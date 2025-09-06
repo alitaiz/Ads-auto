@@ -100,7 +100,15 @@ export function PPCManagementView() {
         setError(null);
         try {
             const response = await fetch(`${API_BASE_URL}/profiles`);
-            if (!response.ok) throw new Error('Failed to fetch profiles from server.');
+            if (!response.ok) {
+                 try {
+                    const errorData = await response.json();
+                    const specificMessage = errorData.details?.message || errorData.message || 'Server returned an error.';
+                    throw new Error(`Failed to fetch profiles: ${specificMessage}`);
+                } catch (jsonError) {
+                    throw new Error(`Failed to fetch profiles. Server responded with status: ${response.status} ${response.statusText}`);
+                }
+            }
             const data: Profile[] = await response.json();
             setProfiles(data);
             if (data.length > 0) {
@@ -108,6 +116,7 @@ export function PPCManagementView() {
             }
         } catch (e) {
             setError(e instanceof Error ? e.message : 'An unknown error occurred while fetching profiles.');
+            setProfiles([]); // Clear profiles on error
         } finally {
             setLoading(prev => ({ ...prev, profiles: false }));
         }
@@ -124,8 +133,13 @@ export function PPCManagementView() {
                 body: JSON.stringify({ profileId, stateFilter: ['enabled', 'paused'] }),
             });
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || 'Failed to fetch campaigns.');
+                try {
+                    const errorData = await response.json();
+                    const specificMessage = errorData.details?.message || errorData.message || 'Server returned an error.';
+                    throw new Error(`Failed to fetch campaigns: ${specificMessage}`);
+                } catch (jsonError) {
+                     throw new Error(`Failed to fetch campaigns. Server responded with status: ${response.status} ${response.statusText}`);
+                }
             }
             const data = await response.json();
             setCampaigns(data.campaigns || []);
@@ -174,7 +188,9 @@ export function PPCManagementView() {
     }, [fetchProfiles]);
 
     useEffect(() => {
-        fetchCampaigns(selectedProfileId);
+        if (selectedProfileId) { // Only fetch campaigns if a profile is selected
+            fetchCampaigns(selectedProfileId);
+        }
     }, [selectedProfileId, fetchCampaigns]);
     
     // --- Memos & Render Logic ---
@@ -184,7 +200,7 @@ export function PPCManagementView() {
 
     const renderTableBody = () => {
         if (loading.campaigns) return <tr><td colSpan={5} style={styles.message}>Loading campaigns...</td></tr>;
-        if (error) return <tr><td colSpan={5} style={{...styles.message, ...styles.error}}>{error}</td></tr>;
+        if (error && campaigns.length === 0) return <tr><td colSpan={5} style={{...styles.message, ...styles.error}}>{error}</td></tr>;
         if (campaigns.length > 0 && filteredCampaigns.length === 0) return <tr><td colSpan={5} style={styles.message}>No campaigns match your search.</td></tr>;
         if (filteredCampaigns.length === 0) return <tr><td colSpan={5} style={styles.message}>No campaigns found for this profile.</td></tr>;
 
@@ -204,6 +220,57 @@ export function PPCManagementView() {
             </tr>
         ));
     };
+    
+    const renderContent = () => {
+        if (loading.profiles) {
+            return <div style={{...styles.card, ...styles.message}}>Loading profiles...</div>
+        }
+        if (error && profiles.length === 0) {
+            return <div style={{...styles.card, ...styles.error, ...styles.message, textAlign: 'left', display: 'block' }}>
+                <p style={{fontWeight: 'bold'}}>Failed to load profiles</p>
+                <p>Could not connect to the Amazon Ads API. This is usually due to incorrect credentials in the backend's <code>.env</code> file.</p>
+                <p><strong>Error details:</strong> {error}</p>
+                <p>Please check your <code>ADS_API_CLIENT_ID</code>, <code>ADS_API_CLIENT_SECRET</code>, and <code>ADS_API_REFRESH_TOKEN</code> on the server and then refresh this page.</p>
+             </div>
+        }
+        
+        return (
+            <>
+                <section style={{...styles.card, flexWrap: 'nowrap', justifyContent: 'space-between'}}>
+                     <input
+                        type="search"
+                        placeholder="Find a campaign by name..."
+                        style={styles.input}
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                        disabled={!selectedProfileId || campaigns.length === 0}
+                    />
+                     <button onClick={() => fetchCampaigns(selectedProfileId)} style={styles.secondaryButton} disabled={loading.campaigns || !selectedProfileId}>
+                        {loading.campaigns ? 'Refreshing...' : 'Refresh'}
+                     </button>
+                </section>
+
+                <main style={{...styles.card, padding: 0}}>
+                    <div style={styles.tableContainer}>
+                        <table style={styles.table}>
+                            <thead>
+                                <tr>
+                                    <th style={styles.th}>Campaign</th>
+                                    <th style={styles.th}>Status</th>
+                                    <th style={styles.th}>Targeting</th>
+                                    <th style={styles.th}>Daily Budget</th>
+                                    <th style={styles.th}>Start Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {renderTableBody()}
+                            </tbody>
+                        </table>
+                    </div>
+                </main>
+            </>
+        );
+    }
 
     return (
         <div style={styles.viewContainer}>
@@ -215,54 +282,22 @@ export function PPCManagementView() {
             
             <header style={styles.header}>
                 <h1 style={styles.title}>Campaign Management</h1>
-                {loading.profiles ? <p>Loading profiles...</p> : (
-                    <select
-                        style={styles.select}
-                        value={selectedProfileId}
-                        onChange={e => setSelectedProfileId(e.target.value)}
-                        disabled={profiles.length === 0}
-                    >
-                        {profiles.length > 0 ? (
-                            profiles.map(p => <option key={p.profileId} value={p.profileId}>{p.accountInfo.name} ({p.countryCode})</option>)
-                        ) : (
-                            <option>No profiles found</option>
-                        )}
-                    </select>
-                )}
+                <select
+                    style={styles.select}
+                    value={selectedProfileId}
+                    onChange={e => setSelectedProfileId(e.target.value)}
+                    disabled={profiles.length === 0 || loading.profiles}
+                >
+                    {profiles.length > 0 ? (
+                        profiles.map(p => <option key={p.profileId} value={p.profileId}>{p.accountInfo.name} ({p.countryCode})</option>)
+                    ) : (
+                        <option>No profiles found</option>
+                    )}
+                </select>
             </header>
             
-            <section style={{...styles.card, flexWrap: 'nowrap', justifyContent: 'space-between'}}>
-                 <input
-                    type="search"
-                    placeholder="Find a campaign by name..."
-                    style={styles.input}
-                    value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
-                    disabled={!selectedProfileId || campaigns.length === 0}
-                />
-                 <button onClick={() => fetchCampaigns(selectedProfileId)} style={styles.secondaryButton} disabled={loading.campaigns}>
-                    {loading.campaigns ? 'Refreshing...' : 'Refresh'}
-                 </button>
-            </section>
+            {renderContent()}
 
-            <main style={{...styles.card, padding: 0}}>
-                <div style={styles.tableContainer}>
-                    <table style={styles.table}>
-                        <thead>
-                            <tr>
-                                <th style={styles.th}>Campaign</th>
-                                <th style={styles.th}>Status</th>
-                                <th style={styles.th}>Targeting</th>
-                                <th style={styles.th}>Daily Budget</th>
-                                <th style={styles.th}>Start Date</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {renderTableBody()}
-                        </tbody>
-                    </table>
-                </div>
-            </main>
         </div>
     );
 }

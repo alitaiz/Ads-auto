@@ -24,7 +24,7 @@ router.get('/profiles', async (req, res) => {
 
 /**
  * POST /api/amazon/campaigns/list
- * Fetches a list of Sponsored Products campaigns for a given profile.
+ * Fetches a list of Sponsored Products campaigns for a given profile, handling pagination to retrieve all campaigns.
  */
 router.post('/campaigns/list', async (req, res) => {
     const { profileId, stateFilter, campaignIdFilter } = req.body;
@@ -33,33 +33,50 @@ router.post('/campaigns/list', async (req, res) => {
     }
 
     try {
-        // Construct the request body for the Amazon API
-        const amazonRequestBody = {
-            stateFilter: {
-                include: stateFilter || ["ENABLED", "PAUSED", "ARCHIVED"],
-            },
-            // You can add more filters here as needed
-            // e.g., campaignIdFilter: { include: [123, 456] }
-        };
-        
-        if (campaignIdFilter && campaignIdFilter.length > 0) {
-           amazonRequestBody.campaignIdFilter = { include: campaignIdFilter };
-        }
+        let allCampaigns = [];
+        let nextToken = null;
 
+        console.log(`Fetching all campaigns for profile ${profileId}...`);
 
-        const data = await amazonAdsApiRequest({
-            method: 'post',
-            url: '/sp/campaigns/list',
-            profileId,
-            data: amazonRequestBody,
-            headers: {
-                'Content-Type': 'application/vnd.spCampaign.v3+json',
-                'Accept': 'application/vnd.spCampaign.v3+json',
-            },
-        });
+        do {
+            const amazonRequestBody = {
+                maxResults: 1000, // Request the maximum allowed per page
+                nextToken: nextToken,
+                stateFilter: {
+                    include: stateFilter || ["ENABLED", "PAUSED", "ARCHIVED"],
+                },
+            };
+            
+            if (campaignIdFilter && campaignIdFilter.length > 0) {
+               amazonRequestBody.campaignIdFilter = { include: campaignIdFilter };
+            }
+
+            const data = await amazonAdsApiRequest({
+                method: 'post',
+                url: '/sp/campaigns/list',
+                profileId,
+                data: amazonRequestBody,
+                headers: {
+                    'Content-Type': 'application/vnd.spCampaign.v3+json',
+                    'Accept': 'application/vnd.spCampaign.v3+json',
+                },
+            });
+            
+            if (data.campaigns && data.campaigns.length > 0) {
+                allCampaigns = allCampaigns.concat(data.campaigns);
+            }
+            
+            nextToken = data.nextToken;
+            if(nextToken) {
+                console.log(`...found another page of campaigns, fetching... (current total: ${allCampaigns.length})`);
+            }
+
+        } while (nextToken);
+
+        console.log(`Successfully fetched a total of ${allCampaigns.length} campaigns.`);
         
-        // Transform data to match frontend's expected format, if necessary
-        const transformedCampaigns = (data.campaigns || []).map(c => ({
+        // Transform data to match frontend's expected format
+        const transformedCampaigns = allCampaigns.map(c => ({
             campaignId: c.campaignId,
             name: c.name,
             campaignType: 'sponsoredProducts',

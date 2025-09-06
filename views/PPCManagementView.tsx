@@ -118,14 +118,25 @@ export function PPCManagementView() {
         const fetchProfiles = async () => {
             try {
                 setLoading(prev => ({ ...prev, profiles: true }));
+                setError(null);
                 const response = await fetch('/api/amazon/profiles');
                 if (!response.ok) {
-                    throw new Error('Failed to fetch profiles.');
+                     const errorData = await response.json().catch(() => ({ message: 'Failed to fetch profiles from server.' }));
+                    throw new Error(errorData.message || 'Failed to fetch profiles.');
                 }
                 const data = await response.json();
-                setProfiles(data);
-                if (data.length > 0) {
-                    setSelectedProfileId(data[0].profileId.toString());
+                
+                // Filter for US profiles only, as requested
+                const usProfiles = data.filter((p: Profile) => p.countryCode === 'US');
+                if (data.length > 0 && usProfiles.length === 0) {
+                    console.info("Profiles were found, but none were for the US marketplace.");
+                }
+
+                setProfiles(usProfiles);
+                if (usProfiles.length > 0) {
+                    setSelectedProfileId(usProfiles[0].profileId.toString());
+                } else {
+                     setCampaigns([]); // Clear campaigns if no US profile is found
                 }
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'An unknown error occurred.');
@@ -232,12 +243,14 @@ export function PPCManagementView() {
                     >
                         {loading.profiles ? (
                             <option>Loading profiles...</option>
-                        ) : (
+                        ) : profiles.length > 0 ? (
                             profiles.map(p => (
                                 <option key={p.profileId} value={p.profileId}>
-                                    {p.accountInfo.name} ({p.accountInfo.marketplaceStringId})
+                                    {p.accountInfo.name} ({p.countryCode})
                                 </option>
                             ))
+                        ) : (
+                            <option>No US profiles found</option>
                         )}
                     </select>
                 </div>

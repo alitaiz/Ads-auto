@@ -25,10 +25,15 @@ export interface Campaign {
     startDate: string;
     endDate?: string | null;
     bidding?: any;
-    // Performance metrics can be added here later
+    // Performance metrics from stream
     impressions?: number;
     clicks?: number;
     spend?: number;
     orders?: number;
     sales?: number;
+    // Calculated metrics
+    ctr?: number;
+    cpc?: number;
+    acos?: number;
+    roas?: number;
 }

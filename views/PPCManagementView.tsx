@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+// Fix: Import EntityState to resolve typing error.
 import { Profile, Campaign, EntityState } from '../types';
 import { formatPrice, formatNumber } from '../utils';
 
@@ -6,7 +7,7 @@ import { formatPrice, formatNumber } from '../utils';
 const styles: { [key: string]: React.CSSProperties } = {
     container: {
         padding: '20px',
-        maxWidth: '1600px',
+        maxWidth: '100%',
         margin: '0 auto',
     },
     header: {
@@ -14,12 +15,14 @@ const styles: { [key: string]: React.CSSProperties } = {
         justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: '20px',
+        flexWrap: 'wrap',
+        gap: '15px'
     },
     title: {
-        fontSize: '2rem',
+        fontSize: '1.75rem',
         margin: 0,
     },
-    filters: {
+    controlsContainer: {
         display: 'flex',
         gap: '15px',
         alignItems: 'center',
@@ -28,17 +31,23 @@ const styles: { [key: string]: React.CSSProperties } = {
         borderRadius: 'var(--border-radius)',
         boxShadow: 'var(--box-shadow)',
         marginBottom: '20px',
+        flexWrap: 'wrap',
+    },
+    controlGroup: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
     },
     tableContainer: {
         backgroundColor: 'var(--card-background-color)',
         borderRadius: 'var(--border-radius)',
         boxShadow: 'var(--box-shadow)',
-        overflow: 'auto',
+        overflowX: 'auto',
     },
     table: {
         width: '100%',
         borderCollapse: 'collapse',
-        minWidth: '1000px',
+        minWidth: '1400px',
     },
     th: {
         padding: '12px 15px',
@@ -46,6 +55,7 @@ const styles: { [key: string]: React.CSSProperties } = {
         borderBottom: '2px solid var(--border-color)',
         backgroundColor: '#f8f9fa',
         fontWeight: 600,
+        whiteSpace: 'nowrap',
     },
     thSortable: {
         padding: '12px 15px',
@@ -55,10 +65,12 @@ const styles: { [key: string]: React.CSSProperties } = {
         fontWeight: 600,
         cursor: 'pointer',
         userSelect: 'none',
+        whiteSpace: 'nowrap',
     },
     td: {
         padding: '12px 15px',
         borderBottom: '1px solid var(--border-color)',
+        whiteSpace: 'nowrap',
     },
     loader: {
         textAlign: 'center',
@@ -74,6 +86,18 @@ const styles: { [key: string]: React.CSSProperties } = {
     },
     button: {
         padding: '8px 15px',
+        border: '1px solid var(--border-color)',
+        borderRadius: '4px',
+        backgroundColor: 'white',
+        color: 'var(--text-color)',
+        cursor: 'pointer',
+        transition: 'background-color 0.2s, opacity 0.2s',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '5px'
+    },
+    primaryButton: {
+        padding: '8px 15px',
         border: 'none',
         borderRadius: '4px',
         backgroundColor: 'var(--primary-color)',
@@ -85,18 +109,12 @@ const styles: { [key: string]: React.CSSProperties } = {
         padding: '8px',
         borderRadius: '4px',
         border: '1px solid var(--border-color)',
-        minWidth: '200px',
+        minWidth: '150px',
     },
     input: {
         padding: '8px',
         borderRadius: '4px',
         border: '1px solid var(--border-color)',
-    },
-    campaignControls: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '15px',
     },
     paginationContainer: {
         display: 'flex',
@@ -125,35 +143,43 @@ const styles: { [key: string]: React.CSSProperties } = {
     },
 };
 
-interface SearchTerm {
-    campaignName: string;
-    customerSearchTerm: string;
-    impressions: number;
-    clicks: number;
-    costPerClick: number;
-    spend: number;
-    sevenDayTotalSales: number;
-    sevenDayAcos: number;
-    asin: string;
-    targeting: string;
-    matchType: string;
-    sevenDayRoas: number;
-    sevenDayTotalOrders: number;
-    sevenDayTotalUnits: number;
+// Fix: Define a specific type for performance metrics data from the API to resolve property access errors.
+interface CampaignPerformanceMetrics {
+  campaignId: number;
+  impressions: number;
+  clicks: number;
+  spend: number;
+  orders: number;
+  sales: number;
+}
+
+interface CampaignWithMetrics extends Campaign {
+  impressions: number;
+  clicks: number;
+  spend: number;
+  orders: number;
+  sales: number;
+  ctr: number;
+  cpc: number;
+  acos: number;
+  roas: number;
 }
 
 const CAMPAIGNS_PER_PAGE = 50;
+
+const InfoIcon = ({ title }: { title: string }) => (
+    <span title={title} style={{ cursor: 'help', marginLeft: '4px', color: '#6c757d' }}>
+        &#9432;
+    </span>
+);
 
 export function PPCManagementView() {
     const [profiles, setProfiles] = useState<Profile[]>([]);
     const [selectedProfileId, setSelectedProfileId] = useState<string>('');
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-    const [searchTerms, setSearchTerms] = useState<SearchTerm[]>([]);
-    const [asins, setAsins] = useState<string[]>([]);
-    const [selectedAsin, setSelectedAsin] = useState<string>('');
-    const [startDate, setStartDate] = useState<string>('2024-07-01');
-    const [endDate, setEndDate] = useState<string>('2024-07-28');
-    const [loading, setLoading] = useState({ profiles: true, campaigns: false, searchTerms: false });
+    // Fix: Use the correct type for performance metrics.
+    const [performanceMetrics, setPerformanceMetrics] = useState<Record<string, CampaignPerformanceMetrics>>({});
+    const [loading, setLoading] = useState({ profiles: true, data: false });
     const [error, setError] = useState<string | null>(null);
 
     // State for campaign search and pagination
@@ -165,8 +191,8 @@ export function PPCManagementView() {
     const [tempBudgetValue, setTempBudgetValue] = useState('');
 
     // State for table sorting
-    const [sortConfig, setSortConfig] = useState<{ key: keyof Campaign; direction: 'ascending' | 'descending' }>({
-        key: 'startDate',
+    const [sortConfig, setSortConfig] = useState<{ key: keyof CampaignWithMetrics; direction: 'ascending' | 'descending' }>({
+        key: 'spend',
         direction: 'descending',
     });
 
@@ -184,10 +210,6 @@ export function PPCManagementView() {
                 const data = await response.json();
                 
                 const usProfiles = data.filter((p: Profile) => p.countryCode === 'US');
-                if (data.length > 0 && usProfiles.length === 0) {
-                    console.info("Profiles were found, but none were for the US marketplace.");
-                }
-
                 setProfiles(usProfiles);
                 if (usProfiles.length > 0) {
                     setSelectedProfileId(usProfiles[0].profileId.toString());
@@ -204,81 +226,62 @@ export function PPCManagementView() {
         fetchProfiles();
     }, []);
 
-    // Fetch campaigns when profile changes
-    useEffect(() => {
+    const fetchData = useCallback(async () => {
         if (!selectedProfileId) return;
 
-        const fetchCampaigns = async () => {
-            try {
-                setLoading(prev => ({ ...prev, campaigns: true }));
-                setError(null);
-                setCampaigns([]);
-                setCampaignSearch(''); // Reset search on profile change
-                setCurrentPage(1);     // Reset page on profile change
-                const response = await fetch('/api/amazon/campaigns/list', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ profileId: selectedProfileId }),
-                });
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.message || 'Failed to fetch campaigns.');
-                }
-                const data = await response.json();
-                setCampaigns(data.campaigns || []);
-            } catch (err) {
-                setError(err instanceof Error ? err.message : 'An unknown error occurred while fetching campaigns.');
-            } finally {
-                setLoading(prev => ({ ...prev, campaigns: false }));
-            }
-        };
+        setLoading(prev => ({ ...prev, data: true }));
+        setError(null);
+        setCampaigns([]);
+        setPerformanceMetrics({});
+        setCampaignSearch('');
+        setCurrentPage(1);
 
-        fetchCampaigns();
-    }, [selectedProfileId]);
-    
-    // Fetch search term filters (ASINs)
-    useEffect(() => {
-        const fetchSearchTermFilters = async () => {
-            try {
-                const response = await fetch('/api/sp-search-terms-filters');
-                if (!response.ok) throw new Error('Failed to fetch search term filters.');
-                const data = await response.json();
-                setAsins(data.asins || []);
-            } catch (err) {
-                console.error(err);
-            }
-        };
-        fetchSearchTermFilters();
-    }, []);
-
-    // Callback to fetch search terms
-    const fetchSearchTerms = useCallback(async () => {
         try {
-            setLoading(prev => ({ ...prev, searchTerms: true }));
-            setError(null);
-            setSearchTerms([]);
-            
-            const params = new URLSearchParams({
-                startDate,
-                endDate,
+            // Fetch campaigns (metadata) in parallel with metrics
+            const campaignsPromise = fetch('/api/amazon/campaigns/list', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ profileId: selectedProfileId }),
             });
-            if (selectedAsin) {
-                params.append('asin', selectedAsin);
+
+            // Fetch performance metrics from stream data for today
+            const metricsPromise = fetch('/api/stream/campaign-metrics');
+
+            const [campaignsResponse, metricsResponse] = await Promise.all([campaignsPromise, metricsPromise]);
+
+            if (!campaignsResponse.ok) {
+                const errorData = await campaignsResponse.json();
+                throw new Error(errorData.message || 'Failed to fetch campaigns.');
+            }
+             if (!metricsResponse.ok) {
+                const errorData = await metricsResponse.json();
+                throw new Error(errorData.error || 'Failed to fetch performance metrics.');
             }
 
-            const response = await fetch(`/api/sp-search-terms?${params.toString()}`);
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to fetch search terms.');
-            }
-            const data = await response.json();
-            setSearchTerms(data);
+            const campaignsData = await campaignsResponse.json();
+            // Fix: Use the correct type for the fetched metrics data.
+            const metricsData: CampaignPerformanceMetrics[] = await metricsResponse.json();
+
+            setCampaigns(campaignsData.campaigns || []);
+
+            // Fix: Use the correct type for the metrics map accumulator.
+            const metricsMap = metricsData.reduce((acc, metric) => {
+                acc[metric.campaignId] = metric;
+                return acc;
+            }, {} as Record<string, CampaignPerformanceMetrics>);
+            setPerformanceMetrics(metricsMap);
+
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'An unknown error occurred while fetching search terms.');
+            setError(err instanceof Error ? err.message : 'An unknown error occurred while fetching data.');
         } finally {
-            setLoading(prev => ({ ...prev, searchTerms: false }));
+            setLoading(prev => ({ ...prev, data: false }));
         }
-    }, [startDate, endDate, selectedAsin]);
+    }, [selectedProfileId]);
+
+    // Fetch data when profile changes or on manual refresh
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
 
     // Handler for updating campaigns with optimistic UI
     const handleUpdateCampaign = useCallback(async (
@@ -322,15 +325,39 @@ export function PPCManagementView() {
             setError(err instanceof Error ? err.message : 'An unknown error occurred during update.');
             setCampaigns(originalCampaigns); // Revert UI on failure
         } finally {
-            // Exit editing mode regardless of outcome
             if (editingCampaign?.id === campaignId) {
                 setEditingCampaign(null);
             }
         }
     }, [campaigns, selectedProfileId, editingCampaign]);
 
+    const campaignsWithMetrics: CampaignWithMetrics[] = useMemo(() => {
+        return campaigns.map(campaign => {
+            const metrics = performanceMetrics[campaign.campaignId];
+            const spend = metrics?.spend ?? 0;
+            const clicks = metrics?.clicks ?? 0;
+            const impressions = metrics?.impressions ?? 0;
+            const sales = metrics?.sales ?? 0;
+            const orders = metrics?.orders ?? 0;
+
+            return {
+                ...campaign,
+                impressions,
+                clicks,
+                spend,
+                orders,
+                sales,
+                ctr: impressions > 0 ? (clicks / impressions) : 0,
+                cpc: clicks > 0 ? (spend / clicks) : 0,
+                acos: sales > 0 ? (spend / sales) : 0,
+                roas: spend > 0 ? (sales / spend) : 0,
+            };
+        });
+    }, [campaigns, performanceMetrics]);
+
+
     // Sorting logic
-    const requestSort = useCallback((key: keyof Campaign) => {
+    const requestSort = useCallback((key: keyof CampaignWithMetrics) => {
         let direction: 'ascending' | 'descending' = 'ascending';
         if (sortConfig.key === key && sortConfig.direction === 'ascending') {
             direction = 'descending';
@@ -338,13 +365,13 @@ export function PPCManagementView() {
         setSortConfig({ key, direction });
     }, [sortConfig]);
 
-    const getSortIndicator = useCallback((key: keyof Campaign) => {
+    const getSortIndicator = useCallback((key: keyof CampaignWithMetrics) => {
         if (sortConfig.key !== key) return null;
         return sortConfig.direction === 'descending' ? ' ↓' : ' ↑';
     }, [sortConfig]);
 
     const sortedCampaigns = useMemo(() => {
-        const sortableCampaigns = [...campaigns];
+        const sortableCampaigns = [...campaignsWithMetrics];
         if (sortConfig.key) {
             sortableCampaigns.sort((a, b) => {
                 const aValue = a[sortConfig.key];
@@ -354,9 +381,7 @@ export function PPCManagementView() {
                 if (bValue === null || bValue === undefined) return -1;
                 
                 let comparison = 0;
-                if (sortConfig.key === 'startDate' || sortConfig.key === 'endDate') {
-                    comparison = new Date(aValue as string).getTime() - new Date(bValue as string).getTime();
-                } else if (typeof aValue === 'number' && typeof bValue === 'number') {
+                if (typeof aValue === 'number' && typeof bValue === 'number') {
                     comparison = aValue - bValue;
                 } else {
                      comparison = String(aValue).localeCompare(String(bValue));
@@ -366,7 +391,7 @@ export function PPCManagementView() {
             });
         }
         return sortableCampaigns;
-    }, [campaigns, sortConfig]);
+    }, [campaignsWithMetrics, sortConfig]);
 
     const filteredCampaigns = useMemo(() => {
         return sortedCampaigns.filter(c =>
@@ -387,7 +412,7 @@ export function PPCManagementView() {
     };
 
     // Handlers for budget inline editing
-    const handleBudgetClick = (campaign: Campaign) => {
+    const handleBudgetClick = (campaign: CampaignWithMetrics) => {
         setEditingCampaign({ id: campaign.campaignId, field: 'budget' });
         setTempBudgetValue(campaign.dailyBudget.toString());
     };
@@ -413,14 +438,26 @@ export function PPCManagementView() {
     return (
         <div style={styles.container}>
             <header style={styles.header}>
-                <h1 style={styles.title}>PPC Management Dashboard</h1>
+                <h1 style={styles.title}>Campaign Management</h1>
+                <div style={styles.controlGroup}>
+                   <button style={styles.primaryButton} onClick={() => alert('Feature coming soon!')}>Create campaign</button>
+                    <input
+                        type="text"
+                        placeholder="Find a campaign..."
+                        value={campaignSearch}
+                        onChange={handleSearchChange}
+                        style={styles.input}
+                        disabled={loading.data}
+                        aria-label="Search campaigns"
+                    />
+                </div>
             </header>
 
             {error && <div style={styles.error} role="alert">{error}</div>}
 
-            <section style={styles.filters}>
-                <div>
-                    <label htmlFor="profile-select">Profile: </label>
+            <section style={styles.controlsContainer}>
+                <div style={styles.controlGroup}>
+                    <label htmlFor="profile-select" style={{fontWeight: 500}}>Profile:</label>
                     <select
                         id="profile-select"
                         style={styles.select}
@@ -429,7 +466,7 @@ export function PPCManagementView() {
                         disabled={loading.profiles || profiles.length === 0}
                     >
                         {loading.profiles ? (
-                            <option>Loading profiles...</option>
+                            <option>Loading...</option>
                         ) : profiles.length > 0 ? (
                             profiles.map(p => (
                                 <option key={p.profileId} value={p.profileId}>
@@ -441,207 +478,144 @@ export function PPCManagementView() {
                         )}
                     </select>
                 </div>
+                 <div style={{flexGrow: 1}}></div>
+                 <div style={styles.controlGroup}>
+                    <select style={styles.select} disabled>
+                        <option>Today</option>
+                    </select>
+                    <button style={styles.button} onClick={fetchData} disabled={loading.data}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path fillRule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>
+                            <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466"/>
+                        </svg>
+                        Refresh
+                    </button>
+                </div>
             </section>
             
-            <section style={{ marginTop: '30px' }}>
-                <div style={styles.campaignControls}>
-                    <h2>Campaign Overview</h2>
-                    <input
-                        type="text"
-                        placeholder="Search campaigns..."
-                        value={campaignSearch}
-                        onChange={handleSearchChange}
-                        style={styles.input}
-                        disabled={loading.campaigns}
-                        aria-label="Search campaigns"
-                    />
-                </div>
-                <div style={styles.tableContainer}>
-                    {loading.campaigns ? (
-                        <div style={styles.loader}>Loading campaigns...</div>
-                    ) : (
-                        <table style={styles.table}>
-                            <thead>
-                                <tr>
-                                    <th style={styles.thSortable} onClick={() => requestSort('name')}>
-                                        Campaign Name{getSortIndicator('name')}
-                                    </th>
-                                    <th style={styles.thSortable} onClick={() => requestSort('state')}>
-                                        State{getSortIndicator('state')}
-                                    </th>
-                                    <th style={styles.thSortable} onClick={() => requestSort('campaignType')}>
-                                        Type{getSortIndicator('campaignType')}
-                                    </th>
-                                    <th style={styles.thSortable} onClick={() => requestSort('targetingType')}>
-                                        Targeting{getSortIndicator('targetingType')}
-                                    </th>
-                                    <th style={styles.thSortable} onClick={() => requestSort('dailyBudget')}>
-                                        Daily Budget{getSortIndicator('dailyBudget')}
-                                    </th>
-                                    <th style={styles.thSortable} onClick={() => requestSort('startDate')}>
-                                        Start Date{getSortIndicator('startDate')}
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {paginatedCampaigns.length > 0 ? paginatedCampaigns.map((c, i) => (
-                                    <tr key={c.campaignId}>
-                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>
-                                            <a href="#" onClick={(e) => e.preventDefault()} style={{...styles.campaignLink, cursor: 'not-allowed'}} title="Drill-down coming soon">
-                                                {c.name}
-                                            </a>
-                                        </td>
-                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>
-                                            <button
-                                                onClick={() => handleUpdateCampaign(c.campaignId, { state: c.state === 'enabled' ? 'paused' : 'enabled' })}
-                                                style={{...styles.stateButton, backgroundColor: c.state === 'enabled' ? 'var(--success-color)' : '#6c757d'}}
-                                                aria-label={`Change status for ${c.name}, current is ${c.state}`}
-                                            >
-                                                {c.state}
-                                            </button>
-                                        </td>
-                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{c.campaignType}</td>
-                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{c.targetingType}</td>
-                                        <td 
-                                            style={{...styles.td, cursor: 'pointer', borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}} 
-                                            onClick={() => editingCampaign?.id !== c.campaignId && handleBudgetClick(c)}
+            <div style={styles.tableContainer}>
+                {loading.data ? (
+                    <div style={styles.loader}>Loading campaign data...</div>
+                ) : (
+                    <table style={styles.table} aria-live="polite">
+                        <thead>
+                            <tr>
+                                <th style={styles.thSortable} onClick={() => requestSort('name')}>
+                                    Campaign{getSortIndicator('name')}
+                                </th>
+                                <th style={styles.thSortable} onClick={() => requestSort('state')}>
+                                    Status{getSortIndicator('state')}
+                                </th>
+                                <th style={styles.thSortable} onClick={() => requestSort('dailyBudget')}>
+                                    Budget{getSortIndicator('dailyBudget')}
+                                </th>
+                                <th style={styles.thSortable} onClick={() => requestSort('impressions')}>
+                                    Impressions<InfoIcon title="Impressions from stream data for today"/>{getSortIndicator('impressions')}
+                                </th>
+                                <th style={styles.thSortable} onClick={() => requestSort('clicks')}>
+                                    Clicks<InfoIcon title="Clicks from stream data for today"/>{getSortIndicator('clicks')}
+                                </th>
+                                <th style={styles.thSortable} onClick={() => requestSort('ctr')}>
+                                    CTR<InfoIcon title="Click-Through Rate (Clicks / Impressions)"/>{getSortIndicator('ctr')}
+                                </th>
+                                <th style={styles.thSortable} onClick={() => requestSort('spend')}>
+                                    Spend<InfoIcon title="Spend from stream data for today"/>{getSortIndicator('spend')}
+                                </th>
+                                <th style={styles.thSortable} onClick={() => requestSort('cpc')}>
+                                    CPC<InfoIcon title="Cost Per Click (Spend / Clicks)"/>{getSortIndicator('cpc')}
+                                </th>
+                                <th style={styles.thSortable} onClick={() => requestSort('orders')}>
+                                    Orders<InfoIcon title="Orders from stream data for today"/>{getSortIndicator('orders')}
+                                </th>
+                                <th style={styles.thSortable} onClick={() => requestSort('sales')}>
+                                    Sales<InfoIcon title="Sales from stream data for today"/>{getSortIndicator('sales')}
+                                </th>
+                                <th style={styles.thSortable} onClick={() => requestSort('acos')}>
+                                    ACOS<InfoIcon title="Advertising Cost of Sales (Spend / Sales)"/>{getSortIndicator('acos')}
+                                </th>
+                                <th style={styles.thSortable} onClick={() => requestSort('roas')}>
+                                    ROAS<InfoIcon title="Return on Ad Spend (Sales / Spend)"/>{getSortIndicator('roas')}
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {paginatedCampaigns.length > 0 ? paginatedCampaigns.map((c, i) => (
+                                <tr key={c.campaignId}>
+                                    <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>
+                                        <a href="#" onClick={(e) => e.preventDefault()} style={{...styles.campaignLink, cursor: 'not-allowed'}} title="Drill-down coming soon">
+                                            {c.name}
+                                        </a>
+                                    </td>
+                                    <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>
+                                        <button
+                                            onClick={() => handleUpdateCampaign(c.campaignId, { state: c.state === 'enabled' ? 'paused' : 'enabled' })}
+                                            style={{...styles.stateButton, backgroundColor: c.state === 'enabled' ? 'var(--success-color)' : '#6c757d'}}
+                                            aria-label={`Change status for ${c.name}, current is ${c.state}`}
                                         >
-                                            {editingCampaign?.id === c.campaignId ? (
-                                                <input
-                                                    type="number"
-                                                    value={tempBudgetValue}
-                                                    onChange={(e) => setTempBudgetValue(e.target.value)}
-                                                    onBlur={() => handleBudgetUpdate(c.campaignId)}
-                                                    onKeyDown={(e) => handleBudgetKeyDown(e, c.campaignId)}
-                                                    autoFocus
-                                                    style={{ ...styles.input, width: '100px', padding: '6px' }}
-                                                    aria-label={`Edit budget for ${c.name}`}
-                                                />
-                                            ) : (
-                                                formatPrice(c.dailyBudget)
-                                            )}
-                                        </td>
-                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{c.startDate}</td>
-                                    </tr>
-                                )) : (
-                                    <tr>
-                                        <td colSpan={6} style={{...styles.td, textAlign: 'center', borderBottom: 'none'}}>
-                                            {campaignSearch ? 'No campaigns match your search.' : 'No campaigns found for this profile.'}
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
-                    )}
-                </div>
-                {totalPages > 1 && (
-                     <div style={styles.paginationContainer}>
-                        <button
-                            style={{...styles.button, opacity: currentPage === 1 ? 0.6 : 1}}
-                            onClick={() => setCurrentPage(p => p - 1)}
-                            disabled={currentPage === 1}
-                        >
-                            Previous
-                        </button>
-                        <span>
-                            Page {currentPage} of {totalPages}
-                        </span>
-                        <button
-                            style={{...styles.button, opacity: currentPage === totalPages ? 0.6 : 1}}
-                            onClick={() => setCurrentPage(p => p + 1)}
-                            disabled={currentPage === totalPages}
-                        >
-                            Next
-                        </button>
-                    </div>
-                )}
-            </section>
-            
-            <section style={{ marginTop: '30px' }}>
-                <h2>Search Term Performance</h2>
-                <div style={{...styles.filters, flexWrap: 'wrap'}}>
-                     <div>
-                        <label htmlFor="start-date">Start Date: </label>
-                        <input
-                            type="date"
-                            id="start-date"
-                            style={styles.input}
-                            value={startDate}
-                            onChange={e => setStartDate(e.target.value)}
-                        />
-                     </div>
-                     <div>
-                        <label htmlFor="end-date">End Date: </label>
-                        <input
-                            type="date"
-                            id="end-date"
-                            style={styles.input}
-                            value={endDate}
-                            onChange={e => setEndDate(e.target.value)}
-                        />
-                     </div>
-                      <div>
-                        <label htmlFor="asin-select">ASIN: </label>
-                        <select
-                            id="asin-select"
-                            style={styles.select}
-                            value={selectedAsin}
-                            onChange={e => setSelectedAsin(e.target.value)}
-                        >
-                            <option value="">All ASINs</option>
-                            {asins.map(asin => <option key={asin} value={asin}>{asin}</option>)}
-                        </select>
-                      </div>
-                      <button style={{...styles.button, opacity: loading.searchTerms ? 0.6 : 1}} onClick={fetchSearchTerms} disabled={loading.searchTerms}>
-                        {loading.searchTerms ? 'Loading...' : 'Apply Filters'}
-                      </button>
-                </div>
-                
-                 <div style={styles.tableContainer}>
-                    {loading.searchTerms ? (
-                        <div style={styles.loader}>Loading search terms...</div>
-                    ) : (
-                        <table style={styles.table}>
-                            <thead>
-                                <tr>
-                                    <th style={styles.th}>Search Term</th>
-                                    <th style={styles.th}>Campaign</th>
-                                    <th style={styles.th}>Match Type</th>
-                                    <th style={styles.th}>Impressions</th>
-                                    <th style={styles.th}>Clicks</th>
-                                    <th style={styles.th}>Spend</th>
-                                    <th style={styles.th}>Sales</th>
-                                    <th style={styles.th}>Orders</th>
-                                    <th style={styles.th}>ACOS</th>
-                                    <th style={styles.th}>ROAS</th>
+                                            {c.state}
+                                        </button>
+                                    </td>
+                                    <td 
+                                        style={{...styles.td, cursor: 'pointer', borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}} 
+                                        onClick={() => editingCampaign?.id !== c.campaignId && handleBudgetClick(c)}
+                                    >
+                                        {editingCampaign?.id === c.campaignId ? (
+                                            <input
+                                                type="number"
+                                                value={tempBudgetValue}
+                                                onChange={(e) => setTempBudgetValue(e.target.value)}
+                                                onBlur={() => handleBudgetUpdate(c.campaignId)}
+                                                onKeyDown={(e) => handleBudgetKeyDown(e, c.campaignId)}
+                                                autoFocus
+                                                style={{ ...styles.input, width: '100px', padding: '6px' }}
+                                                aria-label={`Edit budget for ${c.name}`}
+                                            />
+                                        ) : (
+                                            formatPrice(c.dailyBudget)
+                                        )}
+                                    </td>
+                                    <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{formatNumber(c.impressions)}</td>
+                                    <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{formatNumber(c.clicks)}</td>
+                                    <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{(c.ctr * 100).toFixed(2)}%</td>
+                                    <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{formatPrice(c.spend)}</td>
+                                    <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{formatPrice(c.cpc)}</td>
+                                    <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{formatNumber(c.orders)}</td>
+                                    <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{formatPrice(c.sales)}</td>
+                                    <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{(c.acos * 100).toFixed(2)}%</td>
+                                    <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{c.roas.toFixed(2)}</td>
                                 </tr>
-                            </thead>
-                            <tbody>
-                               {searchTerms.length > 0 ? searchTerms.map((st, index) => (
-                                    <tr key={`${st.customerSearchTerm}-${index}`}>
-                                        <td style={{...styles.td, borderBottom: index === searchTerms.length - 1 ? 'none' : undefined}}>{st.customerSearchTerm}</td>
-                                        <td style={{...styles.td, borderBottom: index === searchTerms.length - 1 ? 'none' : undefined}}>{st.campaignName}</td>
-                                        <td style={{...styles.td, borderBottom: index === searchTerms.length - 1 ? 'none' : undefined}}>{st.matchType}</td>
-                                        <td style={{...styles.td, borderBottom: index === searchTerms.length - 1 ? 'none' : undefined}}>{formatNumber(st.impressions)}</td>
-                                        <td style={{...styles.td, borderBottom: index === searchTerms.length - 1 ? 'none' : undefined}}>{formatNumber(st.clicks)}</td>
-                                        <td style={{...styles.td, borderBottom: index === searchTerms.length - 1 ? 'none' : undefined}}>{formatPrice(st.spend)}</td>
-                                        <td style={{...styles.td, borderBottom: index === searchTerms.length - 1 ? 'none' : undefined}}>{formatPrice(st.sevenDayTotalSales)}</td>
-                                        <td style={{...styles.td, borderBottom: index === searchTerms.length - 1 ? 'none' : undefined}}>{formatNumber(st.sevenDayTotalOrders)}</td>
-                                        <td style={{...styles.td, borderBottom: index === searchTerms.length - 1 ? 'none' : undefined}}>{`${(st.sevenDayAcos * 100).toFixed(2)}%`}</td>
-                                        <td style={{...styles.td, borderBottom: index === searchTerms.length - 1 ? 'none' : undefined}}>{st.sevenDayRoas.toFixed(2)}</td>
-                                    </tr>
-                               )) : (
-                                   <tr>
-                                       <td colSpan={10} style={{...styles.td, textAlign: 'center', borderBottom: 'none'}}>
-                                           No search term data for the selected criteria. Click 'Apply Filters' to load data.
-                                       </td>
-                                   </tr>
-                               )}
-                            </tbody>
-                        </table>
-                    )}
-                 </div>
-            </section>
+                            )) : (
+                                <tr>
+                                    <td colSpan={12} style={{...styles.td, textAlign: 'center', borderBottom: 'none'}}>
+                                        {campaignSearch ? 'No campaigns match your search.' : 'No campaigns found for this profile.'}
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                )}
+            </div>
+            {totalPages > 1 && (
+                 <div style={styles.paginationContainer}>
+                    <button
+                        style={{...styles.button, opacity: currentPage === 1 ? 0.6 : 1}}
+                        onClick={() => setCurrentPage(p => p - 1)}
+                        disabled={currentPage === 1}
+                    >
+                        Previous
+                    </button>
+                    <span>
+                        Page {currentPage} of {totalPages}
+                    </span>
+                    <button
+                        style={{...styles.button, opacity: currentPage === totalPages ? 0.6 : 1}}
+                        onClick={() => setCurrentPage(p => p + 1)}
+                        disabled={currentPage === totalPages}
+                    >
+                        Next
+                    </button>
+                </div>
+            )}
         </div>
     );
 }

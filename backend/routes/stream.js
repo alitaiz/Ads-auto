@@ -111,4 +111,56 @@ router.get('/stream/metrics', async (req, res) => {
     }
 });
 
+
+// Endpoint GET /api/stream/campaign-metrics: Cung cấp các chỉ số tổng hợp theo từng campaign cho "hôm nay".
+router.get('/stream/campaign-metrics', async (req, res) => {
+    try {
+        const query = `
+            WITH traffic_data AS (
+                SELECT
+                    (event_data->>'campaignId') as campaign_id_text,
+                    COALESCE(SUM((event_data->>'impressions')::bigint), 0) as impressions,
+                    COALESCE(SUM((event_data->>'clicks')::bigint), 0) as clicks,
+                    COALESCE(SUM((event_data->>'cost')::numeric), 0.00) as spend
+                FROM raw_stream_events
+                WHERE event_type = 'sp-traffic' AND received_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
+                GROUP BY 1
+            ),
+            conversion_data AS (
+                SELECT
+                    (event_data->>'campaignId') as campaign_id_text,
+                    COALESCE(SUM((event_data->>'attributedConversions1d')::bigint), 0) as orders,
+                    COALESCE(SUM((event_data->>'attributedSales1d')::numeric), 0.00) as sales
+                FROM raw_stream_events
+                WHERE event_type = 'sp-conversion' AND received_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
+                GROUP BY 1
+            )
+            SELECT
+                COALESCE(t.campaign_id_text, c.campaign_id_text) as "campaignId",
+                COALESCE(t.impressions, 0) as impressions,
+                COALESCE(t.clicks, 0) as clicks,
+                COALESCE(t.spend, 0.00)::float as spend,
+                COALESCE(c.orders, 0) as orders,
+                COALESCE(c.sales, 0.00)::float as sales
+            FROM traffic_data t
+            FULL OUTER JOIN conversion_data c ON t.campaign_id_text = c.campaign_id_text
+            WHERE COALESCE(t.campaign_id_text, c.campaign_id_text) IS NOT NULL;
+        `;
+        
+        const result = await pool.query(query);
+        
+        const metrics = result.rows.map(row => ({
+            ...row,
+            campaignId: Number(row.campaignId) // Ensure campaignId is a number
+        }));
+
+        res.json(metrics);
+
+    } catch (error) {
+        console.error("[Server] Lỗi khi lấy campaign stream metrics:", error);
+        res.status(500).json({ error: "Không thể lấy dữ liệu real-time cho các chiến dịch." });
+    }
+});
+
+
 export default router;

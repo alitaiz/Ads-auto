@@ -1,0 +1,163 @@
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { ScanCommand } from "@aws-sdk/lib-dynamodb";
+
+const client = new DynamoDBClient({});
+const TABLE_NAME = process.env.DYNAMODB_TABLE_NAME;
+
+/**
+ * Helper to get all dates between a start and end date string.
+ * @param {string} startDateStr - YYYY-MM-DD
+ * @param {string} endDateStr - YYYY-MM-DD
+ * @returns {string[]} An array of date strings.
+ */
+const getDateRange = (startDateStr, endDateStr) => {
+    const dates = [];
+    // Use UTC to avoid timezone issues
+    const currentDate = new Date(`${startDateStr}T00:00:00.000Z`);
+    const endDate = new Date(`${endDateStr}T00:00:00.000Z`);
+    while (currentDate <= endDate) {
+        dates.push(currentDate.toISOString().split('T')[0]);
+        currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+    }
+    return dates;
+};
+
+
+export const handler = async (event) => {
+    try {
+        console.log("[START] Received event:", JSON.stringify(event, null, 2));
+        const { startDate, endDate } = event.queryStringParameters || {};
+        
+        if (!startDate || !endDate) {
+            return {
+                statusCode: 400,
+                headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+                body: JSON.stringify({ error: 'startDate and endDate query parameters are required.' }),
+            };
+        }
+
+        const startTime = new Date(`${startDate}T00:00:00.000Z`).getTime();
+        const endTime = new Date(`${endDate}T23:59:59.999Z`).getTime();
+        
+        console.log(`[INFO] Querying DynamoDB for timestamp range: ${startTime} (${startDate}) to ${endTime} (${endDate})`);
+
+        const allItems = [];
+        let lastEvaluatedKey;
+        let page = 1;
+        do {
+            console.log(`[INFO] Scanning page ${page}...`);
+            const command = new ScanCommand({
+                TableName: TABLE_NAME,
+                FilterExpression: "#ts BETWEEN :start_time AND :end_time",
+                ExpressionAttributeNames: { "#ts": "timestamp" },
+                ExpressionAttributeValues: { ":start_time": startTime, ":end_time": endTime },
+                ExclusiveStartKey: lastEvaluatedKey,
+            });
+            const response = await client.send(command);
+            allItems.push(...(response.Items || []));
+            lastEvaluatedKey = response.LastEvaluatedKey;
+            page++;
+        } while (lastEvaluatedKey);
+        
+        console.log(`[INFO] Scanned and retrieved a total of ${allItems.length} events from DynamoDB.`);
+
+        // --- Aggregations for both sp-traffic and sp-conversion ---
+        const dailyAggregates = {};
+        const campaignAggregates = {};
+        
+        const initCampaignMetrics = () => ({ impressions: 0, clicks: 0, spend: 0, orders: 0, sales: 0 });
+
+        allItems.forEach(item => {
+            const eventTimestamp = new Date(item.timestamp);
+            const eventDate = eventTimestamp.toISOString().split('T')[0];
+            
+            if (!dailyAggregates[eventDate]) {
+                dailyAggregates[eventDate] = { clicks: 0, spend: 0, orders: 0 };
+            }
+
+            // --- Handle sp-traffic events ---
+            if (item.event_type === 'sp-traffic' && Array.isArray(item.event_data?.records)) {
+                item.event_data.records.forEach(record => {
+                    const campaignId = record.campaignId;
+                    if (!campaignId) return;
+                    if (!campaignAggregates[campaignId]) campaignAggregates[campaignId] = initCampaignMetrics();
+
+                    const clicks = record.clicks || 0;
+                    const cost = record.cost || 0;
+                    const impressions = record.impressions || 0;
+
+                    dailyAggregates[eventDate].clicks += clicks;
+                    dailyAggregates[eventDate].spend += cost;
+                    
+                    campaignAggregates[campaignId].impressions += impressions;
+                    campaignAggregates[campaignId].clicks += clicks;
+                    campaignAggregates[campaignId].spend += cost;
+                });
+            }
+            
+            // --- Handle sp-conversion events ---
+            if (item.event_type === 'sp-conversion' && Array.isArray(item.event_data?.records)) {
+                item.event_data.records.forEach(record => {
+                    const campaignId = record.campaignId;
+                    if (!campaignId) return;
+                    if (!campaignAggregates[campaignId]) campaignAggregates[campaignId] = initCampaignMetrics();
+
+                    const conversions = record.conversions || 0; // Number of orders
+                    const attributedSales1d = record.attributedSales1d || 0;
+
+                    dailyAggregates[eventDate].orders += conversions;
+
+                    campaignAggregates[campaignId].orders += conversions;
+                    campaignAggregates[campaignId].sales += attributedSales1d;
+                });
+            }
+        });
+        
+        // --- Finalize Chart Data ---
+        const dateLabels = getDateRange(startDate, endDate);
+        const chartData = {
+            labels: dateLabels,
+            clicks: dateLabels.map(date => dailyAggregates[date]?.clicks || 0),
+            spend: dateLabels.map(date => Number((dailyAggregates[date]?.spend || 0).toFixed(2))),
+            orders: dateLabels.map(date => dailyAggregates[date]?.orders || 0),
+        };
+
+        // --- Finalize Table Data ---
+        const tableData = Object.entries(campaignAggregates).map(([campaignId, metrics]) => {
+            const { impressions, clicks, spend, orders, sales } = metrics;
+            return {
+                id: Number(campaignId),
+                name: `SP Campaign - ${campaignId}`,
+                state: 'enabled',
+                budget: 10.00,
+                impressions,
+                clicks,
+                ctr: impressions > 0 ? clicks / impressions : 0,
+                spend: Number(spend.toFixed(2)),
+                cpc: clicks > 0 ? Number((spend / clicks).toFixed(2)) : 0,
+                orders,
+                sales: Number(sales.toFixed(2)),
+                acos: sales > 0 ? spend / sales : 0,
+                roas: spend > 0 ? sales / spend : 0,
+                bidAdjustment: 0,
+                topOfSearchImpressionShare: Math.random() * 0.2,
+            };
+        });
+
+        const responsePayload = { chartData, tableData };
+        console.log(`[END] Successfully processed and aggregated data. Returning payload to frontend.`);
+
+        return {
+            statusCode: 200,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify(responsePayload),
+        };
+    } catch (error) {
+        console.error("[ERROR] Unhandled error in Lambda handler:", error);
+        return { 
+            statusCode: 500, 
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({ error: 'Could not process PPC data request.', details: error.message }) 
+        };
+    }
+};

@@ -1,0 +1,27 @@
+Report types
+The Amazon Ads API supports a number of report types based on campaign entity structure. Depending on the ad type, campaign performance can be broken down by various dimensions including campaign, ad group, ad, keyword, target, and ASIN.
+
+Availability by ad type
+ Note
+Sponsored Brands reports are currently available in preview. During the preview period, data related to Sponsored Brands campaigns with flag isMultiAdGroupsEnabled=False won’t be available. Once version 3 reporting supports all Sponsored Brands campaigns, we will announce general availability in the release notes.
+Each type of sponsored ad supports different report types and has a separate path defined.
+
+Report type	Sponsored Products	Sponsored Brands	Sponsored Display	Sponsored Television	Amazon DSP	ALL
+Ad		✓				
+Ad group		✓	✓			
+Advertised product	✓		✓			
+Audience					✓	
+Audio and video (beta)					✓	
+Bid adjustments					✓	
+Campaign	✓	✓	✓	✓	✓	
+Conversion Path						✓
+Geo					✓	
+Gross and invalid traffic	✓	✓	✓			
+Inventory					✓	
+Placement		✓				
+Product					✓	
+Purchased product	✓	✓	✓			
+Reach and frequency					✓	
+Search term	✓	✓				
+Targeting	✓	✓	✓	✓		
+Tech					✓	

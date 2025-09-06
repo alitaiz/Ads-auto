@@ -105,8 +105,17 @@ router.put('/campaigns', async (req, res) => {
     }
 
     try {
+        // Amazon API requires state to be uppercase. Transform the state for each update.
+        const transformedUpdates = updates.map(update => {
+            const newUpdate = { ...update };
+            if (newUpdate.state) {
+                newUpdate.state = newUpdate.state.toUpperCase();
+            }
+            return newUpdate;
+        });
+
         // Amazon API expects the updates to be wrapped in a 'campaigns' property
-        const amazonRequestBody = { campaigns: updates };
+        const amazonRequestBody = { campaigns: transformedUpdates };
 
         const data = await amazonAdsApiRequest({
             method: 'put',

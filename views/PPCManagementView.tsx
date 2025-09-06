@@ -47,6 +47,15 @@ const styles: { [key: string]: React.CSSProperties } = {
         backgroundColor: '#f8f9fa',
         fontWeight: 600,
     },
+    thSortable: {
+        padding: '12px 15px',
+        textAlign: 'left',
+        borderBottom: '2px solid var(--border-color)',
+        backgroundColor: '#f8f9fa',
+        fontWeight: 600,
+        cursor: 'pointer',
+        userSelect: 'none',
+    },
     td: {
         padding: '12px 15px',
         borderBottom: '1px solid var(--border-color)',
@@ -154,6 +163,12 @@ export function PPCManagementView() {
     // State for inline editing
     const [editingCampaign, setEditingCampaign] = useState<{ id: number; field: 'budget' } | null>(null);
     const [tempBudgetValue, setTempBudgetValue] = useState('');
+
+    // State for table sorting
+    const [sortConfig, setSortConfig] = useState<{ key: keyof Campaign; direction: 'ascending' | 'descending' }>({
+        key: 'startDate',
+        direction: 'descending',
+    });
 
     // Fetch profiles on component mount
     useEffect(() => {
@@ -314,12 +329,50 @@ export function PPCManagementView() {
         }
     }, [campaigns, selectedProfileId, editingCampaign]);
 
-    // Memoized filtering and pagination for campaigns
+    // Sorting logic
+    const requestSort = useCallback((key: keyof Campaign) => {
+        let direction: 'ascending' | 'descending' = 'ascending';
+        if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+            direction = 'descending';
+        }
+        setSortConfig({ key, direction });
+    }, [sortConfig]);
+
+    const getSortIndicator = useCallback((key: keyof Campaign) => {
+        if (sortConfig.key !== key) return null;
+        return sortConfig.direction === 'descending' ? ' ↓' : ' ↑';
+    }, [sortConfig]);
+
+    const sortedCampaigns = useMemo(() => {
+        const sortableCampaigns = [...campaigns];
+        if (sortConfig.key) {
+            sortableCampaigns.sort((a, b) => {
+                const aValue = a[sortConfig.key];
+                const bValue = b[sortConfig.key];
+
+                if (aValue === null || aValue === undefined) return 1;
+                if (bValue === null || bValue === undefined) return -1;
+                
+                let comparison = 0;
+                if (sortConfig.key === 'startDate' || sortConfig.key === 'endDate') {
+                    comparison = new Date(aValue as string).getTime() - new Date(bValue as string).getTime();
+                } else if (typeof aValue === 'number' && typeof bValue === 'number') {
+                    comparison = aValue - bValue;
+                } else {
+                     comparison = String(aValue).localeCompare(String(bValue));
+                }
+                
+                return sortConfig.direction === 'ascending' ? comparison : -comparison;
+            });
+        }
+        return sortableCampaigns;
+    }, [campaigns, sortConfig]);
+
     const filteredCampaigns = useMemo(() => {
-        return campaigns.filter(c =>
+        return sortedCampaigns.filter(c =>
             c.name.toLowerCase().includes(campaignSearch.toLowerCase())
         );
-    }, [campaigns, campaignSearch]);
+    }, [sortedCampaigns, campaignSearch]);
 
     const paginatedCampaigns = useMemo(() => {
         const startIndex = (currentPage - 1) * CAMPAIGNS_PER_PAGE;
@@ -410,12 +463,24 @@ export function PPCManagementView() {
                         <table style={styles.table}>
                             <thead>
                                 <tr>
-                                    <th style={styles.th}>Campaign Name</th>
-                                    <th style={styles.th}>State</th>
-                                    <th style={styles.th}>Type</th>
-                                    <th style={styles.th}>Targeting</th>
-                                    <th style={styles.th}>Daily Budget</th>
-                                    <th style={styles.th}>Start Date</th>
+                                    <th style={styles.thSortable} onClick={() => requestSort('name')}>
+                                        Campaign Name{getSortIndicator('name')}
+                                    </th>
+                                    <th style={styles.thSortable} onClick={() => requestSort('state')}>
+                                        State{getSortIndicator('state')}
+                                    </th>
+                                    <th style={styles.thSortable} onClick={() => requestSort('campaignType')}>
+                                        Type{getSortIndicator('campaignType')}
+                                    </th>
+                                    <th style={styles.thSortable} onClick={() => requestSort('targetingType')}>
+                                        Targeting{getSortIndicator('targetingType')}
+                                    </th>
+                                    <th style={styles.thSortable} onClick={() => requestSort('dailyBudget')}>
+                                        Daily Budget{getSortIndicator('dailyBudget')}
+                                    </th>
+                                    <th style={styles.thSortable} onClick={() => requestSort('startDate')}>
+                                        Start Date{getSortIndicator('startDate')}
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Profile, Campaign } from '../types';
+import { Profile, Campaign, EntityState } from '../types';
 import { formatPrice, formatNumber } from '../utils';
 
 // Component-specific styles. For a larger app, consider CSS-in-JS or CSS Modules.
@@ -96,7 +96,24 @@ const styles: { [key: string]: React.CSSProperties } = {
         gap: '15px',
         marginTop: '15px',
         padding: '10px 0',
-    }
+    },
+    stateButton: {
+        padding: '6px 12px',
+        border: 'none',
+        borderRadius: '4px',
+        color: 'white',
+        cursor: 'pointer',
+        transition: 'background-color 0.2s',
+        minWidth: '80px',
+        textTransform: 'capitalize',
+        fontWeight: 600,
+    },
+    campaignLink: {
+        textDecoration: 'none',
+        color: 'var(--primary-color)',
+        fontWeight: 500,
+        cursor: 'pointer',
+    },
 };
 
 interface SearchTerm {
@@ -134,6 +151,10 @@ export function PPCManagementView() {
     const [campaignSearch, setCampaignSearch] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     
+    // State for inline editing
+    const [editingCampaign, setEditingCampaign] = useState<{ id: number; field: 'budget' } | null>(null);
+    const [tempBudgetValue, setTempBudgetValue] = useState('');
+
     // Fetch profiles on component mount
     useEffect(() => {
         const fetchProfiles = async () => {
@@ -237,13 +258,61 @@ export function PPCManagementView() {
             }
             const data = await response.json();
             setSearchTerms(data);
-// FIX: Corrected syntax for the catch block from `catch(err) => {` to `catch(err) {`. The arrow function syntax is invalid here and was causing a cascade of parsing errors.
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An unknown error occurred while fetching search terms.');
         } finally {
             setLoading(prev => ({ ...prev, searchTerms: false }));
         }
     }, [startDate, endDate, selectedAsin]);
+
+    // Handler for updating campaigns with optimistic UI
+    const handleUpdateCampaign = useCallback(async (
+        campaignId: number,
+        updatePayload: Partial<Pick<Campaign, 'state' | 'dailyBudget'>>
+    ) => {
+        const originalCampaigns = [...campaigns];
+        
+        // Optimistic UI update
+        setCampaigns(prevCampaigns =>
+            prevCampaigns.map(c =>
+                c.campaignId === campaignId ? { ...c, ...updatePayload } : c
+            )
+        );
+
+        try {
+            const apiUpdate: { campaignId: number; state?: EntityState; budget?: { amount: number } } = { campaignId };
+            if ('state' in updatePayload) {
+                apiUpdate.state = updatePayload.state;
+            }
+            if ('dailyBudget' in updatePayload && updatePayload.dailyBudget) {
+                apiUpdate.budget = { amount: updatePayload.dailyBudget };
+            }
+
+            const response = await fetch('/api/amazon/campaigns', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    profileId: selectedProfileId,
+                    updates: [apiUpdate],
+                }),
+            });
+            
+            const result = await response.json();
+
+            if (!response.ok || result.responses?.[0]?.code !== 'SUCCESS') {
+                throw new Error(result.responses?.[0]?.description || 'Failed to update campaign.');
+            }
+            setError(null); // Clear previous errors on success
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'An unknown error occurred during update.');
+            setCampaigns(originalCampaigns); // Revert UI on failure
+        } finally {
+            // Exit editing mode regardless of outcome
+            if (editingCampaign?.id === campaignId) {
+                setEditingCampaign(null);
+            }
+        }
+    }, [campaigns, selectedProfileId, editingCampaign]);
 
     // Memoized filtering and pagination for campaigns
     const filteredCampaigns = useMemo(() => {
@@ -263,6 +332,30 @@ export function PPCManagementView() {
         setCampaignSearch(e.target.value);
         setCurrentPage(1); // Reset to first page on new search
     };
+
+    // Handlers for budget inline editing
+    const handleBudgetClick = (campaign: Campaign) => {
+        setEditingCampaign({ id: campaign.campaignId, field: 'budget' });
+        setTempBudgetValue(campaign.dailyBudget.toString());
+    };
+
+    const handleBudgetUpdate = (campaignId: number) => {
+        const newBudget = parseFloat(tempBudgetValue);
+        const originalCampaign = campaigns.find(c => c.campaignId === campaignId);
+        if (originalCampaign && !isNaN(newBudget) && newBudget > 0 && newBudget !== originalCampaign.dailyBudget) {
+            handleUpdateCampaign(campaignId, { dailyBudget: newBudget });
+        } else {
+            setEditingCampaign(null); // Cancel editing if value is invalid or unchanged
+        }
+    };
+    
+    const handleBudgetKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, campaignId: number) => {
+        if (e.key === 'Enter') {
+            handleBudgetUpdate(campaignId);
+        } else if (e.key === 'Escape') {
+            setEditingCampaign(null);
+        }
+    };
     
     return (
         <div style={styles.container}>
@@ -270,7 +363,7 @@ export function PPCManagementView() {
                 <h1 style={styles.title}>PPC Management Dashboard</h1>
             </header>
 
-            {error && <div style={styles.error}>{error}</div>}
+            {error && <div style={styles.error} role="alert">{error}</div>}
 
             <section style={styles.filters}>
                 <div>
@@ -307,6 +400,7 @@ export function PPCManagementView() {
                         onChange={handleSearchChange}
                         style={styles.input}
                         disabled={loading.campaigns}
+                        aria-label="Search campaigns"
                     />
                 </div>
                 <div style={styles.tableContainer}>
@@ -327,11 +421,41 @@ export function PPCManagementView() {
                             <tbody>
                                 {paginatedCampaigns.length > 0 ? paginatedCampaigns.map((c, i) => (
                                     <tr key={c.campaignId}>
-                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{c.name}</td>
-                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{c.state}</td>
+                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>
+                                            <a href="#" onClick={(e) => e.preventDefault()} style={{...styles.campaignLink, cursor: 'not-allowed'}} title="Drill-down coming soon">
+                                                {c.name}
+                                            </a>
+                                        </td>
+                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>
+                                            <button
+                                                onClick={() => handleUpdateCampaign(c.campaignId, { state: c.state === 'enabled' ? 'paused' : 'enabled' })}
+                                                style={{...styles.stateButton, backgroundColor: c.state === 'enabled' ? 'var(--success-color)' : '#6c757d'}}
+                                                aria-label={`Change status for ${c.name}, current is ${c.state}`}
+                                            >
+                                                {c.state}
+                                            </button>
+                                        </td>
                                         <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{c.campaignType}</td>
                                         <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{c.targetingType}</td>
-                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{formatPrice(c.dailyBudget)}</td>
+                                        <td 
+                                            style={{...styles.td, cursor: 'pointer', borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}} 
+                                            onClick={() => editingCampaign?.id !== c.campaignId && handleBudgetClick(c)}
+                                        >
+                                            {editingCampaign?.id === c.campaignId ? (
+                                                <input
+                                                    type="number"
+                                                    value={tempBudgetValue}
+                                                    onChange={(e) => setTempBudgetValue(e.target.value)}
+                                                    onBlur={() => handleBudgetUpdate(c.campaignId)}
+                                                    onKeyDown={(e) => handleBudgetKeyDown(e, c.campaignId)}
+                                                    autoFocus
+                                                    style={{ ...styles.input, width: '100px', padding: '6px' }}
+                                                    aria-label={`Edit budget for ${c.name}`}
+                                                />
+                                            ) : (
+                                                formatPrice(c.dailyBudget)
+                                            )}
+                                        </td>
                                         <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{c.startDate}</td>
                                     </tr>
                                 )) : (

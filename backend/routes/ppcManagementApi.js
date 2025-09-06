@@ -6,17 +6,15 @@ const router = express.Router();
 
 /**
  * GET /api/amazon/profiles
- * Fetches all available advertising profiles.
+ * Fetches all available advertising profiles. This call does not require a scope.
  */
 router.get('/profiles', async (req, res) => {
     try {
-        // For fetching profiles, the profileId scope is not needed in the header,
-        // so we pass a placeholder. The helper will still fetch a token.
-        // We need to pass the client_id though. The helper handles this.
+        // The /v2/profiles endpoint does not use the 'Amazon-Advertising-API-Scope' header.
+        // We call the helper without a profileId to prevent it from being added.
         const response = await amazonAdsApiRequest({
             method: 'get',
             url: '/v2/profiles',
-            profileId: process.env.ADS_API_PROFILE_ID, // A valid profileId is needed for token generation scope
         });
         res.json(response);
     } catch (error) {

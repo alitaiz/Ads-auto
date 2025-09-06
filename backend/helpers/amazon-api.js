@@ -67,7 +67,7 @@ export async function getAdsApiAccessToken() {
  * @param {object} config - The axios request config.
  * @param {string} config.method - The HTTP method (get, post, put).
  * @param {string} config.url - The API endpoint path (e.g., '/v2/profiles').
- * @param {string} config.profileId - The Amazon Ads Profile ID for the scope.
+ * @param {string} [config.profileId] - The Amazon Ads Profile ID for the scope. Not required for all calls.
  * @param {object} [config.data] - The request body for POST/PUT requests.
  * @param {object} [config.headers] - Additional headers to merge.
  * @returns {Promise<any>} The data from the API response.
@@ -78,10 +78,14 @@ export async function amazonAdsApiRequest({ method, url, profileId, data = null,
     const finalHeaders = {
         'Amazon-Advertising-API-ClientId': ADS_API_CLIENT_ID,
         'Authorization': `Bearer ${accessToken}`,
-        'Amazon-Advertising-API-Scope': profileId,
         'Content-Type': 'application/json',
         ...headers,
     };
+
+    // Conditionally add the Scope header only if a profileId is provided.
+    if (profileId) {
+        finalHeaders['Amazon-Advertising-API-Scope'] = profileId;
+    }
 
     try {
         const response = await axios({

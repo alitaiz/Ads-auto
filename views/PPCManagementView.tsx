@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Profile, Campaign } from '../types';
 import { formatPrice, formatNumber } from '../utils';
 
@@ -70,6 +70,7 @@ const styles: { [key: string]: React.CSSProperties } = {
         backgroundColor: 'var(--primary-color)',
         color: 'white',
         cursor: 'pointer',
+        transition: 'background-color 0.2s, opacity 0.2s',
     },
     select: {
         padding: '8px',
@@ -81,6 +82,20 @@ const styles: { [key: string]: React.CSSProperties } = {
         padding: '8px',
         borderRadius: '4px',
         border: '1px solid var(--border-color)',
+    },
+    campaignControls: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '15px',
+    },
+    paginationContainer: {
+        display: 'flex',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        gap: '15px',
+        marginTop: '15px',
+        padding: '10px 0',
     }
 };
 
@@ -101,6 +116,8 @@ interface SearchTerm {
     sevenDayTotalUnits: number;
 }
 
+const CAMPAIGNS_PER_PAGE = 50;
+
 export function PPCManagementView() {
     const [profiles, setProfiles] = useState<Profile[]>([]);
     const [selectedProfileId, setSelectedProfileId] = useState<string>('');
@@ -112,6 +129,10 @@ export function PPCManagementView() {
     const [endDate, setEndDate] = useState<string>('2024-07-28');
     const [loading, setLoading] = useState({ profiles: true, campaigns: false, searchTerms: false });
     const [error, setError] = useState<string | null>(null);
+
+    // State for campaign search and pagination
+    const [campaignSearch, setCampaignSearch] = useState('');
+    const [currentPage, setCurrentPage] = useState(1);
     
     // Fetch profiles on component mount
     useEffect(() => {
@@ -126,7 +147,6 @@ export function PPCManagementView() {
                 }
                 const data = await response.json();
                 
-                // Filter for US profiles only, as requested
                 const usProfiles = data.filter((p: Profile) => p.countryCode === 'US');
                 if (data.length > 0 && usProfiles.length === 0) {
                     console.info("Profiles were found, but none were for the US marketplace.");
@@ -136,7 +156,7 @@ export function PPCManagementView() {
                 if (usProfiles.length > 0) {
                     setSelectedProfileId(usProfiles[0].profileId.toString());
                 } else {
-                     setCampaigns([]); // Clear campaigns if no US profile is found
+                     setCampaigns([]);
                 }
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'An unknown error occurred.');
@@ -157,6 +177,8 @@ export function PPCManagementView() {
                 setLoading(prev => ({ ...prev, campaigns: true }));
                 setError(null);
                 setCampaigns([]);
+                setCampaignSearch(''); // Reset search on profile change
+                setCurrentPage(1);     // Reset page on profile change
                 const response = await fetch('/api/amazon/campaigns/list', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -188,7 +210,6 @@ export function PPCManagementView() {
                 setAsins(data.asins || []);
             } catch (err) {
                 console.error(err);
-                // Non-critical, so we just log the error.
             }
         };
         fetchSearchTermFilters();
@@ -216,12 +237,32 @@ export function PPCManagementView() {
             }
             const data = await response.json();
             setSearchTerms(data);
+// FIX: Corrected syntax for the catch block from `catch(err) => {` to `catch(err) {`. The arrow function syntax is invalid here and was causing a cascade of parsing errors.
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An unknown error occurred while fetching search terms.');
         } finally {
             setLoading(prev => ({ ...prev, searchTerms: false }));
         }
     }, [startDate, endDate, selectedAsin]);
+
+    // Memoized filtering and pagination for campaigns
+    const filteredCampaigns = useMemo(() => {
+        return campaigns.filter(c =>
+            c.name.toLowerCase().includes(campaignSearch.toLowerCase())
+        );
+    }, [campaigns, campaignSearch]);
+
+    const paginatedCampaigns = useMemo(() => {
+        const startIndex = (currentPage - 1) * CAMPAIGNS_PER_PAGE;
+        return filteredCampaigns.slice(startIndex, startIndex + CAMPAIGNS_PER_PAGE);
+    }, [filteredCampaigns, currentPage]);
+
+    const totalPages = Math.ceil(filteredCampaigns.length / CAMPAIGNS_PER_PAGE);
+
+    const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setCampaignSearch(e.target.value);
+        setCurrentPage(1); // Reset to first page on new search
+    };
     
     return (
         <div style={styles.container}>
@@ -257,7 +298,17 @@ export function PPCManagementView() {
             </section>
             
             <section style={{ marginTop: '30px' }}>
-                <h2>Campaign Overview</h2>
+                <div style={styles.campaignControls}>
+                    <h2>Campaign Overview</h2>
+                    <input
+                        type="text"
+                        placeholder="Search campaigns..."
+                        value={campaignSearch}
+                        onChange={handleSearchChange}
+                        style={styles.input}
+                        disabled={loading.campaigns}
+                    />
+                </div>
                 <div style={styles.tableContainer}>
                     {loading.campaigns ? (
                         <div style={styles.loader}>Loading campaigns...</div>
@@ -274,19 +325,19 @@ export function PPCManagementView() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {campaigns.length > 0 ? campaigns.map((c, i) => (
+                                {paginatedCampaigns.length > 0 ? paginatedCampaigns.map((c, i) => (
                                     <tr key={c.campaignId}>
-                                        <td style={{...styles.td, borderBottom: i === campaigns.length - 1 ? 'none' : undefined}}>{c.name}</td>
-                                        <td style={{...styles.td, borderBottom: i === campaigns.length - 1 ? 'none' : undefined}}>{c.state}</td>
-                                        <td style={{...styles.td, borderBottom: i === campaigns.length - 1 ? 'none' : undefined}}>{c.campaignType}</td>
-                                        <td style={{...styles.td, borderBottom: i === campaigns.length - 1 ? 'none' : undefined}}>{c.targetingType}</td>
-                                        <td style={{...styles.td, borderBottom: i === campaigns.length - 1 ? 'none' : undefined}}>{formatPrice(c.dailyBudget)}</td>
-                                        <td style={{...styles.td, borderBottom: i === campaigns.length - 1 ? 'none' : undefined}}>{c.startDate}</td>
+                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{c.name}</td>
+                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{c.state}</td>
+                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{c.campaignType}</td>
+                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{c.targetingType}</td>
+                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{formatPrice(c.dailyBudget)}</td>
+                                        <td style={{...styles.td, borderBottom: i === paginatedCampaigns.length - 1 ? 'none' : undefined}}>{c.startDate}</td>
                                     </tr>
                                 )) : (
                                     <tr>
                                         <td colSpan={6} style={{...styles.td, textAlign: 'center', borderBottom: 'none'}}>
-                                            No campaigns found for this profile.
+                                            {campaignSearch ? 'No campaigns match your search.' : 'No campaigns found for this profile.'}
                                         </td>
                                     </tr>
                                 )}
@@ -294,6 +345,27 @@ export function PPCManagementView() {
                         </table>
                     )}
                 </div>
+                {totalPages > 1 && (
+                     <div style={styles.paginationContainer}>
+                        <button
+                            style={{...styles.button, opacity: currentPage === 1 ? 0.6 : 1}}
+                            onClick={() => setCurrentPage(p => p - 1)}
+                            disabled={currentPage === 1}
+                        >
+                            Previous
+                        </button>
+                        <span>
+                            Page {currentPage} of {totalPages}
+                        </span>
+                        <button
+                            style={{...styles.button, opacity: currentPage === totalPages ? 0.6 : 1}}
+                            onClick={() => setCurrentPage(p => p + 1)}
+                            disabled={currentPage === totalPages}
+                        >
+                            Next
+                        </button>
+                    </div>
+                )}
             </section>
             
             <section style={{ marginTop: '30px' }}>
@@ -331,7 +403,7 @@ export function PPCManagementView() {
                             {asins.map(asin => <option key={asin} value={asin}>{asin}</option>)}
                         </select>
                       </div>
-                      <button style={styles.button} onClick={fetchSearchTerms} disabled={loading.searchTerms}>
+                      <button style={{...styles.button, opacity: loading.searchTerms ? 0.6 : 1}} onClick={fetchSearchTerms} disabled={loading.searchTerms}>
                         {loading.searchTerms ? 'Loading...' : 'Apply Filters'}
                       </button>
                 </div>

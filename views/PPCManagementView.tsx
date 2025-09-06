@@ -253,7 +253,6 @@ export function PPCManagementView() {
                                 <th style={styles.th}>Campaign</th>
                                 <th style={styles.th}>Status</th>
                                 <th style={styles.th}>Targeting</th>
-                                {/* FIX: Corrected malformed style attribute from `style.th}` to `style={styles.th}`. This syntax error was causing subsequent parsing issues. */}
                                 <th style={styles.th}>Daily Budget</th>
                                 <th style={styles.th}>Start Date</th>
                             </tr>

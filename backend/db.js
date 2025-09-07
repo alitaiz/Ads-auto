@@ -1,9 +1,9 @@
 // backend/db.js
 import pg from 'pg';
-import dotenv from 'dotenv';
 
-// Load environment variables from .env file
-dotenv.config();
+// Note: dotenv.config() is intentionally removed from this file.
+// The configuration is handled once at the application's entry point (server.js)
+// to ensure consistency and prevent loading issues.
 
 const { Pool } = pg;
 

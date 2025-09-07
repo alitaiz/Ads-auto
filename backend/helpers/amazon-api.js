@@ -1,13 +1,6 @@
 // backend/helpers/amazon-api.js
 import axios from 'axios';
 
-// Configuration from environment variables
-const {
-    ADS_API_CLIENT_ID,
-    ADS_API_CLIENT_SECRET,
-    ADS_API_REFRESH_TOKEN,
-} = process.env;
-
 const LWA_TOKEN_URL = 'https://api.amazon.com/auth/o2/token';
 const ADS_API_ENDPOINT = 'https://advertising-api.amazon.com';
 
@@ -22,6 +15,9 @@ let accessTokenCache = {
  * @returns {Promise<string>} A valid access token.
  */
 export async function getAdsApiAccessToken() {
+    // Read credentials from process.env just-in-time to avoid module loading issues.
+    const { ADS_API_CLIENT_ID, ADS_API_CLIENT_SECRET, ADS_API_REFRESH_TOKEN } = process.env;
+
     if (!ADS_API_CLIENT_ID || !ADS_API_CLIENT_SECRET || !ADS_API_REFRESH_TOKEN) {
         throw new Error('Missing Amazon Ads API credentials in .env file.');
     }
@@ -70,6 +66,7 @@ export async function getAdsApiAccessToken() {
 export async function amazonAdsApiRequest({ method, url, profileId, data, headers = {} }) {
     try {
         const accessToken = await getAdsApiAccessToken();
+        const { ADS_API_CLIENT_ID } = process.env;
 
         const defaultHeaders = {
             'Amazon-Advertising-API-ClientId': ADS_API_CLIENT_ID,

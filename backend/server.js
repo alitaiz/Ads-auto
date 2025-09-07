@@ -1,19 +1,18 @@
 // backend/server.js
-import express from 'express';
-import cors from 'cors';
+
+// --- Environment Configuration ---
+// This MUST be the first thing to run so that all other modules have access to .env variables.
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// Set up __dirname for ES modules to correctly locate the .env file
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Load environment variables from .env file in the backend directory
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 
-
-// Import API route modules
+// --- Module Imports ---
+import express from 'express';
+import cors from 'cors';
 import ppcManagementApiRoutes from './routes/ppcManagementApi.js';
 import spSearchTermsRoutes from './routes/spSearchTerms.js';
 import streamRoutes from './routes/stream.js';

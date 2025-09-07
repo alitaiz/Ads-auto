@@ -40,3 +40,25 @@ export const formatNumber = (
   }
   return new Intl.NumberFormat(locale).format(value);
 };
+
+/**
+ * Formats a number as a percentage string.
+ * @param value The number to format (e.g., 0.25 for 25%).
+ * @returns A formatted percentage string.
+ */
+export const formatPercent = (value: number | null | undefined): string => {
+    if (value === null || typeof value === 'undefined' || isNaN(value)) {
+        return '0.00%';
+    }
+    return `${(value * 100).toFixed(2)}%`;
+};
+
+/**
+ * Safely retrieves a nested property from an object using a dot-separated path.
+ * @param obj The object to query.
+ * @param path The path to the property (e.g., 'traffic_data.sessions').
+ * @returns The value of the property, or undefined if not found.
+ */
+export const getNested = (obj: any, path: string): any => {
+    return path.split('.').reduce((p, c) => (p && typeof p === 'object' && c in p) ? p[c] : undefined, obj);
+};

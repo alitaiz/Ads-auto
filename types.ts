@@ -72,3 +72,42 @@ export interface SummaryMetricsData {
     ctr: number;
     impressions: number;
 }
+
+
+// --- New Types for Report Views ---
+
+export interface SalesAndTrafficData {
+    parentAsin: string;
+    childAsin: string;
+    sku: string | null;
+    unitsOrdered?: number;
+    orderedProductSales?: number;
+    sessions?: number;
+    pageViews?: number;
+    featuredOfferPercentage?: number;
+    unitSessionPercentage?: number;
+    totalOrderItems?: number;
+    averageSalesPerOrderItem?: number;
+}
+
+export interface SPSearchTermReportData {
+    campaignName: string;
+    customerSearchTerm: string;
+    impressions: number;
+    clicks: number;
+    costPerClick: number;
+    spend: number;
+    sevenDayTotalSales: number;
+    sevenDayAcos: number;
+    asin: string | null;
+    targeting: string;
+    matchType: string;
+    sevenDayRoas: number;
+    sevenDayTotalOrders: number;
+    sevenDayTotalUnits: number;
+}
+
+export interface SPFilterOptions {
+    asins: string[];
+    dates: string[];
+}

@@ -108,12 +108,24 @@ router.put('/campaigns', async (req, res) => {
     }
 
     try {
-        // Amazon API requires state to be uppercase. Transform the state for each update.
+        // Transform the update payload from our internal format to the format Amazon's API expects.
         const transformedUpdates = updates.map(update => {
-            const newUpdate = { ...update };
-            if (newUpdate.state) {
-                newUpdate.state = newUpdate.state.toUpperCase();
+            const newUpdate = { campaignId: update.campaignId };
+
+            // Transform state if it exists
+            if (update.state) {
+                newUpdate.state = update.state.toUpperCase();
             }
+
+            // Transform budget if it exists. The API requires both `budget` (the amount) and `budgetType`.
+            // The frontend sends `{ budget: { amount: X } }`.
+            if (update.budget && typeof update.budget.amount === 'number') {
+                newUpdate.budget = {
+                    budget: update.budget.amount,
+                    budgetType: 'DAILY'
+                };
+            }
+            
             return newUpdate;
         });
 

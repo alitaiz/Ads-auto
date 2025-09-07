@@ -83,7 +83,7 @@ export function PPCManagementView() {
     const [profiles, setProfiles] = useState<Profile[]>([]);
     const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-    const [metrics, setMetrics] = useState<CampaignStreamMetrics[]>([]);
+    const [performanceMetrics, setPerformanceMetrics] = useState<Record<number, CampaignStreamMetrics>>({});
     const [loading, setLoading] = useState({ profiles: true, data: false });
     const [error, setError] = useState<string | null>(null);
     
@@ -163,13 +163,11 @@ export function PPCManagementView() {
             const initialCampaignsResult = await initialCampaignsResponse.json();
             let allCampaigns: Campaign[] = initialCampaignsResult.campaigns || [];
             
-            // Step 2: Identify campaigns from metrics that are not in our initial list.
             const existingCampaignIds = new Set(allCampaigns.map(c => c.campaignId));
             const missingCampaignIds = metricsData
                 .map(m => m.campaignId)
                 .filter(id => !existingCampaignIds.has(id));
 
-            // Step 3: If there are missing campaigns, fetch their metadata specifically.
             if (missingCampaignIds.length > 0) {
                 console.log(`Found ${missingCampaignIds.length} campaigns with metrics but missing metadata. Fetching...`);
                 const missingCampaignsResponse = await fetch('/api/amazon/campaigns/list', {
@@ -191,14 +189,18 @@ export function PPCManagementView() {
                 }
             }
             
-            // Step 4: Set the final state with all collected data.
+            const metricsMap = metricsData.reduce((acc, metric) => {
+                acc[metric.campaignId] = metric;
+                return acc;
+            }, {} as Record<number, CampaignStreamMetrics>);
+
             setCampaigns(allCampaigns);
-            setMetrics(metricsData);
+            setPerformanceMetrics(metricsMap);
 
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to fetch data.');
             setCampaigns([]);
-            setMetrics([]);
+            setPerformanceMetrics({});
         } finally {
             setLoading(prev => ({ ...prev, data: false }));
         }
@@ -246,45 +248,34 @@ export function PPCManagementView() {
     };
 
     const combinedCampaignData: CampaignWithMetrics[] = useMemo(() => {
-        // Create a map for quick lookup of campaign metadata.
-        const campaignMetadataMap = new Map(campaigns.map(c => [c.campaignId, c]));
-
-        // Drive the view from metrics, ensuring any campaign with performance data is shown.
-        return metrics.map(metric => {
-            const metadata = campaignMetadataMap.get(metric.campaignId);
-            const spend = metric.spend ?? 0;
-            const sales = metric.sales ?? 0;
-            const clicks = metric.clicks ?? 0;
-            const impressions = metric.impressions ?? 0;
-            const orders = metric.orders ?? 0;
-
-            // Use fetched metadata if available, otherwise create a fallback.
-            // This fallback should now be hit very rarely.
-            const campaignBase = metadata || {
-                campaignId: metric.campaignId,
-                name: `Campaign ${metric.campaignId}`, // Fallback for truly deleted campaigns
-                campaignType: 'sponsoredProducts',
-                targetingType: 'auto',
-                state: 'archived' as CampaignState, // Assume archived if no metadata
-                dailyBudget: 0,
-                startDate: 'N/A',
-                endDate: null,
+        const enrichedCampaigns = campaigns.map(campaign => {
+            const metrics = performanceMetrics[campaign.campaignId] || {
+                campaignId: campaign.campaignId,
+                impressions: 0,
+                clicks: 0,
+                spend: 0,
+                orders: 0,
+                sales: 0,
             };
+
+            const { impressions, clicks, spend, sales, orders } = metrics;
             
             return {
-                ...campaignBase,
+                ...campaign,
                 impressions,
                 clicks,
                 spend,
-                sales,
                 orders,
+                sales,
                 acos: sales > 0 ? spend / sales : 0,
                 roas: spend > 0 ? sales / spend : 0,
                 cpc: clicks > 0 ? spend / clicks : 0,
                 ctr: impressions > 0 ? clicks / impressions : 0,
             };
         });
-    }, [campaigns, metrics]);
+
+        return enrichedCampaigns.filter(c => c.impressions > 0 || c.clicks > 0 || c.spend > 0 || c.orders > 0 || c.sales > 0);
+    }, [campaigns, performanceMetrics]);
     
     const dataForSummary = useMemo(() => {
          if (!searchTerm) return combinedCampaignData;

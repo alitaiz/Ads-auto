@@ -8,17 +8,17 @@ const router = express.Router();
 // == ENDPOINT ĐỂ NHẬN DỮ LIỆU STREAM (DATA INGESTION)            ==
 // =================================================================
 
-// Middleware để kiểm tra API key bí mật. Đây là một lớp bảo mật quan trọng.
+// Middleware to check for a secret API key. This is a critical security layer.
 const checkApiKey = (req, res, next) => {
     const apiKey = req.headers['x-api-key'];
     if (!apiKey || apiKey !== process.env.STREAM_INGEST_SECRET_KEY) {
-        console.warn('[Stream Ingest] Thất bại: Sai hoặc thiếu API key.');
+        console.warn('[Stream Ingest] Failure: Incorrect or missing API key.');
         return res.status(401).json({ error: 'Unauthorized' });
     }
     next();
 };
 
-// Endpoint POST /api/stream-ingest: Nhận dữ liệu từ AWS Lambda và ghi vào PostgreSQL.
+// POST /api/stream-ingest: Receives data from AWS Lambda and writes to PostgreSQL.
 router.post('/stream-ingest', checkApiKey, async (req, res) => {
     const events = req.body;
 
@@ -35,29 +35,25 @@ router.post('/stream-ingest', checkApiKey, async (req, res) => {
         const query = 'INSERT INTO raw_stream_events(event_type, event_data) VALUES($1, $2)';
         
         for (const event of events) {
-            // dataset_id là trường đáng tin cậy nhất để xác định loại dữ liệu từ Marketing Stream
             const eventType = event.dataset_id || event.type || 'unknown';
 
-            // Dữ liệu stream (như sp-traffic, sp-conversion) thường được gói trong một object
-            // chứa một mảng 'records'. Chúng ta sẽ "bóc tách" và lưu từng record con.
             if (Array.isArray(event.records) && event.records.length > 0) {
                  for (const innerRecord of event.records) {
                     await client.query(query, [eventType, innerRecord]);
                     successfulIngests++;
                  }
             } else {
-                // Nếu không có mảng 'records', đây là một sự kiện đơn lẻ.
                 await client.query(query, [eventType, event]);
                 successfulIngests++;
             }
         }
 
         await client.query('COMMIT');
-        console.log(`[Stream Ingest] Thành công: Đã ghi ${successfulIngests} events vào PostgreSQL.`);
+        console.log(`[Stream Ingest] Success: Ingested ${successfulIngests} events into PostgreSQL.`);
         res.status(200).json({ message: `Successfully ingested ${successfulIngests} events.` });
     } catch (error) {
         if (client) await client.query('ROLLBACK');
-        console.error('[Stream Ingest] Lỗi khi ghi vào PostgreSQL:', error);
+        console.error('[Stream Ingest] Error writing to PostgreSQL:', error);
         res.status(500).json({ error: 'Failed to write data to database.' });
     } finally {
         if (client) client.release();
@@ -65,13 +61,12 @@ router.post('/stream-ingest', checkApiKey, async (req, res) => {
 });
 
 // =================================================================
-// == ENDPOINT ĐỂ CUNG CẤP DỮ LIỆU (DATA RETRIEVAL)             ==
+// == ENDPOINTS FOR DATA RETRIEVAL                              ==
 // =================================================================
 
-// Endpoint GET /api/stream/metrics: Cung cấp các chỉ số tổng hợp cho "hôm nay".
+// GET /api/stream/metrics: Provides aggregated metrics for "today".
 router.get('/stream/metrics', async (req, res) => {
     try {
-        // Truy vấn này tổng hợp cả dữ liệu traffic và conversion cho ngày hiện tại (UTC).
         const query = `
             SELECT
                 COALESCE(SUM((event_data->>'clicks')::bigint) FILTER (WHERE event_type = 'sp-traffic'), 0) as click_count,
@@ -86,13 +81,9 @@ router.get('/stream/metrics', async (req, res) => {
         const result = await pool.query(query);
 
         if (result.rows.length === 0) {
-            // Trường hợp này hiếm khi xảy ra với COALESCE, nhưng là một biện pháp an toàn.
             return res.json({
-                click_count: 0,
-                total_spend: 0,
-                total_orders: 0,
-                total_sales: 0,
-                last_event_timestamp: null
+                click_count: 0, total_spend: 0, total_orders: 0,
+                total_sales: 0, last_event_timestamp: null
             });
         }
         
@@ -106,13 +97,13 @@ router.get('/stream/metrics', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("[Server] Lỗi khi lấy stream metrics:", error);
-        res.status(500).json({ error: "Không thể lấy dữ liệu real-time." });
+        console.error("[Server] Error fetching stream metrics:", error);
+        res.status(500).json({ error: "Could not fetch real-time data." });
     }
 });
 
 
-// Endpoint GET /api/stream/campaign-metrics: Cung cấp các chỉ số tổng hợp theo từng campaign cho "hôm nay".
+// GET /api/stream/campaign-metrics: Provides aggregated metrics per campaign for a date range.
 router.get('/stream/campaign-metrics', async (req, res) => {
     const { startDate, endDate } = req.query;
 
@@ -121,9 +112,6 @@ router.get('/stream/campaign-metrics', async (req, res) => {
     }
 
     try {
-        // Fix: Updated JSON field accessors from camelCase to snake_case (e.g., campaignId -> campaign_id)
-        // to match the actual data format provided by the Amazon Marketing Stream.
-        // The WHERE clause is now parameterized to accept the date range from the frontend.
         const query = `
             WITH traffic_data AS (
                 SELECT
@@ -158,16 +146,32 @@ router.get('/stream/campaign-metrics', async (req, res) => {
         
         const result = await pool.query(query, [startDate, endDate]);
         
-        const metrics = result.rows.map(row => ({
-            ...row,
-            campaignId: Number(row.campaignId) // Ensure campaignId is a number
-        }));
+        const metrics = result.rows
+            .map(row => {
+                // The campaignId from the DB is a string, which could be null for some events.
+                if (!row.campaignId) {
+                    return null;
+                }
+                const campaignIdNumber = Number(row.campaignId);
+
+                // Filter out invalid IDs (0, NaN) that could result from Number(null) or Number('abc')
+                if (!campaignIdNumber || isNaN(campaignIdNumber)) {
+                    console.warn(`[Stream Metrics] Filtering out invalid campaign ID from DB: ${row.campaignId}`);
+                    return null;
+                }
+                
+                return {
+                    ...row,
+                    campaignId: campaignIdNumber
+                };
+            })
+            .filter(Boolean); // This effectively removes all the null entries.
 
         res.json(metrics);
 
     } catch (error) {
-        console.error("[Server] Lỗi khi lấy campaign stream metrics:", error);
-        res.status(500).json({ error: "Không thể lấy dữ liệu real-time cho các chiến dịch." });
+        console.error("[Server] Error fetching campaign stream metrics:", error);
+        res.status(500).json({ error: "Could not fetch real-time campaign data." });
     }
 });
 

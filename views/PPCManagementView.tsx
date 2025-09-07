@@ -283,11 +283,11 @@ const SummaryMetrics = ({ campaigns }: { campaigns: CampaignWithMetrics[] }) => 
     const summary = useMemo(() => {
         const totals = campaigns.reduce(
             (acc, campaign) => {
-                acc.spend += campaign.spend;
-                acc.sales += campaign.sales;
-                acc.orders += campaign.orders;
-                acc.clicks += campaign.clicks;
-                acc.impressions += campaign.impressions;
+                acc.spend += Number(campaign.spend) || 0;
+                acc.sales += Number(campaign.sales) || 0;
+                acc.orders += Number(campaign.orders) || 0;
+                acc.clicks += Number(campaign.clicks) || 0;
+                acc.impressions += Number(campaign.impressions) || 0;
                 return acc;
             },
             { spend: 0, sales: 0, orders: 0, clicks: 0, impressions: 0 }
@@ -571,8 +571,11 @@ export function PPCManagementView() {
         setCurrentPage(1);
 
         try {
+            const formattedStartDate = dateRange.start.toISOString().split('T')[0]; // YYYY-MM-DD
+            const formattedEndDate = dateRange.end.toISOString().split('T')[0]; // YYYY-MM-DD
+
             // Step 1: Fetch metrics, initial campaigns, and historical names in parallel.
-            const metricsPromise = fetch('/api/stream/campaign-metrics');
+            const metricsPromise = fetch(`/api/stream/campaign-metrics?startDate=${formattedStartDate}&endDate=${formattedEndDate}`);
             const initialCampaignsPromise = fetch('/api/amazon/campaigns/list', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -644,7 +647,7 @@ export function PPCManagementView() {
         } finally {
             setLoading(prev => ({ ...prev, data: false }));
         }
-    }, [selectedProfileId]);
+    }, [selectedProfileId, dateRange]);
 
     // Fetch data when profile changes or on manual refresh
     useEffect(() => {
@@ -654,13 +657,7 @@ export function PPCManagementView() {
     const handleApplyDateRange = (newRange: { start: Date; end: Date }) => {
         setDateRange(newRange);
         setDatePickerOpen(false);
-        const today = new Date();
-        const isToday = newRange.start.toDateString() === today.toDateString() && newRange.end.toDateString() === today.toDateString();
-        
-        if (!isToday) {
-            alert("Date range selection UI is implemented, but the backend currently only supports fetching live data for 'Today'.");
-        }
-        fetchData();
+        // Data fetching is now triggered by the useEffect watching `fetchData`, which depends on `dateRange`.
     };
 
     const formatDateRange = (start: Date, end: Date) => {

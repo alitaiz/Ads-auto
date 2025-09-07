@@ -114,9 +114,16 @@ router.get('/stream/metrics', async (req, res) => {
 
 // Endpoint GET /api/stream/campaign-metrics: Cung cấp các chỉ số tổng hợp theo từng campaign cho "hôm nay".
 router.get('/stream/campaign-metrics', async (req, res) => {
+    const { startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+        return res.status(400).json({ error: 'startDate and endDate query parameters are required.' });
+    }
+
     try {
         // Fix: Updated JSON field accessors from camelCase to snake_case (e.g., campaignId -> campaign_id)
         // to match the actual data format provided by the Amazon Marketing Stream.
+        // The WHERE clause is now parameterized to accept the date range from the frontend.
         const query = `
             WITH traffic_data AS (
                 SELECT
@@ -125,7 +132,7 @@ router.get('/stream/campaign-metrics', async (req, res) => {
                     COALESCE(SUM((event_data->>'clicks')::bigint), 0) as clicks,
                     COALESCE(SUM((event_data->>'cost')::numeric), 0.00) as spend
                 FROM raw_stream_events
-                WHERE event_type = 'sp-traffic' AND received_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
+                WHERE event_type = 'sp-traffic' AND received_at >= ($1)::date AND received_at < ($2)::date + interval '1 day'
                 GROUP BY 1
             ),
             conversion_data AS (
@@ -134,7 +141,7 @@ router.get('/stream/campaign-metrics', async (req, res) => {
                     COALESCE(SUM((event_data->>'attributed_conversions_1d')::bigint), 0) as orders,
                     COALESCE(SUM((event_data->>'attributed_sales_1d')::numeric), 0.00) as sales
                 FROM raw_stream_events
-                WHERE event_type = 'sp-conversion' AND received_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
+                WHERE event_type = 'sp-conversion' AND received_at >= ($1)::date AND received_at < ($2)::date + interval '1 day'
                 GROUP BY 1
             )
             SELECT
@@ -149,7 +156,7 @@ router.get('/stream/campaign-metrics', async (req, res) => {
             WHERE COALESCE(t.campaign_id_text, c.campaign_id_text) IS NOT NULL;
         `;
         
-        const result = await pool.query(query);
+        const result = await pool.query(query, [startDate, endDate]);
         
         const metrics = result.rows.map(row => ({
             ...row,

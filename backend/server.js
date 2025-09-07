@@ -5,18 +5,18 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// --- Local Module Imports ---
+// --- Configuration ---
+// IMPORTANT: Load environment variables right at the start, before any other modules are imported.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '.env') });
+
+// --- Local Module Imports (Now safe to import) ---
 import pool from './db.js';
 import ppcManagementApiRoutes from './routes/ppcManagementApi.js';
 import spSearchTermsRoutes from './routes/spSearchTerms.js';
 import streamRoutes from './routes/stream.js';
 import ppcManagementRoutes from './routes/ppcManagement.js';
-
-
-// --- Configuration ---
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.resolve(__dirname, '.env') });
 
 const app = express();
 const port = process.env.PORT || 4001;

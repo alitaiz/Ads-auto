@@ -35,7 +35,7 @@ export async function getAdsApiAccessToken() {
             client_id: ADS_API_CLIENT_ID,
             client_secret: ADS_API_CLIENT_SECRET,
         }), {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            headers: { 'Content-Type': 'application/x-form-urlencoded' },
         });
 
         const data = response.data;
@@ -67,15 +67,22 @@ export async function amazonAdsApiRequest({ method, url, profileId, data, header
     try {
         const accessToken = await getAdsApiAccessToken();
 
+        const apiHeaders = {
+            'Amazon-Advertising-API-ClientId': process.env.ADS_API_CLIENT_ID,
+            'Authorization': `Bearer ${accessToken}`,
+            ...headers
+        };
+
+        // Only add the scope header if a profileId is provided.
+        if (profileId) {
+            // FIX: Explicitly cast profileId to a string to prevent API errors.
+            apiHeaders['Amazon-Advertising-API-Scope'] = String(profileId);
+        }
+
         const response = await axios({
             method,
             url: `${ADS_API_ENDPOINT}${url}`,
-            headers: {
-                'Amazon-Advertising-API-ClientId': process.env.ADS_API_CLIENT_ID,
-                'Authorization': `Bearer ${accessToken}`,
-                'Amazon-Advertising-API-Scope': profileId,
-                ...headers
-            },
+            headers: apiHeaders,
             data,
         });
 

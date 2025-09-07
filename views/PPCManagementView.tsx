@@ -183,6 +183,9 @@ const styles: { [key: string]: React.CSSProperties } = {
         fontSize: '1.5rem',
         fontWeight: 600,
         color: 'var(--text-color)',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
     },
     datePickerContainer: {
         position: 'absolute',
@@ -193,7 +196,8 @@ const styles: { [key: string]: React.CSSProperties } = {
         boxShadow: 'var(--box-shadow)',
         marginTop: '5px',
         display: 'flex',
-        padding: '10px'
+        padding: '10px',
+        right: 0,
     },
     datePickerPresets: {
         display: 'flex',
@@ -918,10 +922,12 @@ export function PPCManagementView() {
                 </div>
                  <div style={{flexGrow: 1}}></div>
                  <div style={styles.controlGroup}>
-                    <button ref={datePickerButtonRef} style={styles.button} onClick={() => setDatePickerOpen(o => !o)}>
-                       {formatDateRange(dateRange.start, dateRange.end)}
-                    </button>
-                    {isDatePickerOpen && <div ref={datePickerRef}><DateRangePicker onApply={handleApplyDateRange} onClose={() => setDatePickerOpen(false)} /></div>}
+                    <div style={{ position: 'relative' }}>
+                        <button ref={datePickerButtonRef} style={styles.button} onClick={() => setDatePickerOpen(o => !o)}>
+                           {formatDateRange(dateRange.start, dateRange.end)}
+                        </button>
+                        {isDatePickerOpen && <div ref={datePickerRef}><DateRangePicker onApply={handleApplyDateRange} onClose={() => setDatePickerOpen(false)} /></div>}
+                    </div>
                     <button style={styles.button} onClick={fetchData} disabled={loading.data}>
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                             <path fillRule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z"/>

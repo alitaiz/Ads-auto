@@ -12,14 +12,18 @@ let accessTokenCache = {
 
 /**
  * Retrieves a valid LWA (Login with Amazon) access token, refreshing if necessary.
+ * This function is now backward-compatible, supporting both 'ADS_API_' and legacy 'AMAZON_' prefixes for .env variables.
  * @returns {Promise<string>} A valid access token.
  */
 export async function getAdsApiAccessToken() {
-    // Read credentials from process.env just-in-time to avoid module loading issues.
-    const { ADS_API_CLIENT_ID, ADS_API_CLIENT_SECRET, ADS_API_REFRESH_TOKEN } = process.env;
+    // Support both new (ADS_API_) and legacy (AMAZON_) naming conventions for credentials.
+    const clientId = process.env.ADS_API_CLIENT_ID || process.env.AMAZON_CLIENT_ID;
+    const clientSecret = process.env.ADS_API_CLIENT_SECRET || process.env.AMAZON_CLIENT_SECRET;
+    const refreshToken = process.env.ADS_API_REFRESH_TOKEN || process.env.AMAZON_REFRESH_TOKEN;
 
-    if (!ADS_API_CLIENT_ID || !ADS_API_CLIENT_SECRET || !ADS_API_REFRESH_TOKEN) {
-        throw new Error('Missing Amazon Ads API credentials in .env file.');
+    if (!clientId || !clientSecret || !refreshToken) {
+        // The error message guides the user to the current standard variable names.
+        throw new Error('Missing Amazon Ads API credentials in .env file. Please ensure ADS_API_CLIENT_ID, ADS_API_CLIENT_SECRET, and ADS_API_REFRESH_TOKEN are set.');
     }
 
     // If we have a valid token in cache, return it
@@ -32,9 +36,9 @@ export async function getAdsApiAccessToken() {
     try {
         const response = await axios.post(LWA_TOKEN_URL, new URLSearchParams({
             grant_type: 'refresh_token',
-            refresh_token: ADS_API_REFRESH_TOKEN,
-            client_id: ADS_API_CLIENT_ID,
-            client_secret: ADS_API_CLIENT_SECRET,
+            refresh_token: refreshToken,
+            client_id: clientId,
+            client_secret: clientSecret,
         }), {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         });
@@ -66,10 +70,15 @@ export async function getAdsApiAccessToken() {
 export async function amazonAdsApiRequest({ method, url, profileId, data, headers = {} }) {
     try {
         const accessToken = await getAdsApiAccessToken();
-        const { ADS_API_CLIENT_ID } = process.env;
+        // Ensure we use the same logic to get the client ID for the header.
+        const clientId = process.env.ADS_API_CLIENT_ID || process.env.AMAZON_CLIENT_ID;
 
+        if (!clientId) {
+             throw new Error('Missing Amazon Ads API Client ID in .env file.');
+        }
+        
         const defaultHeaders = {
-            'Amazon-Advertising-API-ClientId': ADS_API_CLIENT_ID,
+            'Amazon-Advertising-API-ClientId': clientId,
             'Authorization': `Bearer ${accessToken}`,
             ...headers
         };

@@ -91,6 +91,15 @@ const getInitialDateRange = () => {
     return { start, end };
 };
 
+// A timezone-safe function to format a date for API queries.
+// This prevents the user's local timezone from shifting the date.
+const formatDateForQuery = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
 
 export function PPCManagementView() {
     const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -144,9 +153,8 @@ export function PPCManagementView() {
         setError(null);
         setCurrentPage(1);
 
-        const formatDate = (d: Date) => d.toISOString().split('T')[0];
-        const formattedStartDate = formatDate(dateRange.start);
-        const formattedEndDate = formatDate(dateRange.end);
+        const formattedStartDate = formatDateForQuery(dateRange.start);
+        const formattedEndDate = formatDateForQuery(dateRange.end);
 
         try {
             // Step 1: Fetch metrics and the initial list of campaigns in parallel.

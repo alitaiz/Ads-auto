@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { PPCManagementView } from './views/PPCManagementView';
@@ -30,12 +30,20 @@ const styles = `
   }
 `;
 
-const styleSheet = document.createElement("style");
-styleSheet.innerText = styles;
-document.head.appendChild(styleSheet);
-
-
 function App() {
+  // Encapsulate global style injection within a useEffect to ensure it runs
+  // after the component mounts, preventing potential module initialization race conditions.
+  useEffect(() => {
+    const styleSheet = document.createElement("style");
+    styleSheet.innerText = styles;
+    document.head.appendChild(styleSheet);
+    
+    // Return a cleanup function to remove the stylesheet when the component unmounts.
+    return () => {
+      document.head.removeChild(styleSheet);
+    };
+  }, []); // Empty dependency array ensures this effect runs only once.
+
   // For now, the app has one main view. We set up routing to allow for future expansion
   // with Ad Group and Keyword views.
   return (

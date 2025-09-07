@@ -251,7 +251,8 @@ export function PPCManagementView() {
             // Fetch historical campaign names as a fallback
             const namesPromise = fetch('/api/ppc/campaign-names');
 
-            const [campaignsResponse, metricsResponse, namesResponse] = await Promise.all([campaignsPromise, metricsPromise, namesResponse]);
+            // Fix: Corrected typo where `namesResponse` was used before declaration. It should be `namesPromise`.
+            const [campaignsResponse, metricsResponse, namesResponse] = await Promise.all([campaignsPromise, metricsPromise, namesPromise]);
 
             if (!campaignsResponse.ok) {
                 const errorData = await campaignsResponse.json();

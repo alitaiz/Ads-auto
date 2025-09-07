@@ -1,6 +1,7 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useContext } from 'react';
 import { SPSearchTermReportData, SPFilterOptions } from '../types';
 import { formatNumber, formatPercent, formatPrice, getNested } from '../utils';
+import { DataCacheContext } from '../contexts/DataCacheContext';
 
 const styles: { [key: string]: React.CSSProperties } = {
     viewContainer: {
@@ -107,26 +108,32 @@ const styles: { [key: string]: React.CSSProperties } = {
 };
 
 export function SPSearchTermsView() {
+    const { cache, setCache } = useContext(DataCacheContext);
+
     const [filterOptions, setFilterOptions] = useState<SPFilterOptions>({ asins: [], dates: [] });
-    const [selectedAsin, setSelectedAsin] = useState<string>('');
-    const [startDate, setStartDate] = useState<string>(() => {
+    
+    // Initialize filters from cache or set defaults
+    const [selectedAsin, setSelectedAsin] = useState<string>(cache.spSearchTerms.filters?.asin || '');
+    const [startDate, setStartDate] = useState<string>(cache.spSearchTerms.filters?.startDate || (() => {
         const d = new Date();
         d.setDate(d.getDate() - 8);
         return d.toISOString().split('T')[0];
-    });
-    const [endDate, setEndDate] = useState<string>(() => {
+    })());
+    const [endDate, setEndDate] = useState<string>(cache.spSearchTerms.filters?.endDate || (() => {
         const d = new Date();
         d.setDate(d.getDate() - 2);
         return d.toISOString().split('T')[0];
-    });
-    const [data, setData] = useState<SPSearchTermReportData[]>([]);
-    const [loading, setLoading] = useState(true);
+    })());
+    
+    const [data, setData] = useState<SPSearchTermReportData[]>(cache.spSearchTerms.data || []);
+    const [loading, setLoading] = useState(false); // Only true during fetch
     const [error, setError] = useState<string | null>(null);
-    const [hasAppliedFilters, setHasAppliedFilters] = useState(false);
+    const [hasAppliedFilters, setHasAppliedFilters] = useState(!!cache.spSearchTerms.filters);
     const [sortConfig, setSortConfig] = useState<{ key: string | null; direction: 'ascending' | 'descending' }>({ key: 'impressions', direction: 'descending' });
 
     useEffect(() => {
         const fetchFilters = async () => {
+            if (filterOptions.asins.length > 0) return;
             try {
                 setError(null);
                 setLoading(true);
@@ -145,7 +152,7 @@ export function SPSearchTermsView() {
             }
         };
         fetchFilters();
-    }, []);
+    }, [filterOptions.asins.length]);
 
     const handleApply = useCallback(async () => {
         if (!startDate || !endDate) return;
@@ -153,6 +160,19 @@ export function SPSearchTermsView() {
             setError("Start date cannot be after end date.");
             return;
         }
+
+        const currentFilters = { asin: selectedAsin, startDate, endDate };
+
+        // Check cache first
+        if (
+            JSON.stringify(cache.spSearchTerms.filters) === JSON.stringify(currentFilters) &&
+            cache.spSearchTerms.data.length > 0
+        ) {
+            setData(cache.spSearchTerms.data);
+            setHasAppliedFilters(true);
+            return; // Skip fetch
+        }
+
         try {
             setHasAppliedFilters(true);
             setLoading(true);
@@ -164,8 +184,16 @@ export function SPSearchTermsView() {
                 const errorData = await response.json();
                 throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
             }
-            const data: SPSearchTermReportData[] = await response.json();
-            setData(data);
+            const fetchedData: SPSearchTermReportData[] = await response.json();
+            setData(fetchedData);
+            // Update cache on successful fetch
+            setCache(prev => ({
+                ...prev,
+                spSearchTerms: {
+                    data: fetchedData,
+                    filters: currentFilters,
+                }
+            }));
         } catch (e) {
             if (e instanceof Error) setError(`Failed to fetch data: ${e.message}`);
             else setError('An unknown error occurred.');
@@ -173,7 +201,7 @@ export function SPSearchTermsView() {
         } finally {
             setLoading(false);
         }
-    }, [selectedAsin, startDate, endDate]);
+    }, [selectedAsin, startDate, endDate, cache.spSearchTerms, setCache]);
 
     const requestSort = (key: string) => {
         let direction: 'ascending' | 'descending' = 'descending';
@@ -210,7 +238,6 @@ export function SPSearchTermsView() {
     ];
 
     const renderContent = () => {
-        if (loading && !hasAppliedFilters && !error) return <div style={styles.message}>Loading filters...</div>;
         if (loading) return <div style={styles.message}>Loading data...</div>;
         if (error && !loading) return null;
         if (!hasAppliedFilters) return <div style={styles.message}>Please select filters and click "Apply" to view data.</div>;
@@ -273,7 +300,7 @@ export function SPSearchTermsView() {
                     <input type="date" id="end-date-sp" style={styles.input} value={endDate} onChange={e => setEndDate(e.target.value)} disabled={filtersDisabled} />
                 </div>
                 <button onClick={handleApply} style={styles.primaryButton} disabled={filtersDisabled || !startDate || !endDate}>
-                    {loading ? 'Loading...' : 'Apply'}
+                    {loading ? 'Applying...' : 'Apply'}
                 </button>
             </div>
 

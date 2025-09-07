@@ -7,6 +7,7 @@ import { KeywordView } from './views/KeywordView';
 import { Layout } from './views/components/Layout';
 import { SalesAndTrafficView } from './views/SalesAndTrafficView';
 import { SPSearchTermsView } from './views/SPSearchTermsView';
+import { DataCacheProvider } from './contexts/DataCacheContext';
 
 // Basic global styles
 const styles = `
@@ -71,7 +72,9 @@ if (container) {
   const root = createRoot(container);
   root.render(
     <React.StrictMode>
-      <App />
+      <DataCacheProvider>
+        <App />
+      </DataCacheProvider>
     </React.StrictMode>
   );
 } else {

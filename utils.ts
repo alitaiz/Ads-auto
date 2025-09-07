@@ -62,3 +62,20 @@ export const formatPercent = (value: number | null | undefined): string => {
 export const getNested = (obj: any, path: string): any => {
     return path.split('.').reduce((p, c) => (p && typeof p === 'object' && c in p) ? p[c] : undefined, obj);
 };
+
+/**
+ * Compares two date range objects for equality, ignoring time.
+ * @param a The first date range object.
+ * @param b The second date range object.
+ * @returns True if the start and end dates are the same day.
+ */
+export const areDateRangesEqual = (
+    a: { start: Date; end: Date } | null,
+    b: { start: Date; end: Date } | null
+): boolean => {
+    if (!a || !b) {
+        return a === b;
+    }
+    const format = (d: Date) => d.toISOString().split('T')[0];
+    return format(a.start) === format(b.start) && format(a.end) === format(b.end);
+};

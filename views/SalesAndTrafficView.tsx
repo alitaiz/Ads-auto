@@ -1,6 +1,7 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useContext } from 'react';
 import { SalesAndTrafficData, SPFilterOptions } from '../types';
 import { formatNumber, formatPercent, formatPrice, getNested } from '../utils';
+import { DataCacheContext } from '../contexts/DataCacheContext';
 
 const styles: { [key: string]: React.CSSProperties } = {
     viewContainer: {
@@ -107,21 +108,26 @@ const styles: { [key: string]: React.CSSProperties } = {
 };
 
 export function SalesAndTrafficView() {
+    const { cache, setCache } = useContext(DataCacheContext);
+
     const [filterOptions, setFilterOptions] = useState<SPFilterOptions>({ asins: [], dates: [] });
-    const [selectedAsin, setSelectedAsin] = useState<string>('');
-    const [selectedDate, setSelectedDate] = useState<string>(() => {
+
+    const [selectedAsin, setSelectedAsin] = useState<string>(cache.salesAndTraffic.filters?.asin || '');
+    const [selectedDate, setSelectedDate] = useState<string>(cache.salesAndTraffic.filters?.date || (() => {
         const d = new Date();
         d.setDate(d.getDate() - 2); // Default to 2 days ago
         return d.toISOString().split('T')[0];
-    });
-    const [salesData, setSalesData] = useState<SalesAndTrafficData[]>([]);
+    })());
+    
+    const [salesData, setSalesData] = useState<SalesAndTrafficData[]>(cache.salesAndTraffic.data || []);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [hasAppliedFilters, setHasAppliedFilters] = useState(false);
+    const [hasAppliedFilters, setHasAppliedFilters] = useState(!!cache.salesAndTraffic.filters);
     const [sortConfig, setSortConfig] = useState<{ key: string | null; direction: 'ascending' | 'descending' }>({ key: 'sessions', direction: 'descending' });
 
      useEffect(() => {
         const fetchFilters = async () => {
+            if (filterOptions.asins.length > 0) return;
             try {
                 setError(null);
                 setLoading(true);
@@ -140,10 +146,22 @@ export function SalesAndTrafficView() {
             }
         };
         fetchFilters();
-    }, []);
+    }, [filterOptions.asins.length]);
 
     const handleApply = useCallback(async () => {
         if (!selectedDate) return;
+
+        const currentFilters = { asin: selectedAsin, date: selectedDate };
+        // Check cache first
+        if (
+            JSON.stringify(cache.salesAndTraffic.filters) === JSON.stringify(currentFilters) &&
+            cache.salesAndTraffic.data.length > 0
+        ) {
+            setSalesData(cache.salesAndTraffic.data);
+            setHasAppliedFilters(true);
+            return; // Skip fetch
+        }
+
         try {
             setHasAppliedFilters(true);
             setLoading(true);
@@ -155,8 +173,16 @@ export function SalesAndTrafficView() {
                  const errorData = await response.json();
                 throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
             }
-            const data: SalesAndTrafficData[] = await response.json();
-            setSalesData(data);
+            const fetchedData: SalesAndTrafficData[] = await response.json();
+            setSalesData(fetchedData);
+            // Update cache
+            setCache(prev => ({
+                ...prev,
+                salesAndTraffic: {
+                    data: fetchedData,
+                    filters: currentFilters
+                }
+            }));
         } catch (e) {
             if (e instanceof Error) setError(`Failed to fetch data: ${e.message}`);
             else setError('An unknown error occurred.');
@@ -164,7 +190,7 @@ export function SalesAndTrafficView() {
         } finally {
             setLoading(false);
         }
-    }, [selectedAsin, selectedDate]);
+    }, [selectedAsin, selectedDate, cache.salesAndTraffic, setCache]);
 
     const requestSort = (key: string) => {
         let direction: 'ascending' | 'descending' = 'descending';
@@ -255,12 +281,11 @@ export function SalesAndTrafficView() {
                     </select>
                 </div>
                 <div style={styles.filterGroup}>
-                    {/* FIX: Corrected typo in htmlFor attribute */}
                     <label style={styles.label} htmlFor="date-select-sales">Select day</label>
                     <input type="date" id="date-select-sales" style={styles.input} value={selectedDate} onChange={e => setSelectedDate(e.target.value)} disabled={filtersDisabled} />
                 </div>
                 <button onClick={handleApply} style={styles.primaryButton} disabled={filtersDisabled || !selectedDate}>
-                    {loading ? 'Loading...' : 'Apply'}
+                    {loading ? 'Applying...' : 'Apply'}
                 </button>
             </div>
             

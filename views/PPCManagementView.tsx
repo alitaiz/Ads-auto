@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, useContext } from 'react';
 import { Link } from 'react-router-dom';
 import { Profile, Campaign, CampaignWithMetrics, CampaignStreamMetrics, SummaryMetricsData, CampaignState } from '../types';
 import { DateRangePicker } from './components/DateRangePicker';
 import { SummaryMetrics } from './components/SummaryMetrics';
 import { CampaignTable } from './components/CampaignTable';
 import { Pagination } from './components/Pagination';
+import { DataCacheContext } from '../contexts/DataCacheContext';
+import { areDateRangesEqual } from '../utils';
 
 const styles: { [key: string]: React.CSSProperties } = {
     container: {
@@ -79,20 +81,14 @@ const styles: { [key: string]: React.CSSProperties } = {
 const ITEMS_PER_PAGE = 20;
 type SortableKeys = keyof CampaignWithMetrics;
 
-// Moved the date range initialization to a separate function for clarity and robustness.
-// This function will be used as a lazy initializer for the useState hook.
 const getInitialDateRange = () => {
     const end = new Date();
     const start = new Date();
-    // Set hours to 0 to ensure the entire day is included
     start.setHours(0, 0, 0, 0);
     end.setHours(23, 59, 59, 999);
-    // By not modifying 'start', the default range is now "Today".
     return { start, end };
 };
 
-// A timezone-safe function to format a date for API queries.
-// This prevents the user's local timezone from shifting the date.
 const formatDateForQuery = (d: Date) => {
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -102,17 +98,18 @@ const formatDateForQuery = (d: Date) => {
 
 
 export function PPCManagementView() {
+    const { cache, setCache } = useContext(DataCacheContext);
+
     const [profiles, setProfiles] = useState<Profile[]>([]);
-    const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-    const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-    const [performanceMetrics, setPerformanceMetrics] = useState<Record<number, CampaignStreamMetrics>>({});
-    const [loading, setLoading] = useState({ profiles: true, data: false });
+    const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
+        localStorage.getItem('selectedProfileId') || null
+    );
+    const [campaigns, setCampaigns] = useState<Campaign[]>(cache.ppcManagement.campaigns || []);
+    const [performanceMetrics, setPerformanceMetrics] = useState<Record<number, CampaignStreamMetrics>>(cache.ppcManagement.performanceMetrics || {});
+    const [loading, setLoading] = useState({ profiles: true, data: true });
     const [error, setError] = useState<string | null>(null);
     
-    // Using a lazy initializer for the dateRange state. This is a React best practice
-    // that ensures this calculation runs ONLY ONCE when the component first mounts.
-    // This fixes the bug where the component could default to an incorrect date range.
-    const [dateRange, setDateRange] = useState(getInitialDateRange);
+    const [dateRange, setDateRange] = useState(cache.ppcManagement.dateRange || getInitialDateRange);
     const [isDatePickerOpen, setDatePickerOpen] = useState(false);
 
     const [currentPage, setCurrentPage] = useState(1);
@@ -134,7 +131,9 @@ export function PPCManagementView() {
                 setProfiles(usProfiles);
                 if (usProfiles.length > 0) {
                     const storedProfileId = localStorage.getItem('selectedProfileId');
-                    const profileIdToSet = storedProfileId && usProfiles.find((p: Profile) => p.profileId === storedProfileId) ? storedProfileId : usProfiles[0].profileId;
+                    const profileIdToSet = storedProfileId && usProfiles.find((p: Profile) => p.profileId.toString() === storedProfileId) 
+                        ? storedProfileId 
+                        : usProfiles[0].profileId.toString();
                     setSelectedProfileId(profileIdToSet);
                 }
             } catch (err) {
@@ -157,7 +156,6 @@ export function PPCManagementView() {
         const formattedEndDate = formatDateForQuery(dateRange.end);
 
         try {
-            // Step 1: Fetch metrics and the initial list of campaigns in parallel.
             const metricsPromise = fetch(`/api/stream/campaign-metrics?startDate=${formattedStartDate}&endDate=${formattedEndDate}`);
             const initialCampaignsPromise = fetch('/api/amazon/campaigns/list', {
                 method: 'POST',
@@ -170,14 +168,8 @@ export function PPCManagementView() {
             
             const [metricsResponse, initialCampaignsResponse] = await Promise.all([metricsPromise, initialCampaignsPromise]);
 
-            if (!metricsResponse.ok) {
-                const errorData = await metricsResponse.json();
-                throw new Error(errorData.error || 'Failed to fetch performance metrics.');
-            }
-            if (!initialCampaignsResponse.ok) {
-                const errorData = await initialCampaignsResponse.json();
-                throw new Error(errorData.message || 'Failed to fetch initial campaigns.');
-            }
+            if (!metricsResponse.ok) throw new Error((await metricsResponse.json()).error || 'Failed to fetch performance metrics.');
+            if (!initialCampaignsResponse.ok) throw new Error((await initialCampaignsResponse.json()).message || 'Failed to fetch initial campaigns.');
 
             const metricsData: CampaignStreamMetrics[] = await metricsResponse.json() || [];
             const initialCampaignsResult = await initialCampaignsResponse.json();
@@ -189,7 +181,6 @@ export function PPCManagementView() {
                 .filter(id => !existingCampaignIds.has(id));
 
             if (missingCampaignIds.length > 0) {
-                console.log(`Found ${missingCampaignIds.length} campaigns with metrics but missing metadata. Fetching...`);
                 const missingCampaignsResponse = await fetch('/api/amazon/campaigns/list', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -202,10 +193,7 @@ export function PPCManagementView() {
 
                 if (missingCampaignsResponse.ok) {
                     const missingCampaignsData = await missingCampaignsResponse.json();
-                    const fetchedMissingCampaigns = missingCampaignsData.campaigns || [];
-                    allCampaigns = [...allCampaigns, ...fetchedMissingCampaigns];
-                } else {
-                    console.warn(`Failed to fetch metadata for ${missingCampaignIds.length} campaigns by ID.`);
+                    allCampaigns = [...allCampaigns, ...(missingCampaignsData.campaigns || [])];
                 }
             }
             
@@ -216,6 +204,16 @@ export function PPCManagementView() {
 
             setCampaigns(allCampaigns);
             setPerformanceMetrics(metricsMap);
+            // Update the global cache
+            setCache(prev => ({
+                ...prev,
+                ppcManagement: {
+                    campaigns: allCampaigns,
+                    performanceMetrics: metricsMap,
+                    profileId: selectedProfileId,
+                    dateRange: dateRange,
+                }
+            }));
 
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to fetch data.');
@@ -224,12 +222,29 @@ export function PPCManagementView() {
         } finally {
             setLoading(prev => ({ ...prev, data: false }));
         }
-    }, [selectedProfileId, dateRange]);
+    }, [selectedProfileId, dateRange, setCache]);
 
 
     useEffect(() => {
+        if (!selectedProfileId) {
+             setLoading(prev => ({ ...prev, data: false }));
+             return;
+        }
+
+        // Check if data for the current filters is already in the cache
+        if (
+            cache.ppcManagement.profileId === selectedProfileId &&
+            areDateRangesEqual(cache.ppcManagement.dateRange, dateRange) &&
+            cache.ppcManagement.campaigns.length > 0
+        ) {
+            setCampaigns(cache.ppcManagement.campaigns);
+            setPerformanceMetrics(cache.ppcManagement.performanceMetrics);
+            setLoading(prev => ({ ...prev, data: false }));
+            return; // Skip fetch
+        }
+
         fetchData();
-    }, [fetchData]);
+    }, [selectedProfileId, dateRange, fetchData, cache]);
 
     useEffect(() => {
         if (selectedProfileId) {
@@ -260,6 +275,8 @@ export function PPCManagementView() {
                 body: JSON.stringify({ profileId: selectedProfileId, updates: [{ campaignId, ...update }] }),
             });
             if (!response.ok) throw new Error('Failed to update campaign.');
+             // On success, invalidate the cache so fresh data is pulled next time
+            setCache(prev => ({...prev, ppcManagement: { ...prev.ppcManagement, campaigns: [] }}));
         } catch (err)
         {
             setError(err instanceof Error ? err.message : 'Update failed.');

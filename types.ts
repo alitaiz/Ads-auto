@@ -111,3 +111,36 @@ export interface SPFilterOptions {
     asins: string[];
     dates: string[];
 }
+
+// --- Types for Data Caching ---
+
+export interface PPCManagementCache {
+  campaigns: Campaign[];
+  performanceMetrics: Record<number, CampaignStreamMetrics>;
+  profileId: string | null;
+  dateRange: { start: Date; end: Date } | null;
+}
+
+export interface SPSearchTermsCache {
+    data: SPSearchTermReportData[];
+    filters: {
+        asin: string;
+        startDate: string;
+        endDate: string;
+    } | null;
+}
+
+export interface SalesAndTrafficCache {
+    data: SalesAndTrafficData[];
+    filters: {
+        asin: string;
+        date: string;
+    } | null;
+}
+
+
+export interface AppDataCache {
+    ppcManagement: PPCManagementCache;
+    spSearchTerms: SPSearchTermsCache;
+    salesAndTraffic: SalesAndTrafficCache;
+}

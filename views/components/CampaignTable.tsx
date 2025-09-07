@@ -13,6 +13,7 @@ const styles: { [key: string]: React.CSSProperties } = {
     table: {
         width: '100%',
         borderCollapse: 'collapse',
+        tableLayout: 'fixed', // Important for resizing
     },
     th: {
         padding: '12px 15px',
@@ -21,10 +22,22 @@ const styles: { [key: string]: React.CSSProperties } = {
         backgroundColor: '#f8f9fa',
         fontWeight: 600,
         cursor: 'pointer',
+        position: 'relative', // For resize handle and sort icon
+        whiteSpace: 'nowrap',
+    },
+    thResizable: {
+        resize: 'horizontal',
+        overflow: 'hidden',
+    },
+    sortIcon: {
+        marginLeft: '5px',
     },
     td: {
         padding: '12px 15px',
         borderBottom: '1px solid var(--border-color)',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
     },
     link: {
         textDecoration: 'none',
@@ -47,12 +60,38 @@ const styles: { [key: string]: React.CSSProperties } = {
     }
 };
 
+type SortableKeys = keyof CampaignWithMetrics;
+
 interface CampaignTableProps {
     campaigns: CampaignWithMetrics[];
     onUpdateCampaign: (campaignId: number, update: { state?: CampaignState; budget?: { amount: number } }) => void;
+    sortConfig: { key: SortableKeys; direction: 'ascending' | 'descending' } | null;
+    onRequestSort: (key: SortableKeys) => void;
 }
 
-export function CampaignTable({ campaigns, onUpdateCampaign }: CampaignTableProps) {
+const SortableHeader = ({
+    label,
+    sortKey,
+    sortConfig,
+    onRequestSort,
+}: {
+    label: string,
+    sortKey: SortableKeys,
+    sortConfig: CampaignTableProps['sortConfig'],
+    onRequestSort: CampaignTableProps['onRequestSort'],
+}) => {
+    const isSorted = sortConfig?.key === sortKey;
+    const directionIcon = sortConfig?.direction === 'ascending' ? '▲' : '▼';
+
+    return (
+        <th style={{...styles.th, ...styles.thResizable}} onClick={() => onRequestSort(sortKey)}>
+            {label}
+            {isSorted && <span style={styles.sortIcon}>{directionIcon}</span>}
+        </th>
+    );
+};
+
+export function CampaignTable({ campaigns, onUpdateCampaign, sortConfig, onRequestSort }: CampaignTableProps) {
     const [editingCell, setEditingCell] = useState<{ id: number; field: 'state' | 'budget' } | null>(null);
     const [tempValue, setTempValue] = useState<string | number>('');
 
@@ -93,25 +132,37 @@ export function CampaignTable({ campaigns, onUpdateCampaign }: CampaignTableProp
     return (
         <div style={styles.tableContainer}>
             <table style={styles.table}>
+                <colgroup>
+                    <col style={{ width: '25%' }} />
+                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '9%' }} />
+                    <col style={{ width: '9%' }} />
+                    <col style={{ width: '9%' }} />
+                    <col style={{ width: '9%' }} />
+                    <col style={{ width: '9%' }} />
+                    <col style={{ width: '5%' }} />
+                    <col style={{ width: '5%' }} />
+                </colgroup>
                 <thead>
                     <tr>
-                        <th style={styles.th}>Campaign Name</th>
-                        <th style={styles.th}>Status</th>
-                        <th style={styles.th}>Daily Budget</th>
-                        <th style={styles.th}>Spend</th>
-                        <th style={styles.th}>Sales</th>
-                        <th style={styles.th}>Orders</th>
-                        <th style={styles.th}>Impressions</th>
-                        <th style={styles.th}>Clicks</th>
-                        <th style={styles.th}>ACoS</th>
-                        <th style={styles.th}>RoAS</th>
+                        <SortableHeader label="Campaign Name" sortKey="name" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="Status" sortKey="state" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="Daily Budget" sortKey="dailyBudget" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="Spend" sortKey="spend" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="Sales" sortKey="sales" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="Orders" sortKey="orders" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="Impressions" sortKey="impressions" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="Clicks" sortKey="clicks" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="ACoS" sortKey="acos" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="RoAS" sortKey="roas" sortConfig={sortConfig} onRequestSort={onRequestSort} />
                     </tr>
                 </thead>
                 <tbody>
                     {campaigns.map(campaign => (
                         <tr key={campaign.campaignId}>
-                            <td style={styles.td}>
-                                <Link to={`/campaigns/${campaign.campaignId}/adgroups`} style={styles.link}>
+                            <td style={styles.td} title={campaign.name}>
+                                <Link to={`/campaigns/${campaign.campaignId}/adgroups`} state={{ campaignName: campaign.name }} style={styles.link}>
                                     {campaign.name}
                                 </Link>
                             </td>

@@ -27,6 +27,7 @@ const styles: { [key: string]: React.CSSProperties } = {
         display: 'flex',
         alignItems: 'center',
         gap: '20px',
+        flexWrap: 'wrap',
     },
     profileSelector: {
         padding: '8px 12px',
@@ -34,6 +35,13 @@ const styles: { [key: string]: React.CSSProperties } = {
         border: '1px solid var(--border-color)',
         fontSize: '1rem',
         minWidth: '200px',
+    },
+    searchInput: {
+        padding: '8px 12px',
+        borderRadius: '4px',
+        border: '1px solid var(--border-color)',
+        fontSize: '1rem',
+        minWidth: '250px',
     },
     loader: {
         textAlign: 'center',
@@ -49,6 +57,7 @@ const styles: { [key: string]: React.CSSProperties } = {
 };
 
 const ITEMS_PER_PAGE = 20;
+type SortableKeys = keyof CampaignWithMetrics;
 
 export function PPCManagementView() {
     const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -58,7 +67,6 @@ export function PPCManagementView() {
     const [loading, setLoading] = useState({ profiles: true, campaigns: false, metrics: false });
     const [error, setError] = useState<string | null>(null);
     
-    // Default to last 7 days
     const today = new Date();
     const lastWeek = new Date(today);
     lastWeek.setDate(today.getDate() - 7);
@@ -66,10 +74,12 @@ export function PPCManagementView() {
     
     const [startDate, setStartDate] = useState(formatDate(lastWeek));
     const [endDate, setEndDate] = useState(formatDate(today));
-
     const [currentPage, setCurrentPage] = useState(1);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' } | null>({ key: 'spend', direction: 'descending' });
 
-    // Fetch profiles on mount
+
+    // Fetch profiles on mount, filtering for US market
     useEffect(() => {
         const fetchProfiles = async () => {
             try {
@@ -78,10 +88,12 @@ export function PPCManagementView() {
                 const response = await fetch('/api/amazon/profiles');
                 if (!response.ok) throw new Error('Failed to fetch profiles.');
                 const data = await response.json();
-                setProfiles(data);
-                if (data.length > 0) {
-                    const storedProfileId = sessionStorage.getItem('selectedProfileId');
-                    const profileIdToSet = storedProfileId && data.find((p: Profile) => p.profileId === storedProfileId) ? storedProfileId : data[0].profileId;
+                const usProfiles = data.filter((p: Profile) => p.countryCode === 'US');
+
+                setProfiles(usProfiles);
+                if (usProfiles.length > 0) {
+                    const storedProfileId = localStorage.getItem('selectedProfileId');
+                    const profileIdToSet = storedProfileId && usProfiles.find((p: Profile) => p.profileId === storedProfileId) ? storedProfileId : usProfiles[0].profileId;
                     setSelectedProfileId(profileIdToSet);
                 }
             } catch (err) {
@@ -93,36 +105,44 @@ export function PPCManagementView() {
         fetchProfiles();
     }, []);
 
-    // Fetch campaigns and metrics when profile or date range changes
+    // Fetch metrics first, then campaign details for campaigns with metrics
     const fetchData = useCallback(async () => {
         if (!selectedProfileId) return;
 
         setLoading(prev => ({ ...prev, campaigns: true, metrics: true }));
         setError(null);
+        setCampaigns([]);
+        setMetrics([]);
         setCurrentPage(1);
 
         try {
-            // Fetch campaigns
-            const campaignsResponse = await fetch('/api/amazon/campaigns/list', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ profileId: selectedProfileId }),
-            });
-            if (!campaignsResponse.ok) throw new Error('Failed to fetch campaigns.');
-            const campaignsData = await campaignsResponse.json();
-            setCampaigns(campaignsData.campaigns || []);
-            setLoading(prev => ({ ...prev, campaigns: false }));
-            
-            // Fetch metrics
+            // Step 1: Fetch metrics from our local DB
             const metricsResponse = await fetch(`/api/stream/campaign-metrics?startDate=${startDate}&endDate=${endDate}`);
             if (!metricsResponse.ok) throw new Error('Failed to fetch metrics.');
-            const metricsData = await metricsResponse.json();
+            const metricsData: CampaignStreamMetrics[] = await metricsResponse.json();
             setMetrics(metricsData || []);
             setLoading(prev => ({ ...prev, metrics: false }));
 
+            // Step 2: If we have metrics, fetch campaign details only for those campaigns
+            if (metricsData && metricsData.length > 0) {
+                const campaignIdFilter = metricsData.map(m => m.campaignId);
+                
+                const campaignsResponse = await fetch('/api/amazon/campaigns/list', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ profileId: selectedProfileId, campaignIdFilter }),
+                });
+                if (!campaignsResponse.ok) throw new Error('Failed to fetch campaign details.');
+                const campaignsData = await campaignsResponse.json();
+                setCampaigns(campaignsData.campaigns || []);
+            } else {
+                setCampaigns([]); // No metrics, so no campaigns to show
+            }
+
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to fetch data.');
-            setLoading({ profiles: false, campaigns: false, metrics: false });
+        } finally {
+             setLoading({ profiles: false, campaigns: false, metrics: false });
         }
     }, [selectedProfileId, startDate, endDate]);
 
@@ -132,13 +152,12 @@ export function PPCManagementView() {
 
     useEffect(() => {
         if (selectedProfileId) {
-            sessionStorage.setItem('selectedProfileId', selectedProfileId);
+            localStorage.setItem('selectedProfileId', selectedProfileId);
         }
     }, [selectedProfileId]);
     
     const handleUpdateCampaign = async (campaignId: number, update: any) => {
         const originalCampaigns = [...campaigns];
-        // Optimistic UI update
         setCampaigns(prev => prev.map(c => c.campaignId === campaignId ? { ...c, ...(update.budget ? {dailyBudget: update.budget.amount} : update) } : c));
 
         try {
@@ -155,7 +174,7 @@ export function PPCManagementView() {
     };
 
     const combinedCampaignData: CampaignWithMetrics[] = useMemo(() => {
-        return campaigns.map(campaign => {
+        let combined = campaigns.map(campaign => {
             const campaignMetrics = metrics.find(m => m.campaignId === campaign.campaignId);
             const spend = campaignMetrics?.spend ?? 0;
             const sales = campaignMetrics?.sales ?? 0;
@@ -173,7 +192,30 @@ export function PPCManagementView() {
                 cpc: clicks > 0 ? spend / clicks : 0,
             };
         });
-    }, [campaigns, metrics]);
+
+        // Apply search filter
+        if (searchTerm) {
+            combined = combined.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
+        }
+
+        // Apply sorting
+        if (sortConfig !== null) {
+            combined.sort((a, b) => {
+                const aValue = a[sortConfig.key] ?? 0;
+                const bValue = b[sortConfig.key] ?? 0;
+
+                if (aValue < bValue) {
+                    return sortConfig.direction === 'ascending' ? -1 : 1;
+                }
+                if (aValue > bValue) {
+                    return sortConfig.direction === 'ascending' ? 1 : -1;
+                }
+                return 0;
+            });
+        }
+        
+        return combined;
+    }, [campaigns, metrics, searchTerm, sortConfig]);
     
     const summaryMetrics: SummaryMetricsData | null = useMemo(() => {
         if (loading.metrics) return null;
@@ -203,11 +245,26 @@ export function PPCManagementView() {
     
     const totalPages = Math.ceil(combinedCampaignData.length / ITEMS_PER_PAGE);
 
+    const requestSort = (key: SortableKeys) => {
+        let direction: 'ascending' | 'descending' = 'ascending';
+        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'ascending') {
+            direction = 'descending';
+        }
+        setSortConfig({ key, direction });
+    };
+
     return (
         <div style={styles.container}>
             <header style={styles.header}>
                 <h1 style={styles.title}>PPC Management Dashboard</h1>
                 <div style={styles.controls}>
+                    <input
+                        type="text"
+                        placeholder="Search by campaign name..."
+                        style={styles.searchInput}
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                    />
                     <DateRangePicker
                         startDate={startDate}
                         endDate={endDate}
@@ -225,7 +282,7 @@ export function PPCManagementView() {
                         ) : profiles.length > 0 ? (
                             profiles.map(p => <option key={p.profileId} value={p.profileId}>{p.profileId} ({p.countryCode})</option>)
                         ) : (
-                            <option>No profiles found</option>
+                            <option>No US profiles found</option>
                         )}
                     </select>
                 </div>
@@ -237,9 +294,14 @@ export function PPCManagementView() {
             
             {loading.campaigns || loading.metrics ? (
                 <div style={styles.loader}>Loading campaign data...</div>
-            ) : combinedCampaignData.length > 0 ? (
+            ) : combinedCampaignData.length > 0 || searchTerm ? (
                 <>
-                    <CampaignTable campaigns={paginatedCampaigns} onUpdateCampaign={handleUpdateCampaign} />
+                    <CampaignTable 
+                        campaigns={paginatedCampaigns} 
+                        onUpdateCampaign={handleUpdateCampaign}
+                        sortConfig={sortConfig}
+                        onRequestSort={requestSort}
+                    />
                     <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
                 </>
             ) : (

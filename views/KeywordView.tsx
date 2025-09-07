@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { Keyword } from '../types';
 import { formatPrice } from '../utils';
 
@@ -71,8 +71,11 @@ const styles: { [key: string]: React.CSSProperties } = {
 
 export function KeywordView() {
     const { adGroupId } = useParams<{ adGroupId: string }>();
+    const location = useLocation();
+    
     const [keywords, setKeywords] = useState<Keyword[]>([]);
-    const [adGroupName, setAdGroupName] = useState('');
+    const [adGroupName, setAdGroupName] = useState(location.state?.adGroupName || `Ad Group ${adGroupId}`);
+    const [campaignName, setCampaignName] = useState(location.state?.campaignName || '...');
     const [campaignId, setCampaignId] = useState<number | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -86,7 +89,7 @@ export function KeywordView() {
         setLoading(true);
         setError(null);
         try {
-            const profileId = sessionStorage.getItem('selectedProfileId');
+            const profileId = localStorage.getItem('selectedProfileId');
             if (!profileId) throw new Error("Profile ID not found.");
 
             const response = await fetch(`/api/amazon/adgroups/${adGroupId}/keywords`, {
@@ -101,14 +104,20 @@ export function KeywordView() {
             }
             const data = await response.json();
             setKeywords(data.keywords);
-            setAdGroupName(data.adGroupName || `Ad Group ${adGroupId}`);
             setCampaignId(data.campaignId || null);
+            
+            // Set names from router state if available, otherwise use API response as fallback
+            if(location.state?.adGroupName) setAdGroupName(location.state.adGroupName);
+            else if (data.adGroupName) setAdGroupName(data.adGroupName);
+            
+             if(location.state?.campaignName) setCampaignName(location.state.campaignName);
+
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An unknown error occurred.');
         } finally {
             setLoading(false);
         }
-    }, [adGroupId]);
+    }, [adGroupId, location.state]);
 
     useEffect(() => {
         fetchKeywords();
@@ -119,7 +128,7 @@ export function KeywordView() {
         setKeywords(prev => prev.map(k => k.keywordId === keywordId ? { ...k, ...updatePayload } : k));
 
         try {
-            const profileId = sessionStorage.getItem('selectedProfileId');
+            const profileId = localStorage.getItem('selectedProfileId');
             const response = await fetch('/api/amazon/keywords', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -127,8 +136,6 @@ export function KeywordView() {
             });
 
             if (!response.ok) throw new Error('Failed to update keyword.');
-            // Optionally re-fetch to confirm
-            // fetchKeywords();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Update failed.');
             setKeywords(originalKeywords); // Revert on failure
@@ -165,11 +172,11 @@ export function KeywordView() {
                 {campaignId && (
                      <>
                         {' > '}
-                        <Link to={`/campaigns/${campaignId}/adgroups`} style={styles.link}>Ad Groups</Link>
+                        <Link to={`/campaigns/${campaignId}/adgroups`} state={{ campaignName: campaignName }} style={styles.link}>{campaignName}</Link>
                      </>
                 )}
                  {' > '}
-                <span>{loading ? '...' : adGroupName}</span>
+                <span>{adGroupName}</span>
             </div>
             <header style={styles.header}>
                 <h1 style={styles.title}>Keywords</h1>

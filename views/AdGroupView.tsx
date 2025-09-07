@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { AdGroup } from '../types';
 import { formatPrice } from '../utils';
 
@@ -65,8 +65,10 @@ const styles: { [key: string]: React.CSSProperties } = {
 
 export function AdGroupView() {
     const { campaignId } = useParams<{ campaignId: string }>();
+    const location = useLocation();
+    
     const [adGroups, setAdGroups] = useState<AdGroup[]>([]);
-    const [campaignName, setCampaignName] = useState('');
+    const [campaignName, setCampaignName] = useState(location.state?.campaignName || `Campaign ${campaignId}`);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -77,9 +79,7 @@ export function AdGroupView() {
             setLoading(true);
             setError(null);
             try {
-                // We need the profileId for the API call. We can store it in sessionStorage or localStorage
-                // when it's selected in the main view, or pass it via state. For simplicity, we assume it's stored.
-                const profileId = sessionStorage.getItem('selectedProfileId');
+                const profileId = localStorage.getItem('selectedProfileId');
                 if (!profileId) {
                     throw new Error("Profile ID not found. Please select a profile on the main page first.");
                 }
@@ -96,8 +96,14 @@ export function AdGroupView() {
                 }
                 const data = await response.json();
                 setAdGroups(data.adGroups);
-                // Assuming the campaign name is passed back for context
-                setCampaignName(data.campaignName || `Campaign ${campaignId}`);
+
+                // If campaign name wasn't passed in state, we use the fallback. 
+                // A better approach would be to fetch campaign details if state is null.
+                if (!location.state?.campaignName) {
+                    // Placeholder for fetching campaign name if needed
+                    console.log("Campaign name not passed in state, using fallback.");
+                }
+
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'An unknown error occurred.');
             } finally {
@@ -106,23 +112,14 @@ export function AdGroupView() {
         };
 
         fetchAdGroups();
-    }, [campaignId]);
-    
-    // Store selectedProfileId in sessionStorage when it changes on the main view
-    // This is a simplified way to pass state between views without a complex state manager
-    // In PPCManagementView, add:
-    // useEffect(() => {
-    //   if (selectedProfileId) {
-    //     sessionStorage.setItem('selectedProfileId', selectedProfileId);
-    //   }
-    // }, [selectedProfileId]);
+    }, [campaignId, location.state]);
 
     return (
         <div style={styles.container}>
             <div style={styles.breadcrumb}>
                 <Link to="/campaigns" style={styles.link}>Campaigns</Link>
                 {' > '}
-                <span>{loading ? '...' : campaignName}</span>
+                <span>{campaignName}</span>
             </div>
             <header style={styles.header}>
                 <h1 style={styles.title}>Ad Groups</h1>
@@ -146,7 +143,11 @@ export function AdGroupView() {
                             {adGroups.length > 0 ? adGroups.map(ag => (
                                 <tr key={ag.adGroupId}>
                                     <td style={styles.td}>
-                                        <Link to={`/adgroups/${ag.adGroupId}/keywords`} style={styles.link}>
+                                        <Link 
+                                            to={`/adgroups/${ag.adGroupId}/keywords`} 
+                                            state={{ adGroupName: ag.name, campaignName: campaignName }}
+                                            style={styles.link}
+                                        >
                                             {ag.name}
                                         </Link>
                                     </td>

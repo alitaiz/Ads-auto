@@ -162,8 +162,32 @@ export function PPCManagementView() {
             
             const metricsData: CampaignStreamMetrics[] = (await metricsResponse.json()) || [];
             const campaignsResult = await campaignsResponse.json();
-            const allCampaigns: Campaign[] = campaignsResult.campaigns || [];
+            let allCampaigns: Campaign[] = campaignsResult.campaigns || [];
             
+            // Identify campaigns with metrics but missing from the primary API call
+            const primaryCampaignIds = new Set(allCampaigns.map(c => c.campaignId));
+            const metricCampaignIds = new Set(metricsData.map(m => m.campaignId));
+            const missingCampaignIds = [...metricCampaignIds].filter(id => !primaryCampaignIds.has(id));
+
+            if (missingCampaignIds.length > 0) {
+                 console.log(`Found ${missingCampaignIds.length} campaigns with metrics but no metadata. Fetching...`);
+                 const missingCampaignsResponse = await fetch('/api/amazon/campaigns/list', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        profileId: selectedProfileId,
+                        stateFilter: ["ENABLED", "PAUSED", "ARCHIVED"], // Fetch all states for these specific IDs
+                        campaignIdFilter: missingCampaignIds
+                    }),
+                });
+                if (missingCampaignsResponse.ok) {
+                    const missingData = await missingCampaignsResponse.json();
+                    allCampaigns = [...allCampaigns, ...(missingData.campaigns || [])];
+                } else {
+                     console.warn('Failed to fetch metadata for campaigns that had metrics.');
+                }
+            }
+
             setCampaigns(allCampaigns);
             setMetrics(metricsData);
 
@@ -235,13 +259,19 @@ export function PPCManagementView() {
                 cpc: clicks > 0 ? spend / clicks : 0,
             };
         });
+        
+        // Apply frontend filters for consistency after merging data sources
+        let finalData = combined;
+        if (statusFilter !== 'all') {
+            finalData = finalData.filter(c => c.state === statusFilter);
+        }
 
         if (searchTerm) {
-            combined = combined.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
+            finalData = finalData.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
         }
 
         if (sortConfig !== null) {
-            combined.sort((a, b) => {
+            finalData.sort((a, b) => {
                 const aValue = a[sortConfig.key] ?? 0;
                 const bValue = b[sortConfig.key] ?? 0;
 
@@ -251,11 +281,12 @@ export function PPCManagementView() {
             });
         }
         
-        return combined;
-    }, [campaigns, metrics, searchTerm, sortConfig]);
+        return finalData;
+    }, [campaigns, metrics, searchTerm, sortConfig, statusFilter]);
     
     const summaryMetrics: SummaryMetricsData | null = useMemo(() => {
         if (loading.data) return null;
+        // The summary should be based on the final filtered data being displayed
         const total = combinedCampaignData.reduce((acc, campaign) => {
             acc.spend += campaign.spend || 0;
             acc.sales += campaign.sales || 0;

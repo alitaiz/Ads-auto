@@ -9,7 +9,7 @@
 --
 -- The primary key is a composite of several fields to ensure that each record
 -- representing a unique combination of date, campaign, ad group, search term,
-- - and targeting is stored only once.
+-- and targeting is stored only once.
 
 CREATE TABLE IF NOT EXISTS sponsored_products_search_term_report (
     id SERIAL PRIMARY KEY,

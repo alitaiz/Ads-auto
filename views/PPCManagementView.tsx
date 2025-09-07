@@ -84,7 +84,6 @@ export function PPCManagementView() {
     const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [metrics, setMetrics] = useState<CampaignStreamMetrics[]>([]);
-    const [campaignNameMap, setCampaignNameMap] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState({ profiles: true, data: false });
     const [error, setError] = useState<string | null>(null);
     
@@ -129,7 +128,7 @@ export function PPCManagementView() {
     const fetchData = useCallback(async () => {
         if (!selectedProfileId) return;
 
-        setLoading({ ...loading, data: true });
+        setLoading(prev => ({ ...prev, data: true }));
         setError(null);
         setCurrentPage(1);
 
@@ -138,54 +137,42 @@ export function PPCManagementView() {
         const formattedEndDate = formatDate(dateRange.end);
 
         try {
-            // Fetch metrics, names, and initial campaign list in parallel for efficiency
-            const metricsPromise = fetch(`/api/stream/campaign-metrics?startDate=${formattedStartDate}&endDate=${formattedEndDate}`);
-            const namesPromise = fetch('/api/ppc/campaign-names');
-            
-            const [metricsResponse, namesResponse] = await Promise.all([metricsPromise, namesPromise]);
-
-            if (!metricsResponse.ok) throw new Error('Failed to fetch performance metrics.');
-            const metricsData: CampaignStreamMetrics[] = (await metricsResponse.json()) || [];
-            setMetrics(metricsData);
-
-            if (namesResponse.ok) {
-                setCampaignNameMap(await namesResponse.json());
-            } else {
-                console.warn('Could not fetch historical campaign names.');
-                setCampaignNameMap({});
-            }
-
-            // If there's no performance data, we don't need to fetch metadata.
-            if (metricsData.length === 0) {
-                setCampaigns([]);
-                return;
-            }
-
-            const campaignIdsFromMetrics = [...new Set(metricsData.map(m => m.campaignId))];
-
-            const campaignsResponse = await fetch('/api/amazon/campaigns/list', {
+            // Fetch all campaigns and metrics in parallel for efficiency.
+            // Getting all campaigns upfront ensures we have metadata for any campaign with metrics.
+            const campaignsPromise = fetch('/api/amazon/campaigns/list', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     profileId: selectedProfileId,
                     stateFilter: ["ENABLED", "PAUSED", "ARCHIVED"],
-                    campaignIdFilter: campaignIdsFromMetrics
                 }),
             });
 
-            if (campaignsResponse.ok) {
-                const campaignsResult = await campaignsResponse.json();
-                setCampaigns(campaignsResult.campaigns || []);
-            } else {
-                console.warn('Failed to fetch campaign metadata. Campaigns may be missing names.');
-                setCampaigns([]);
+            const metricsPromise = fetch(`/api/stream/campaign-metrics?startDate=${formattedStartDate}&endDate=${formattedEndDate}`);
+            
+            const [campaignsResponse, metricsResponse] = await Promise.all([campaignsPromise, metricsPromise]);
+
+            if (!campaignsResponse.ok) {
+                const errorData = await campaignsResponse.json();
+                throw new Error(errorData.message || 'Failed to fetch campaigns.');
             }
+            if (!metricsResponse.ok) {
+                const errorData = await metricsResponse.json();
+                throw new Error(errorData.error || 'Failed to fetch performance metrics.');
+            }
+
+            const campaignsResult = await campaignsResponse.json();
+            setCampaigns(campaignsResult.campaigns || []);
+
+            const metricsData: CampaignStreamMetrics[] = (await metricsResponse.json()) || [];
+            setMetrics(metricsData);
+
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to fetch data.');
             setCampaigns([]);
             setMetrics([]);
         } finally {
-            setLoading({ ...loading, data: false });
+            setLoading(prev => ({ ...prev, data: false }));
         }
     }, [selectedProfileId, dateRange]);
 
@@ -231,8 +218,10 @@ export function PPCManagementView() {
     };
 
     const combinedCampaignData: CampaignWithMetrics[] = useMemo(() => {
+        // This is the source of truth for campaign metadata, fetched for the whole profile.
         const campaignMetadataMap = new Map(campaigns.map(c => [c.campaignId, c]));
 
+        // The view is driven by metrics. We only show campaigns that have performance data.
         return metrics.map(metric => {
             const metadata = campaignMetadataMap.get(metric.campaignId);
             const spend = metric.spend ?? 0;
@@ -241,12 +230,14 @@ export function PPCManagementView() {
             const impressions = metric.impressions ?? 0;
             const orders = metric.orders ?? 0;
 
+            // Use live metadata if available, otherwise create a fallback.
+            // This ensures every metric row has a corresponding campaign structure.
             const campaignBase = metadata || {
                 campaignId: metric.campaignId,
-                name: campaignNameMap[metric.campaignId] || `Campaign ${metric.campaignId}`,
+                name: `Campaign ${metric.campaignId}`, // Fallback name for deleted/purged campaigns
                 campaignType: 'sponsoredProducts',
                 targetingType: 'auto',
-                state: 'archived' as CampaignState,
+                state: 'archived' as CampaignState, // Assume archived if no metadata
                 dailyBudget: 0,
                 startDate: 'N/A',
                 endDate: null,
@@ -265,7 +256,7 @@ export function PPCManagementView() {
                 ctr: impressions > 0 ? clicks / impressions : 0,
             };
         });
-    }, [campaigns, metrics, campaignNameMap]);
+    }, [campaigns, metrics]);
     
     const dataForSummary = useMemo(() => {
          if (!searchTerm) return combinedCampaignData;

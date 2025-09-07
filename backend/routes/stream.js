@@ -103,13 +103,15 @@ router.get('/stream/metrics', async (req, res) => {
 });
 
 
-// GET /api/stream/campaign-metrics: Provides aggregated metrics per campaign for a date range.
+// GET /api/stream/campaign-metrics: Provides aggregated metrics per campaign for a date range, now with timezone support.
 router.get('/stream/campaign-metrics', async (req, res) => {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, timezone } = req.query;
 
     if (!startDate || !endDate) {
         return res.status(400).json({ error: 'startDate and endDate query parameters are required.' });
     }
+
+    const client = await pool.connect();
 
     try {
         const query = `
@@ -144,7 +146,20 @@ router.get('/stream/campaign-metrics', async (req, res) => {
             WHERE COALESCE(t.campaign_id_text, c.campaign_id_text) IS NOT NULL;
         `;
         
-        const result = await pool.query(query, [startDate, endDate]);
+        await client.query('BEGIN');
+        
+        if (timezone) {
+            // Basic validation to prevent SQL injection. A real app should use a whitelist of IANA timezones.
+            if (!/^[A-Za-z_\/]+$/.test(timezone)) {
+                throw new Error(`Invalid timezone format: ${timezone}`);
+            }
+            // Set the timezone for the duration of this transaction. This makes the `::date` cast respect the user's selected timezone.
+            await client.query(`SET LOCAL TIME ZONE $1`, [timezone]);
+        }
+        
+        const result = await client.query(query, [startDate, endDate]);
+        
+        await client.query('COMMIT');
         
         const metrics = result.rows
             .map(row => {
@@ -173,8 +188,11 @@ router.get('/stream/campaign-metrics', async (req, res) => {
         res.json(metrics);
 
     } catch (error) {
+        if (client) await client.query('ROLLBACK');
         console.error("[Server] Error fetching campaign stream metrics:", error);
         res.status(500).json({ error: "Could not fetch real-time campaign data." });
+    } finally {
+        if (client) client.release();
     }
 });
 

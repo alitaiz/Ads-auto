@@ -79,17 +79,36 @@ const styles: { [key: string]: React.CSSProperties } = {
 const ITEMS_PER_PAGE = 20;
 type SortableKeys = keyof CampaignWithMetrics;
 
-// Moved the date range initialization to a separate function for clarity and robustness.
-// This function will be used as a lazy initializer for the useState hook.
-const getInitialDateRange = () => {
-    const end = new Date();
-    const start = new Date();
-    // Set hours to 0 to ensure the entire day is included
-    start.setHours(0, 0, 0, 0);
-    end.setHours(23, 59, 59, 999);
-    // By not modifying 'start', the default range is now "Today".
+const timezones = [
+    { value: 'America/New_York', label: 'ET (New York)' },
+    { value: 'America/Chicago', label: 'CT (Chicago)' },
+    { value: 'America/Denver', label: 'MT (Denver)' },
+    { value: 'America/Phoenix', label: 'MST (Phoenix)' },
+    { value: 'America/Los_Angeles', label: 'PT (Los Angeles)' },
+    { value: 'UTC', label: 'UTC' },
+    { value: 'Europe/London', label: 'GMT (London)' },
+    { value: 'Europe/Paris', label: 'CET (Paris)' },
+    { value: 'Asia/Tokyo', label: 'JST (Tokyo)' },
+];
+
+// Gets the start and end Date objects for "Today" in a specific timezone.
+const getInitialDateRangeInTimezone = (timeZone: string) => {
+    const now = new Date();
+    // 'en-CA' locale is a reliable way to get YYYY-MM-DD format
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    });
+    const dateString = formatter.format(now); // e.g., "2024-07-25"
+    // Create Date objects representing the start and end of that day.
+    // The browser will interpret this in its local time, but the date parts (Y,M,D) will be correct.
+    const start = new Date(`${dateString}T00:00:00`);
+    const end = new Date(`${dateString}T23:59:59.999`);
     return { start, end };
 };
+
 
 // A timezone-safe function to format a date for API queries.
 // This prevents the user's local timezone from shifting the date.
@@ -108,11 +127,11 @@ export function PPCManagementView() {
     const [performanceMetrics, setPerformanceMetrics] = useState<Record<number, CampaignStreamMetrics>>({});
     const [loading, setLoading] = useState({ profiles: true, data: false });
     const [error, setError] = useState<string | null>(null);
+    const [timezone, setTimezone] = useState<string>('America/New_York');
     
     // Using a lazy initializer for the dateRange state. This is a React best practice
     // that ensures this calculation runs ONLY ONCE when the component first mounts.
-    // This fixes the bug where the component could default to an incorrect date range.
-    const [dateRange, setDateRange] = useState(getInitialDateRange);
+    const [dateRange, setDateRange] = useState(() => getInitialDateRangeInTimezone(timezone));
     const [isDatePickerOpen, setDatePickerOpen] = useState(false);
 
     const [currentPage, setCurrentPage] = useState(1);
@@ -158,7 +177,7 @@ export function PPCManagementView() {
 
         try {
             // Step 1: Fetch metrics and the initial list of campaigns in parallel.
-            const metricsPromise = fetch(`/api/stream/campaign-metrics?startDate=${formattedStartDate}&endDate=${formattedEndDate}`);
+            const metricsPromise = fetch(`/api/stream/campaign-metrics?startDate=${formattedStartDate}&endDate=${formattedEndDate}&timezone=${timezone}`);
             const initialCampaignsPromise = fetch('/api/amazon/campaigns/list', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -224,7 +243,7 @@ export function PPCManagementView() {
         } finally {
             setLoading(prev => ({ ...prev, data: false }));
         }
-    }, [selectedProfileId, dateRange]);
+    }, [selectedProfileId, dateRange, timezone]);
 
 
     useEffect(() => {
@@ -236,6 +255,11 @@ export function PPCManagementView() {
             localStorage.setItem('selectedProfileId', selectedProfileId);
         }
     }, [selectedProfileId]);
+    
+    // When the timezone changes, reset the date range to "Today" in the new timezone.
+    useEffect(() => {
+        setDateRange(getInitialDateRangeInTimezone(timezone));
+    }, [timezone]);
 
     const handleApplyDateRange = (newRange: { start: Date; end: Date }) => {
         setDateRange(newRange);
@@ -417,6 +441,18 @@ export function PPCManagementView() {
                     />
                 </div>
                 <div style={{...styles.controlGroup, marginLeft: 'auto'}}>
+                    <div style={styles.controlGroup}>
+                         <label htmlFor="timezone-select" style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>Timezone:</label>
+                         <select
+                             id="timezone-select"
+                             style={styles.profileSelector}
+                             value={timezone}
+                             onChange={e => setTimezone(e.target.value)}
+                             disabled={loading.data}
+                         >
+                             {timezones.map(tz => <option key={tz.value} value={tz.value}>{tz.label}</option>)}
+                         </select>
+                     </div>
                      <div style={{ position: 'relative' }}>
                          <button style={styles.dateButton} onClick={() => setDatePickerOpen(o => !o)}>
                            {formatDateRangeDisplay(dateRange.start, dateRange.end)}
@@ -426,6 +462,7 @@ export function PPCManagementView() {
                                 initialRange={dateRange}
                                 onApply={handleApplyDateRange} 
                                 onClose={() => setDatePickerOpen(false)} 
+                                timezone={timezone}
                             />
                         }
                     </div>

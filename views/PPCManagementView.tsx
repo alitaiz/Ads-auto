@@ -179,6 +179,7 @@ export function PPCManagementView() {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     // Fix: Use the correct type for performance metrics.
     const [performanceMetrics, setPerformanceMetrics] = useState<Record<string, CampaignPerformanceMetrics>>({});
+    const [campaignNameMap, setCampaignNameMap] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState({ profiles: true, data: false });
     const [error, setError] = useState<string | null>(null);
 
@@ -237,7 +238,7 @@ export function PPCManagementView() {
         setCurrentPage(1);
 
         try {
-            // Fetch campaigns (metadata) in parallel with metrics
+            // Fetch campaigns (metadata) in parallel with metrics and historical names
             const campaignsPromise = fetch('/api/amazon/campaigns/list', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -246,8 +247,11 @@ export function PPCManagementView() {
 
             // Fetch performance metrics from stream data for today
             const metricsPromise = fetch('/api/stream/campaign-metrics');
+            
+            // Fetch historical campaign names as a fallback
+            const namesPromise = fetch('/api/ppc/campaign-names');
 
-            const [campaignsResponse, metricsResponse] = await Promise.all([campaignsPromise, metricsPromise]);
+            const [campaignsResponse, metricsResponse, namesResponse] = await Promise.all([campaignsPromise, metricsPromise, namesResponse]);
 
             if (!campaignsResponse.ok) {
                 const errorData = await campaignsResponse.json();
@@ -261,6 +265,13 @@ export function PPCManagementView() {
             const campaignsData = await campaignsResponse.json();
             // Fix: Use the correct type for the fetched metrics data.
             const metricsData: CampaignPerformanceMetrics[] = await metricsResponse.json();
+            
+            if (namesResponse.ok) {
+                const namesData = await namesResponse.json();
+                setCampaignNameMap(namesData);
+            } else {
+                console.warn('Could not fetch historical campaign names.');
+            }
 
             setCampaigns(campaignsData.campaigns || []);
 
@@ -332,16 +343,44 @@ export function PPCManagementView() {
     }, [campaigns, selectedProfileId, editingCampaign]);
 
     const campaignsWithMetrics: CampaignWithMetrics[] = useMemo(() => {
-        return campaigns.map(campaign => {
-            const metrics = performanceMetrics[campaign.campaignId];
-            const spend = metrics?.spend ?? 0;
-            const clicks = metrics?.clicks ?? 0;
-            const impressions = metrics?.impressions ?? 0;
-            const sales = metrics?.sales ?? 0;
-            const orders = metrics?.orders ?? 0;
-
+        // Create a Map of all campaigns from the API for O(1) lookup
+        const campaignsFromApi = new Map(campaigns.map(c => [c.campaignId, c]));
+        
+        // Get all unique campaign IDs from both metrics and the API list
+        const allCampaignIds = new Set([
+            ...campaigns.map(c => c.campaignId),
+            ...Object.values(performanceMetrics).map(m => m.campaignId)
+        ]);
+    
+        const combinedCampaigns: CampaignWithMetrics[] = Array.from(allCampaignIds).map(campaignId => {
+            const campaignInfo = campaignsFromApi.get(campaignId);
+            // Fix: Explicitly type `metrics` to allow safe access to its optional properties.
+            const metrics: Partial<CampaignPerformanceMetrics> = performanceMetrics[campaignId] || {};
+    
+            // Use live campaign info if available, otherwise create a placeholder
+            // which conforms to the Campaign interface.
+            const baseCampaign: Campaign = campaignInfo
+                ? campaignInfo
+                : {
+                    campaignId: campaignId,
+                    name: campaignNameMap[String(campaignId)] || `Campaign ${campaignId}`,
+                    campaignType: 'sponsoredProducts',
+                    targetingType: 'unknown',
+                    state: 'archived', // A safe, non-interactive default from EntityState
+                    dailyBudget: 0,
+                    startDate: 'N/A',
+                    endDate: null,
+                    bidding: {},
+                };
+            
+            const spend = metrics.spend ?? 0;
+            const clicks = metrics.clicks ?? 0;
+            const impressions = metrics.impressions ?? 0;
+            const sales = metrics.sales ?? 0;
+            const orders = metrics.orders ?? 0;
+            
             return {
-                ...campaign,
+                ...baseCampaign,
                 impressions,
                 clicks,
                 spend,
@@ -353,7 +392,9 @@ export function PPCManagementView() {
                 roas: spend > 0 ? (sales / spend) : 0,
             };
         });
-    }, [campaigns, performanceMetrics]);
+        
+        return combinedCampaigns;
+    }, [campaigns, performanceMetrics, campaignNameMap]);
 
 
     // Sorting logic

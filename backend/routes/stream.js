@@ -115,10 +115,12 @@ router.get('/stream/metrics', async (req, res) => {
 // Endpoint GET /api/stream/campaign-metrics: Cung cấp các chỉ số tổng hợp theo từng campaign cho "hôm nay".
 router.get('/stream/campaign-metrics', async (req, res) => {
     try {
+        // Fix: Updated JSON field accessors from camelCase to snake_case (e.g., campaignId -> campaign_id)
+        // to match the actual data format provided by the Amazon Marketing Stream.
         const query = `
             WITH traffic_data AS (
                 SELECT
-                    (event_data->>'campaignId') as campaign_id_text,
+                    (event_data->>'campaign_id') as campaign_id_text,
                     COALESCE(SUM((event_data->>'impressions')::bigint), 0) as impressions,
                     COALESCE(SUM((event_data->>'clicks')::bigint), 0) as clicks,
                     COALESCE(SUM((event_data->>'cost')::numeric), 0.00) as spend
@@ -128,9 +130,9 @@ router.get('/stream/campaign-metrics', async (req, res) => {
             ),
             conversion_data AS (
                 SELECT
-                    (event_data->>'campaignId') as campaign_id_text,
-                    COALESCE(SUM((event_data->>'attributedConversions1d')::bigint), 0) as orders,
-                    COALESCE(SUM((event_data->>'attributedSales1d')::numeric), 0.00) as sales
+                    (event_data->>'campaign_id') as campaign_id_text,
+                    COALESCE(SUM((event_data->>'attributed_conversions_1d')::bigint), 0) as orders,
+                    COALESCE(SUM((event_data->>'attributed_sales_1d')::numeric), 0.00) as sales
                 FROM raw_stream_events
                 WHERE event_type = 'sp-conversion' AND received_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')
                 GROUP BY 1

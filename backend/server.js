@@ -4,11 +4,21 @@
 // This MUST be the first thing to run so that all other modules have access to .env variables.
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.resolve(__dirname, '.env') });
+
+// Define the path for the required .env file.
+const envPath = path.resolve(__dirname, '.env');
+
+// Check if the .env file exists and load it.
+let envFileLoaded = false;
+if (fs.existsSync(envPath)) {
+  dotenv.config({ path: envPath });
+  envFileLoaded = true;
+}
 
 // --- Module Imports ---
 import express from 'express';
@@ -55,6 +65,13 @@ app.use((err, req, res, next) => {
 // --- Start Server ---
 const server = app.listen(port, () => {
     console.log(`🚀 Backend server is listening at http://localhost:${port}`);
+    if (envFileLoaded) {
+        console.log(`✅ Successfully loaded environment configuration from '.env' file.`);
+    } else {
+        console.error("❌ FATAL ERROR: The '.env' configuration file was not found in the /backend directory.");
+        console.error('   Please copy ".env.example.txt" to ".env" and fill in your credentials.');
+        process.exit(1);
+    }
     // A simple check on startup to warn if essential environment variables are missing
     if (!process.env.DB_USER || !process.env.ADS_API_CLIENT_ID) {
         console.warn('⚠️ WARNING: Essential environment variables (e.g., DB_USER, ADS_API_CLIENT_ID) are not set. The application may not function correctly.');

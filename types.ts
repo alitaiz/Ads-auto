@@ -1,63 +1,74 @@
 // types.ts
 
-export type EntityState = 'enabled' | 'paused' | 'archived' | 'ended' | 'pendingReview';
-
 export interface Profile {
-    profileId: number;
-    profileType: string;
-    accountInfo: {
-        marketplaceStringId: string;
-        id: string;
-        type: string;
-        name: string;
-    };
-    countryCode: string;
-    timezone: string;
+  profileId: string;
+  countryCode: string;
+  name?: string; // Profiles from /v2/profiles might have more fields
 }
 
+export type CampaignState = 'enabled' | 'paused' | 'archived';
+
 export interface Campaign {
-    campaignId: number;
-    name: string;
-    campaignType: string; // e.g., 'sponsoredProducts'
-    targetingType: string; // e.g., 'auto', 'manual'
-    state: EntityState;
-    dailyBudget: number;
-    startDate: string;
-    endDate?: string | null;
-    bidding?: any;
-    // Performance metrics from stream
-    impressions?: number;
-    clicks?: number;
-    spend?: number;
-    orders?: number;
-    sales?: number;
-    // Calculated metrics
-    ctr?: number;
-    cpc?: number;
-    acos?: number;
-    roas?: number;
+  campaignId: number;
+  name: string;
+  campaignType: 'sponsoredProducts'; // Assuming only SP for now
+  targetingType: 'auto' | 'manual';
+  state: CampaignState;
+  dailyBudget: number;
+  startDate: string;
+  endDate: string | null;
+  bidding?: any; // Bidding strategy can be complex
 }
 
 export interface AdGroup {
-    adGroupId: number;
-    name: string;
-    campaignId: number;
-    defaultBid: number;
-    state: EntityState;
+  adGroupId: number;
+  name: string;
+  campaignId: number;
+  defaultBid: number;
+  state: 'enabled' | 'paused' | 'archived';
 }
 
 export interface Keyword {
-    keywordId: number;
-    adGroupId: number;
+  keywordId: number;
+  adGroupId: number;
+  campaignId: number;
+  keywordText: string;
+  matchType: 'broad' | 'phrase' | 'exact';
+  state: 'enabled' | 'paused' | 'archived';
+  bid?: number;
+}
+
+export interface CampaignStreamMetrics {
     campaignId: number;
-    keywordText: string;
-    matchType: 'broad' | 'phrase' | 'exact';
-    state: EntityState;
-    bid?: number;
-     // Performance metrics will be added later
+    impressions: number;
+    clicks: number;
+    spend: number;
+    orders: number;
+    sales: number;
+}
+
+// Combined type for campaign data and its performance metrics
+export interface CampaignWithMetrics extends Campaign {
     impressions?: number;
     clicks?: number;
     spend?: number;
-    orders?: number;
     sales?: number;
+    orders?: number;
+    acos?: number;
+    roas?: number;
+    cpc?: number;
+    ctr?: number;
+    cvr?: number;
+}
+
+export interface SummaryMetricsData {
+    clicks: number;
+    spend: number;
+    orders: number;
+    sales: number;
+    acos: number;
+    roas: number;
+    cpc: number;
+    ctr: number;
+    impressions: number;
 }

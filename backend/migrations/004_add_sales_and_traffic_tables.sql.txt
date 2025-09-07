@@ -1,0 +1,35 @@
+-- =============================================================================
+-- Migration: Create Sales and Traffic Report Tables
+-- =============================================================================
+--
+-- This script creates two tables to store data from the Amazon Selling Partner API's
+-- "Sales and Traffic Report". This report provides crucial business context,
+-- including organic sales and traffic, which helps in evaluating the overall
+-- performance of products beyond just advertising metrics.
+--
+
+-- Table 1: sales_and_traffic_by_date
+-- Stores aggregated sales and traffic data for the entire account on a given day.
+CREATE TABLE IF NOT EXISTS sales_and_traffic_by_date (
+    report_date DATE PRIMARY KEY,
+    sales_data JSONB, -- Stores the 'salesByDate' object from the report
+    traffic_data JSONB -- Stores the 'trafficByDate' object from the report
+);
+
+-- Table 2: sales_and_traffic_by_asin
+-- Stores sales and traffic data broken down by individual child ASINs for a given day.
+CREATE TABLE IF NOT EXISTS sales_and_traffic_by_asin (
+    id SERIAL PRIMARY KEY,
+    report_date DATE NOT NULL,
+    parent_asin VARCHAR(255),
+    child_asin VARCHAR(255) NOT NULL,
+    sku VARCHAR(255),
+    sales_data JSONB, -- Stores the 'salesByAsin' object from the report
+    traffic_data JSONB, -- Stores the 'trafficByAsin' object from the report
+    -- Ensures that for any given day, a child ASIN and SKU combination is unique.
+    CONSTRAINT unique_sales_traffic_asin_entry UNIQUE (report_date, child_asin, sku)
+);
+
+-- Add indexes to frequently queried columns to improve performance
+CREATE INDEX IF NOT EXISTS idx_sat_asin_report_date ON sales_and_traffic_by_asin(report_date);
+CREATE INDEX IF NOT EXISTS idx_sat_asin_child_asin ON sales_and_traffic_by_asin(child_asin);

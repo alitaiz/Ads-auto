@@ -79,6 +79,19 @@ const styles: { [key: string]: React.CSSProperties } = {
 const ITEMS_PER_PAGE = 20;
 type SortableKeys = keyof CampaignWithMetrics;
 
+// Moved the date range initialization to a separate function for clarity and robustness.
+// This function will be used as a lazy initializer for the useState hook.
+const getInitialDateRange = () => {
+    const end = new Date();
+    const start = new Date();
+    // Set hours to 0 to ensure the entire day is included
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+    // By not modifying 'start', the default range is now "Today".
+    return { start, end };
+};
+
+
 export function PPCManagementView() {
     const [profiles, setProfiles] = useState<Profile[]>([]);
     const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
@@ -87,11 +100,10 @@ export function PPCManagementView() {
     const [loading, setLoading] = useState({ profiles: true, data: false });
     const [error, setError] = useState<string | null>(null);
     
-    const today = new Date();
-    const lastWeek = new Date();
-    lastWeek.setDate(today.getDate() - 7);
-    
-    const [dateRange, setDateRange] = useState({ start: lastWeek, end: today });
+    // Using a lazy initializer for the dateRange state. This is a React best practice
+    // that ensures this calculation runs ONLY ONCE when the component first mounts.
+    // This fixes the bug where the component could default to an incorrect date range.
+    const [dateRange, setDateRange] = useState(getInitialDateRange);
     const [isDatePickerOpen, setDatePickerOpen] = useState(false);
 
     const [currentPage, setCurrentPage] = useState(1);

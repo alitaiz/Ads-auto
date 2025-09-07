@@ -33,3 +33,10 @@ CREATE TABLE IF NOT EXISTS sales_and_traffic_by_asin (
 -- Add indexes to frequently queried columns to improve performance
 CREATE INDEX IF NOT EXISTS idx_sat_asin_report_date ON sales_and_traffic_by_asin(report_date);
 CREATE INDEX IF NOT EXISTS idx_sat_asin_child_asin ON sales_and_traffic_by_asin(child_asin);
+
+-- =============================================================================
+-- Grant Permissions to Application User
+-- =============================================================================
+-- IMPORTANT: Replace 'yourdbuser' with the actual DB_USER from your .env file.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE sales_and_traffic_by_date, sales_and_traffic_by_asin TO yourdbuser;
+GRANT USAGE, SELECT ON SEQUENCE sales_and_traffic_by_asin_id_seq TO yourdbuser;

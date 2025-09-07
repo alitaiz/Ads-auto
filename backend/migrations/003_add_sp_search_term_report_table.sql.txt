@@ -43,3 +43,10 @@ CREATE TABLE IF NOT EXISTS sponsored_products_search_term_report (
 CREATE INDEX IF NOT EXISTS idx_sp_str_report_date ON sponsored_products_search_term_report(report_date);
 CREATE INDEX IF NOT EXISTS idx_sp_str_campaign_id ON sponsored_products_search_term_report(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_sp_str_asin ON sponsored_products_search_term_report(asin);
+
+-- =============================================================================
+-- Grant Permissions to Application User
+-- =============================================================================
+-- IMPORTANT: Replace 'yourdbuser' with the actual DB_USER from your .env file.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE sponsored_products_search_term_report TO yourdbuser;
+GRANT USAGE, SELECT ON SEQUENCE sponsored_products_search_term_report_id_seq TO yourdbuser;

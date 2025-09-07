@@ -240,8 +240,9 @@ export function PPCManagementView() {
         }
     };
 
+    // 1. Combine all campaign metadata with metrics. This is our base dataset.
     const combinedCampaignData: CampaignWithMetrics[] = useMemo(() => {
-        let combined = campaigns.map(campaign => {
+        return campaigns.map(campaign => {
             const campaignMetrics = metrics.find(m => m.campaignId === campaign.campaignId);
             const spend = campaignMetrics?.spend ?? 0;
             const sales = campaignMetrics?.sales ?? 0;
@@ -259,35 +260,18 @@ export function PPCManagementView() {
                 cpc: clicks > 0 ? spend / clicks : 0,
             };
         });
-        
-        // Apply frontend filters for consistency after merging data sources
-        let finalData = combined;
-        if (statusFilter !== 'all') {
-            finalData = finalData.filter(c => c.state === statusFilter);
-        }
-
-        if (searchTerm) {
-            finalData = finalData.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
-        }
-
-        if (sortConfig !== null) {
-            finalData.sort((a, b) => {
-                const aValue = a[sortConfig.key] ?? 0;
-                const bValue = b[sortConfig.key] ?? 0;
-
-                if (aValue < bValue) return sortConfig.direction === 'ascending' ? -1 : 1;
-                if (aValue > bValue) return sortConfig.direction === 'ascending' ? 1 : -1;
-                return 0;
-            });
-        }
-        
-        return finalData;
-    }, [campaigns, metrics, searchTerm, sortConfig, statusFilter]);
+    }, [campaigns, metrics]);
     
+    // 2. Create the dataset for summary calculations (only filter by search term).
+    const dataForSummary = useMemo(() => {
+         if (!searchTerm) return combinedCampaignData;
+         return combinedCampaignData.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
+    }, [combinedCampaignData, searchTerm]);
+
     const summaryMetrics: SummaryMetricsData | null = useMemo(() => {
         if (loading.data) return null;
-        // The summary should be based on the final filtered data being displayed
-        const total = combinedCampaignData.reduce((acc, campaign) => {
+        
+        const total = dataForSummary.reduce((acc, campaign) => {
             acc.spend += campaign.spend || 0;
             acc.sales += campaign.sales || 0;
             acc.orders += campaign.orders || 0;
@@ -303,15 +287,38 @@ export function PPCManagementView() {
             cpc: total.clicks > 0 ? total.spend / total.clicks : 0,
             ctr: total.impressions > 0 ? total.clicks / total.impressions : 0,
         };
-    }, [combinedCampaignData, loading.data]);
+    }, [dataForSummary, loading.data]);
 
+    // 3. Create the final dataset for the table (apply status filter, search term, and sorting).
+    const finalDisplayData: CampaignWithMetrics[] = useMemo(() => {
+        let data = combinedCampaignData;
+
+        if (statusFilter !== 'all') {
+            data = data.filter(c => c.state === statusFilter);
+        }
+        if (searchTerm) {
+            data = data.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
+        }
+
+        if (sortConfig !== null) {
+            data.sort((a, b) => {
+                const aValue = a[sortConfig.key] ?? 0;
+                const bValue = b[sortConfig.key] ?? 0;
+
+                if (aValue < bValue) return sortConfig.direction === 'ascending' ? -1 : 1;
+                if (aValue > bValue) return sortConfig.direction === 'ascending' ? 1 : -1;
+                return 0;
+            });
+        }
+        return data;
+    }, [combinedCampaignData, statusFilter, searchTerm, sortConfig]);
 
     const paginatedCampaigns = useMemo(() => {
         const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-        return combinedCampaignData.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-    }, [combinedCampaignData, currentPage]);
+        return finalDisplayData.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    }, [finalDisplayData, currentPage]);
     
-    const totalPages = Math.ceil(combinedCampaignData.length / ITEMS_PER_PAGE);
+    const totalPages = Math.ceil(finalDisplayData.length / ITEMS_PER_PAGE);
 
     const requestSort = (key: SortableKeys) => {
         let direction: 'ascending' | 'descending' = 'ascending';
@@ -393,7 +400,7 @@ export function PPCManagementView() {
             
             {loading.data ? (
                 <div style={styles.loader}>Loading campaign data...</div>
-            ) : combinedCampaignData.length > 0 || searchTerm ? (
+            ) : finalDisplayData.length > 0 || searchTerm ? (
                 <>
                     <CampaignTable 
                         campaigns={paginatedCampaigns} 

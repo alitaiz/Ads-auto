@@ -137,60 +137,40 @@ export function PPCManagementView() {
         const formattedEndDate = formatDate(dateRange.end);
 
         try {
-            const metricsPromise = fetch(`/api/stream/campaign-metrics?startDate=${formattedStartDate}&endDate=${formattedEndDate}`);
+            // Step 1: Fetch metrics from the stream first. This is our source of truth.
+            const metricsResponse = await fetch(`/api/stream/campaign-metrics?startDate=${formattedStartDate}&endDate=${formattedEndDate}`);
+            if (!metricsResponse.ok) throw new Error('Failed to fetch performance metrics.');
+            const metricsData: CampaignStreamMetrics[] = (await metricsResponse.json()) || [];
             
-            let apiStateFilter: string[];
-            if (statusFilter === 'all') {
-                apiStateFilter = ["ENABLED", "PAUSED", "ARCHIVED"];
-            } else {
-                apiStateFilter = [statusFilter.toUpperCase()];
+            setMetrics(metricsData);
+
+            // If there's no performance data, we don't need to fetch metadata.
+            if (metricsData.length === 0) {
+                setCampaigns([]);
+                return;
             }
 
-            const campaignsPromise = fetch('/api/amazon/campaigns/list', {
+            // Step 2: Extract unique campaign IDs from the metrics.
+            const campaignIdsFromMetrics = [...new Set(metricsData.map(m => m.campaignId))];
+
+            // Step 3: Fetch metadata (name, status, budget) for only those campaigns.
+            const campaignsResponse = await fetch('/api/amazon/campaigns/list', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     profileId: selectedProfileId,
-                    stateFilter: apiStateFilter
+                    stateFilter: ["ENABLED", "PAUSED", "ARCHIVED"], // Get all states to match against metrics
+                    campaignIdFilter: campaignIdsFromMetrics
                 }),
             });
-            
-            const [metricsResponse, campaignsResponse] = await Promise.all([metricsPromise, campaignsPromise]);
 
-            if (!metricsResponse.ok) throw new Error('Failed to fetch performance metrics.');
-            if (!campaignsResponse.ok) throw new Error('Failed to fetch campaigns.');
-            
-            const metricsData: CampaignStreamMetrics[] = (await metricsResponse.json()) || [];
-            const campaignsResult = await campaignsResponse.json();
-            let allCampaigns: Campaign[] = campaignsResult.campaigns || [];
-            
-            // Identify campaigns with metrics but missing from the primary API call
-            const primaryCampaignIds = new Set(allCampaigns.map(c => c.campaignId));
-            const metricCampaignIds = new Set(metricsData.map(m => m.campaignId));
-            const missingCampaignIds = [...metricCampaignIds].filter(id => !primaryCampaignIds.has(id));
-
-            if (missingCampaignIds.length > 0) {
-                 console.log(`Found ${missingCampaignIds.length} campaigns with metrics but no metadata. Fetching...`);
-                 const missingCampaignsResponse = await fetch('/api/amazon/campaigns/list', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        profileId: selectedProfileId,
-                        stateFilter: ["ENABLED", "PAUSED", "ARCHIVED"], // Fetch all states for these specific IDs
-                        campaignIdFilter: missingCampaignIds
-                    }),
-                });
-                if (missingCampaignsResponse.ok) {
-                    const missingData = await missingCampaignsResponse.json();
-                    allCampaigns = [...allCampaigns, ...(missingData.campaigns || [])];
-                } else {
-                     console.warn('Failed to fetch metadata for campaigns that had metrics.');
-                }
+            if (campaignsResponse.ok) {
+                const campaignsResult = await campaignsResponse.json();
+                setCampaigns(campaignsResult.campaigns || []);
+            } else {
+                console.warn('Failed to fetch campaign metadata. Campaigns may be missing names.');
+                setCampaigns([]); // Proceed with empty metadata; names will be defaulted.
             }
-
-            setCampaigns(allCampaigns);
-            setMetrics(metricsData);
-
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to fetch data.');
             setCampaigns([]);
@@ -198,7 +178,7 @@ export function PPCManagementView() {
         } finally {
             setLoading({ ...loading, data: false });
         }
-    }, [selectedProfileId, dateRange, statusFilter]);
+    }, [selectedProfileId, dateRange]);
 
 
     useEffect(() => {
@@ -234,30 +214,44 @@ export function PPCManagementView() {
                 body: JSON.stringify({ profileId: selectedProfileId, updates: [{ campaignId, ...update }] }),
             });
             if (!response.ok) throw new Error('Failed to update campaign.');
-        } catch (err) {
+        } catch (err)
+        {
             setError(err instanceof Error ? err.message : 'Update failed.');
             setCampaigns(originalCampaigns); // Revert on failure
         }
     };
 
-    // 1. Combine all campaign metadata with metrics. This is our base dataset.
+    // 1. Combine data, with METRICS as the source of truth.
     const combinedCampaignData: CampaignWithMetrics[] = useMemo(() => {
-        // Create a map for quick metric lookup
-        const metricsMap = new Map(metrics.map(m => [m.campaignId, m]));
+        // Create a map for quick metadata lookup from the 'campaigns' state
+        const campaignMetadataMap = new Map(campaigns.map(c => [c.campaignId, c]));
 
-        return campaigns.map(campaign => {
-            const campaignMetrics = metricsMap.get(campaign.campaignId);
-            const spend = campaignMetrics?.spend ?? 0;
-            const sales = campaignMetrics?.sales ?? 0;
-            const clicks = campaignMetrics?.clicks ?? 0;
+        // Iterate over metrics, as they are the definitive list of campaigns to show.
+        return metrics.map(metric => {
+            const metadata = campaignMetadataMap.get(metric.campaignId);
+            const spend = metric.spend ?? 0;
+            const sales = metric.sales ?? 0;
+            const clicks = metric.clicks ?? 0;
+            
+            // If metadata wasn't found (e.g., campaign was deleted), provide sensible defaults.
+            const campaignBase = metadata || {
+                campaignId: metric.campaignId,
+                name: `Campaign ${metric.campaignId}`, // Default name
+                campaignType: 'sponsoredProducts',
+                targetingType: 'auto',
+                state: 'archived' as CampaignState, // Assume archived if not found
+                dailyBudget: 0,
+                startDate: 'N/A',
+                endDate: null,
+            };
             
             return {
-                ...campaign,
-                impressions: campaignMetrics?.impressions ?? 0,
+                ...campaignBase,
+                impressions: metric.impressions ?? 0,
                 clicks: clicks,
                 spend: spend,
                 sales: sales,
-                orders: campaignMetrics?.orders ?? 0,
+                orders: metric.orders ?? 0,
                 acos: sales > 0 ? spend / sales : 0,
                 roas: spend > 0 ? sales / spend : 0,
                 cpc: clicks > 0 ? spend / clicks : 0,

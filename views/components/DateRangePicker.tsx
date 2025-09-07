@@ -79,29 +79,14 @@ const styles: { [key: string]: React.CSSProperties } = {
     },
 };
 
-const getTodayInTimezone = (timeZone: string) => {
-    const now = new Date();
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-    });
-    const dateString = formatter.format(now);
-    const start = new Date(`${dateString}T00:00:00`);
-    const end = new Date(`${dateString}T23:59:59.999`);
-    return { start, end };
-};
-
 
 interface DateRangePickerProps {
   onApply: (range: { start: Date; end: Date }) => void;
   onClose: () => void;
   initialRange: { start: Date; end: Date };
-  timezone: string;
 }
 
-export function DateRangePicker({ onApply, onClose, initialRange, timezone }: DateRangePickerProps) {
+export function DateRangePicker({ onApply, onClose, initialRange }: DateRangePickerProps) {
     const [viewDate, setViewDate] = useState(new Date(initialRange.end.getFullYear(), initialRange.end.getMonth(), 1));
     const [startDate, setStartDate] = useState<Date | null>(initialRange.start);
     const [endDate, setEndDate] = useState<Date | null>(initialRange.end);
@@ -122,9 +107,10 @@ export function DateRangePicker({ onApply, onClose, initialRange, timezone }: Da
     };
     
     const setPresetRange = (preset: string) => {
-        const { start: todayStart, end: todayEnd } = getTodayInTimezone(timezone);
-        let start = new Date(todayStart);
-        let end = new Date(todayEnd);
+        const end = new Date();
+        const start = new Date();
+        end.setHours(0,0,0,0);
+        start.setHours(0,0,0,0);
 
         switch(preset) {
             case 'today': break;

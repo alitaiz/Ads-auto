@@ -53,10 +53,23 @@ app.use((err, req, res, next) => {
 });
 
 // --- Start Server ---
-app.listen(port, () => {
+const server = app.listen(port, () => {
     console.log(`🚀 Backend server is listening at http://localhost:${port}`);
     // A simple check on startup to warn if essential environment variables are missing
     if (!process.env.DB_USER || !process.env.ADS_API_CLIENT_ID) {
         console.warn('⚠️ WARNING: Essential environment variables (e.g., DB_USER, ADS_API_CLIENT_ID) are not set. The application may not function correctly.');
     }
+});
+
+// --- Robust Startup Error Handling ---
+// This listener catches critical errors during server startup, like a port being in use.
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error(`❌ FATAL ERROR: Port ${port} is already in use.`);
+        console.error('   Another process (or a zombie instance of this app) is likely running on this port.');
+        console.error('   To fix this, find and stop the other process, or change the PORT in your .env file.');
+    } else {
+        console.error('❌ FATAL ERROR: An unexpected error occurred while starting the server:', err);
+    }
+    process.exit(1); // Exit with an error code to prevent a zombie process
 });

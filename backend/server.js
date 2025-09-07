@@ -2,9 +2,16 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-// Load environment variables from .env file
-dotenv.config();
+// Set up __dirname for ES modules to correctly locate the .env file
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load environment variables from .env file in the backend directory
+dotenv.config({ path: path.resolve(__dirname, '.env') });
+
 
 // Import API route modules
 import ppcManagementApiRoutes from './routes/ppcManagementApi.js';

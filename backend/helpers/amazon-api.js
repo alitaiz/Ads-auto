@@ -1,8 +1,5 @@
 // backend/helpers/amazon-api.js
 import axios from 'axios';
-import dotenv from 'dotenv';
-
-dotenv.config();
 
 // Configuration from environment variables
 const {

@@ -148,16 +148,23 @@ export function PPCManagementView() {
                 const response = await fetch('/api/amazon/profiles');
                 
                 if (!response.ok) {
-                    let errorDetails = 'Could not retrieve error details from server.';
+                    // Read the response body only ONCE as text.
+                    const errorText = await response.text();
+                    let finalError = errorText; // Default to the raw text from server.
+
+                    // Try to parse it as JSON to get a more structured message if available.
                     try {
-                        const errorData = await response.json();
-                        errorDetails = errorData.message || JSON.stringify(errorData.details || errorData);
+                        const errorJson = JSON.parse(errorText);
+                        finalError = errorJson.message || JSON.stringify(errorJson.details || errorJson);
                     } catch (e) {
-                        // Response might not be JSON
-                        errorDetails = await response.text();
+                        // If parsing fails, we just use the raw text, which is already in finalError.
+                        // This is expected if the server returns a non-JSON error (e.g., HTML from a gateway).
+                        console.warn("Could not parse error response from server as JSON. Using raw text.");
                     }
-                    console.error('FRONTEND_LOG: Failed to fetch profiles. Status:', response.status, 'Details:', errorDetails);
-                    throw new Error(`Failed to fetch profiles. Server says: "${errorDetails}"`);
+                    
+                    console.error('FRONTEND_LOG: Failed to fetch profiles. Status:', response.status, 'Details:', finalError);
+                    // Throw an error with the detailed message from the server.
+                    throw new Error(finalError);
                 }
 
                 const data = await response.json();

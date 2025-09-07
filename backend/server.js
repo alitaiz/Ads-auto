@@ -1,18 +1,6 @@
 // backend/server.js
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-// --- Environment Variable Loading ---
-// This is now the SINGLE source of truth for loading environment variables.
-// By explicitly providing the path, we ensure the correct .env file is loaded
-// regardless of the current working directory from which node is executed.
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.resolve(__dirname, '.env') });
-
 
 // Import API route modules
 import ppcManagementApiRoutes from './routes/ppcManagementApi.js';

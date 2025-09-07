@@ -137,9 +137,9 @@ export function PPCManagementView() {
         const formattedEndDate = formatDate(dateRange.end);
 
         try {
-            // Fetch all campaigns and metrics in parallel for efficiency.
-            // Getting all campaigns upfront ensures we have metadata for any campaign with metrics.
-            const campaignsPromise = fetch('/api/amazon/campaigns/list', {
+            // Step 1: Fetch metrics and the initial list of campaigns in parallel.
+            const metricsPromise = fetch(`/api/stream/campaign-metrics?startDate=${formattedStartDate}&endDate=${formattedEndDate}`);
+            const initialCampaignsPromise = fetch('/api/amazon/campaigns/list', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -147,24 +147,52 @@ export function PPCManagementView() {
                     stateFilter: ["ENABLED", "PAUSED", "ARCHIVED"],
                 }),
             });
-
-            const metricsPromise = fetch(`/api/stream/campaign-metrics?startDate=${formattedStartDate}&endDate=${formattedEndDate}`);
             
-            const [campaignsResponse, metricsResponse] = await Promise.all([campaignsPromise, metricsPromise]);
+            const [metricsResponse, initialCampaignsResponse] = await Promise.all([metricsPromise, initialCampaignsPromise]);
 
-            if (!campaignsResponse.ok) {
-                const errorData = await campaignsResponse.json();
-                throw new Error(errorData.message || 'Failed to fetch campaigns.');
-            }
             if (!metricsResponse.ok) {
                 const errorData = await metricsResponse.json();
                 throw new Error(errorData.error || 'Failed to fetch performance metrics.');
             }
+            if (!initialCampaignsResponse.ok) {
+                const errorData = await initialCampaignsResponse.json();
+                throw new Error(errorData.message || 'Failed to fetch initial campaigns.');
+            }
 
-            const campaignsResult = await campaignsResponse.json();
-            setCampaigns(campaignsResult.campaigns || []);
+            const metricsData: CampaignStreamMetrics[] = await metricsResponse.json() || [];
+            const initialCampaignsResult = await initialCampaignsResponse.json();
+            let allCampaigns: Campaign[] = initialCampaignsResult.campaigns || [];
+            
+            // Step 2: Identify campaigns from metrics that are not in our initial list.
+            const existingCampaignIds = new Set(allCampaigns.map(c => c.campaignId));
+            const missingCampaignIds = metricsData
+                .map(m => m.campaignId)
+                .filter(id => !existingCampaignIds.has(id));
 
-            const metricsData: CampaignStreamMetrics[] = (await metricsResponse.json()) || [];
+            // Step 3: If there are missing campaigns, fetch their metadata specifically.
+            if (missingCampaignIds.length > 0) {
+                console.log(`Found ${missingCampaignIds.length} campaigns with metrics but missing metadata. Fetching...`);
+                const missingCampaignsResponse = await fetch('/api/amazon/campaigns/list', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        profileId: selectedProfileId,
+                        stateFilter: ["ENABLED", "PAUSED", "ARCHIVED"], 
+                        campaignIdFilter: missingCampaignIds,
+                    }),
+                });
+
+                if (missingCampaignsResponse.ok) {
+                    const missingCampaignsData = await missingCampaignsResponse.json();
+                    const fetchedMissingCampaigns = missingCampaignsData.campaigns || [];
+                    allCampaigns = [...allCampaigns, ...fetchedMissingCampaigns];
+                } else {
+                    console.warn(`Failed to fetch metadata for ${missingCampaignIds.length} campaigns by ID.`);
+                }
+            }
+            
+            // Step 4: Set the final state with all collected data.
+            setCampaigns(allCampaigns);
             setMetrics(metricsData);
 
         } catch (err) {
@@ -218,10 +246,10 @@ export function PPCManagementView() {
     };
 
     const combinedCampaignData: CampaignWithMetrics[] = useMemo(() => {
-        // This is the source of truth for campaign metadata, fetched for the whole profile.
+        // Create a map for quick lookup of campaign metadata.
         const campaignMetadataMap = new Map(campaigns.map(c => [c.campaignId, c]));
 
-        // The view is driven by metrics. We only show campaigns that have performance data.
+        // Drive the view from metrics, ensuring any campaign with performance data is shown.
         return metrics.map(metric => {
             const metadata = campaignMetadataMap.get(metric.campaignId);
             const spend = metric.spend ?? 0;
@@ -230,11 +258,11 @@ export function PPCManagementView() {
             const impressions = metric.impressions ?? 0;
             const orders = metric.orders ?? 0;
 
-            // Use live metadata if available, otherwise create a fallback.
-            // This ensures every metric row has a corresponding campaign structure.
+            // Use fetched metadata if available, otherwise create a fallback.
+            // This fallback should now be hit very rarely.
             const campaignBase = metadata || {
                 campaignId: metric.campaignId,
-                name: `Campaign ${metric.campaignId}`, // Fallback name for deleted/purged campaigns
+                name: `Campaign ${metric.campaignId}`, // Fallback for truly deleted campaigns
                 campaignType: 'sponsoredProducts',
                 targetingType: 'auto',
                 state: 'archived' as CampaignState, // Assume archived if no metadata

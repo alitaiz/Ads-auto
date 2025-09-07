@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Profile, Campaign, CampaignWithMetrics, CampaignStreamMetrics, SummaryMetricsData } from '../types';
+import { Profile, Campaign, CampaignWithMetrics, CampaignStreamMetrics, SummaryMetricsData, CampaignState } from '../types';
 import { DateRangePicker } from './components/DateRangePicker';
 import { SummaryMetrics } from './components/SummaryMetrics';
 import { CampaignTable } from './components/CampaignTable';
@@ -23,11 +23,21 @@ const styles: { [key: string]: React.CSSProperties } = {
         fontSize: '2rem',
         margin: 0,
     },
-    controls: {
+    controlsContainer: {
         display: 'flex',
         alignItems: 'center',
         gap: '20px',
         flexWrap: 'wrap',
+        padding: '15px',
+        backgroundColor: 'var(--card-background-color)',
+        borderRadius: 'var(--border-radius)',
+        boxShadow: 'var(--box-shadow)',
+        marginBottom: '20px',
+    },
+    controlGroup: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
     },
     profileSelector: {
         padding: '8px 12px',
@@ -61,6 +71,7 @@ const styles: { [key: string]: React.CSSProperties } = {
         padding: '20px',
         backgroundColor: '#fdd',
         borderRadius: 'var(--border-radius)',
+        marginBottom: '20px',
     },
 };
 
@@ -72,7 +83,7 @@ export function PPCManagementView() {
     const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [metrics, setMetrics] = useState<CampaignStreamMetrics[]>([]);
-    const [loading, setLoading] = useState({ profiles: true, campaigns: false, metrics: false });
+    const [loading, setLoading] = useState({ profiles: true, data: false });
     const [error, setError] = useState<string | null>(null);
     
     const today = new Date();
@@ -86,6 +97,7 @@ export function PPCManagementView() {
     const [currentPage, setCurrentPage] = useState(1);
     const [searchTerm, setSearchTerm] = useState('');
     const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' } | null>({ key: 'spend', direction: 'descending' });
+    const [statusFilter, setStatusFilter] = useState<CampaignState | 'all'>('enabled');
 
 
     useEffect(() => {
@@ -116,7 +128,7 @@ export function PPCManagementView() {
     const fetchData = useCallback(async () => {
         if (!selectedProfileId) return;
 
-        setLoading({ profiles: false, campaigns: true, metrics: true });
+        setLoading({ ...loading, data: true });
         setError(null);
         setCurrentPage(1);
 
@@ -126,16 +138,23 @@ export function PPCManagementView() {
 
         try {
             const metricsPromise = fetch(`/api/stream/campaign-metrics?startDate=${formattedStartDate}&endDate=${formattedEndDate}`);
+            
+            let apiStateFilter: string[];
+            if (statusFilter === 'all') {
+                apiStateFilter = ["ENABLED", "PAUSED", "ARCHIVED"];
+            } else {
+                apiStateFilter = [statusFilter.toUpperCase()];
+            }
+
             const campaignsPromise = fetch('/api/amazon/campaigns/list', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     profileId: selectedProfileId,
-                    stateFilter: ["ENABLED", "PAUSED", "ARCHIVED"]
+                    stateFilter: apiStateFilter
                 }),
             });
-
-            // FIX: Corrected variable name from campaignsResponse to campaignsPromise
+            
             const [metricsResponse, campaignsResponse] = await Promise.all([metricsPromise, campaignsPromise]);
 
             if (!metricsResponse.ok) throw new Error('Failed to fetch performance metrics.');
@@ -153,9 +172,9 @@ export function PPCManagementView() {
             setCampaigns([]);
             setMetrics([]);
         } finally {
-            setLoading({ profiles: false, campaigns: false, metrics: false });
+            setLoading({ ...loading, data: false });
         }
-    }, [selectedProfileId, dateRange]);
+    }, [selectedProfileId, dateRange, statusFilter]);
 
 
     useEffect(() => {
@@ -215,7 +234,7 @@ export function PPCManagementView() {
                 roas: spend > 0 ? sales / spend : 0,
                 cpc: clicks > 0 ? spend / clicks : 0,
             };
-        }).filter(c => c.impressions > 0 || c.clicks > 0 || c.spend > 0 || c.sales > 0 || c.orders > 0);
+        });
 
         if (searchTerm) {
             combined = combined.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -236,7 +255,7 @@ export function PPCManagementView() {
     }, [campaigns, metrics, searchTerm, sortConfig]);
     
     const summaryMetrics: SummaryMetricsData | null = useMemo(() => {
-        if (loading.metrics) return null;
+        if (loading.data) return null;
         const total = combinedCampaignData.reduce((acc, campaign) => {
             acc.spend += campaign.spend || 0;
             acc.sales += campaign.sales || 0;
@@ -253,7 +272,7 @@ export function PPCManagementView() {
             cpc: total.clicks > 0 ? total.spend / total.clicks : 0,
             ctr: total.impressions > 0 ? total.clicks / total.impressions : 0,
         };
-    }, [combinedCampaignData, loading.metrics]);
+    }, [combinedCampaignData, loading.data]);
 
 
     const paginatedCampaigns = useMemo(() => {
@@ -275,27 +294,15 @@ export function PPCManagementView() {
         <div style={styles.container}>
             <header style={styles.header}>
                 <h1 style={styles.title}>PPC Management Dashboard</h1>
-                <div style={styles.controls}>
-                    <input
-                        type="text"
-                        placeholder="Search by campaign name..."
-                        style={styles.searchInput}
-                        value={searchTerm}
-                        onChange={e => setSearchTerm(e.target.value)}
-                    />
-                    <div style={{ position: 'relative' }}>
-                         <button ref={datePickerButtonRef} style={styles.dateButton} onClick={() => setDatePickerOpen(o => !o)}>
-                           {formatDateRangeDisplay(dateRange.start, dateRange.end)}
-                        </button>
-                        {isDatePickerOpen && 
-                            <DateRangePicker 
-                                initialRange={dateRange}
-                                onApply={handleApplyDateRange} 
-                                onClose={() => setDatePickerOpen(false)} 
-                            />
-                        }
-                    </div>
+            </header>
+
+            {error && <div style={styles.error} role="alert">{error}</div>}
+
+            <section style={styles.controlsContainer}>
+                 <div style={styles.controlGroup}>
+                    <label htmlFor="profile-select" style={{ fontWeight: 500 }}>Profile:</label>
                     <select
+                        id="profile-select"
                         style={styles.profileSelector}
                         value={selectedProfileId || ''}
                         onChange={(e) => setSelectedProfileId(e.target.value)}
@@ -310,13 +317,50 @@ export function PPCManagementView() {
                         )}
                     </select>
                 </div>
-            </header>
+                 <div style={styles.controlGroup}>
+                    <label htmlFor="status-filter" style={{ fontWeight: 500 }}>Status:</label>
+                    <select
+                        id="status-filter"
+                        style={styles.profileSelector}
+                        value={statusFilter}
+                        onChange={e => setStatusFilter(e.target.value as any)}
+                        disabled={loading.data}
+                    >
+                        <option value="enabled">Enabled</option>
+                        <option value="paused">Paused</option>
+                        <option value="archived">Archived</option>
+                        <option value="all">All States</option>
+                    </select>
+                </div>
+                 <div style={styles.controlGroup}>
+                     <input
+                        type="text"
+                        placeholder="Search by campaign name..."
+                        style={styles.searchInput}
+                        value={searchTerm}
+                        onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+                        disabled={loading.data}
+                    />
+                </div>
+                <div style={{...styles.controlGroup, marginLeft: 'auto'}}>
+                     <div style={{ position: 'relative' }}>
+                         <button ref={datePickerButtonRef} style={styles.dateButton} onClick={() => setDatePickerOpen(o => !o)}>
+                           {formatDateRangeDisplay(dateRange.start, dateRange.end)}
+                        </button>
+                        {isDatePickerOpen && 
+                            <DateRangePicker 
+                                initialRange={dateRange}
+                                onApply={handleApplyDateRange} 
+                                onClose={() => setDatePickerOpen(false)} 
+                            />
+                        }
+                    </div>
+                </div>
+            </section>
 
-            {error && <div style={styles.error} role="alert">{error}</div>}
-
-            <SummaryMetrics metrics={summaryMetrics} loading={loading.metrics || loading.campaigns} />
+            <SummaryMetrics metrics={summaryMetrics} loading={loading.data} />
             
-            {loading.campaigns || loading.metrics ? (
+            {loading.data ? (
                 <div style={styles.loader}>Loading campaign data...</div>
             ) : combinedCampaignData.length > 0 || searchTerm ? (
                 <>

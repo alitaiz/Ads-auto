@@ -71,8 +71,8 @@ router.get('/stream/metrics', async (req, res) => {
             SELECT
                 COALESCE(SUM((event_data->>'clicks')::bigint) FILTER (WHERE event_type = 'sp-traffic'), 0) as click_count,
                 COALESCE(SUM((event_data->>'cost')::numeric) FILTER (WHERE event_type = 'sp-traffic'), 0.00) as total_spend,
-                COALESCE(SUM((event_data->>'conversions')::bigint) FILTER (WHERE event_type = 'sp-conversion'), 0) as total_orders,
-                COALESCE(SUM((event_data->>'attributedSales1d')::numeric) FILTER (WHERE event_type = 'sp-conversion'), 0.00) as total_sales,
+                COALESCE(SUM((event_data->>'attributed_conversions_1d')::bigint) FILTER (WHERE event_type = 'sp-conversion'), 0) as total_orders,
+                COALESCE(SUM((event_data->>'attributed_sales_1d')::numeric) FILTER (WHERE event_type = 'sp-conversion'), 0.00) as total_sales,
                 MAX(received_at) as last_event_timestamp
             FROM raw_stream_events
             WHERE received_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC');
@@ -103,21 +103,19 @@ router.get('/stream/metrics', async (req, res) => {
 });
 
 
-// GET /api/stream/campaign-metrics: Provides aggregated metrics per campaign for a date range, now with timezone support.
+// GET /api/stream/campaign-metrics: Provides aggregated metrics per campaign for a date range.
 router.get('/stream/campaign-metrics', async (req, res) => {
-    const { startDate, endDate, timezone } = req.query;
+    const { startDate, endDate } = req.query;
 
     if (!startDate || !endDate) {
         return res.status(400).json({ error: 'startDate and endDate query parameters are required.' });
     }
 
-    const client = await pool.connect();
-
     try {
         const query = `
             WITH traffic_data AS (
                 SELECT
-                    (event_data->>'campaignId') as campaign_id_text,
+                    (event_data->>'campaign_id') as campaign_id_text,
                     COALESCE(SUM((event_data->>'impressions')::bigint), 0) as impressions,
                     COALESCE(SUM((event_data->>'clicks')::bigint), 0) as clicks,
                     COALESCE(SUM((event_data->>'cost')::numeric), 0.00) as spend
@@ -127,9 +125,9 @@ router.get('/stream/campaign-metrics', async (req, res) => {
             ),
             conversion_data AS (
                 SELECT
-                    (event_data->>'campaignId') as campaign_id_text,
-                    COALESCE(SUM((event_data->>'conversions')::bigint), 0) as orders,
-                    COALESCE(SUM((event_data->>'attributedSales1d')::numeric), 0.00) as sales
+                    (event_data->>'campaign_id') as campaign_id_text,
+                    COALESCE(SUM((event_data->>'attributed_conversions_1d')::bigint), 0) as orders,
+                    COALESCE(SUM((event_data->>'attributed_sales_1d')::numeric), 0.00) as sales
                 FROM raw_stream_events
                 WHERE event_type = 'sp-conversion' AND received_at >= ($1)::date AND received_at < ($2)::date + interval '1 day'
                 GROUP BY 1
@@ -146,20 +144,7 @@ router.get('/stream/campaign-metrics', async (req, res) => {
             WHERE COALESCE(t.campaign_id_text, c.campaign_id_text) IS NOT NULL;
         `;
         
-        await client.query('BEGIN');
-        
-        if (timezone) {
-            // Basic validation to prevent SQL injection. A real app should use a whitelist of IANA timezones.
-            if (!/^[A-Za-z_\/]+$/.test(timezone)) {
-                throw new Error(`Invalid timezone format: ${timezone}`);
-            }
-            // Set the timezone for the duration of this transaction. This makes the `::date` cast respect the user's selected timezone.
-            await client.query(`SET LOCAL TIME ZONE $1`, [timezone]);
-        }
-        
-        const result = await client.query(query, [startDate, endDate]);
-        
-        await client.query('COMMIT');
+        const result = await pool.query(query, [startDate, endDate]);
         
         const metrics = result.rows
             .map(row => {
@@ -188,11 +173,8 @@ router.get('/stream/campaign-metrics', async (req, res) => {
         res.json(metrics);
 
     } catch (error) {
-        if (client) await client.query('ROLLBACK');
         console.error("[Server] Error fetching campaign stream metrics:", error);
         res.status(500).json({ error: "Could not fetch real-time campaign data." });
-    } finally {
-        if (client) client.release();
     }
 });
 

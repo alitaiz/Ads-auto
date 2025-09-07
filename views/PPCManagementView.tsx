@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Profile, Campaign, CampaignWithMetrics, CampaignStreamMetrics, SummaryMetricsData, CampaignState } from '../types';
+import { DateRangePicker } from './components/DateRangePicker';
 import { SummaryMetrics } from './components/SummaryMetrics';
 import { CampaignTable } from './components/CampaignTable';
 import { Pagination } from './components/Pagination';
@@ -16,6 +17,8 @@ const styles: { [key: string]: React.CSSProperties } = {
         justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: '20px',
+        flexWrap: 'wrap',
+        gap: '20px',
     },
     title: {
         fontSize: '2rem',
@@ -25,6 +28,7 @@ const styles: { [key: string]: React.CSSProperties } = {
         display: 'flex',
         alignItems: 'center',
         gap: '20px',
+        flexWrap: 'wrap',
         padding: '15px',
         backgroundColor: 'var(--card-background-color)',
         borderRadius: 'var(--border-radius)',
@@ -50,6 +54,14 @@ const styles: { [key: string]: React.CSSProperties } = {
         fontSize: '1rem',
         minWidth: '250px',
     },
+    dateButton: {
+        padding: '8px 12px',
+        borderRadius: '4px',
+        border: '1px solid var(--border-color)',
+        fontSize: '1rem',
+        background: 'white',
+        cursor: 'pointer',
+    },
     loader: {
         textAlign: 'center',
         padding: '50px',
@@ -67,9 +79,27 @@ const styles: { [key: string]: React.CSSProperties } = {
 const ITEMS_PER_PAGE = 20;
 type SortableKeys = keyof CampaignWithMetrics;
 
-const getTodayDateString = () => {
-    return new Date().toISOString().split('T')[0];
+// Moved the date range initialization to a separate function for clarity and robustness.
+// This function will be used as a lazy initializer for the useState hook.
+const getInitialDateRange = () => {
+    const end = new Date();
+    const start = new Date();
+    // Set hours to 0 to ensure the entire day is included
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+    // By not modifying 'start', the default range is now "Today".
+    return { start, end };
 };
+
+// A timezone-safe function to format a date for API queries.
+// This prevents the user's local timezone from shifting the date.
+const formatDateForQuery = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
 
 export function PPCManagementView() {
     const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -78,6 +108,12 @@ export function PPCManagementView() {
     const [performanceMetrics, setPerformanceMetrics] = useState<Record<number, CampaignStreamMetrics>>({});
     const [loading, setLoading] = useState({ profiles: true, data: false });
     const [error, setError] = useState<string | null>(null);
+    
+    // Using a lazy initializer for the dateRange state. This is a React best practice
+    // that ensures this calculation runs ONLY ONCE when the component first mounts.
+    // This fixes the bug where the component could default to an incorrect date range.
+    const [dateRange, setDateRange] = useState(getInitialDateRange);
+    const [isDatePickerOpen, setDatePickerOpen] = useState(false);
 
     const [currentPage, setCurrentPage] = useState(1);
     const [searchTerm, setSearchTerm] = useState('');
@@ -91,16 +127,14 @@ export function PPCManagementView() {
                 setLoading(prev => ({ ...prev, profiles: true }));
                 setError(null);
                 const response = await fetch('/api/amazon/profiles');
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.message || 'Failed to fetch profiles.');
-                }
+                if (!response.ok) throw new Error('Failed to fetch profiles.');
                 const data = await response.json();
                 const usProfiles = data.filter((p: Profile) => p.countryCode === 'US');
+
                 setProfiles(usProfiles);
                 if (usProfiles.length > 0) {
                     const storedProfileId = localStorage.getItem('selectedProfileId');
-                    const profileIdToSet = storedProfileId && usProfiles.find((p: Profile) => p.profileId.toString() === storedProfileId) ? storedProfileId : usProfiles[0].profileId.toString();
+                    const profileIdToSet = storedProfileId && usProfiles.find((p: Profile) => p.profileId === storedProfileId) ? storedProfileId : usProfiles[0].profileId;
                     setSelectedProfileId(profileIdToSet);
                 }
             } catch (err) {
@@ -117,42 +151,70 @@ export function PPCManagementView() {
 
         setLoading(prev => ({ ...prev, data: true }));
         setError(null);
-        setCurrentPage(1); // Reset to first page on new data fetch
+        setCurrentPage(1);
 
-        const today = getTodayDateString();
+        const formattedStartDate = formatDateForQuery(dateRange.start);
+        const formattedEndDate = formatDateForQuery(dateRange.end);
 
         try {
-            const metricsPromise = fetch(`/api/stream/campaign-metrics?startDate=${today}&endDate=${today}`);
-            const campaignsPromise = fetch('/api/amazon/campaigns/list', {
+            // Step 1: Fetch metrics and the initial list of campaigns in parallel.
+            const metricsPromise = fetch(`/api/stream/campaign-metrics?startDate=${formattedStartDate}&endDate=${formattedEndDate}`);
+            const initialCampaignsPromise = fetch('/api/amazon/campaigns/list', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     profileId: selectedProfileId,
-                    // Fetch all states from Amazon, we will filter on the frontend
                     stateFilter: ["ENABLED", "PAUSED", "ARCHIVED"],
                 }),
             });
             
-            const [metricsResponse, campaignsResponse] = await Promise.all([metricsPromise, campaignsPromise]);
+            const [metricsResponse, initialCampaignsResponse] = await Promise.all([metricsPromise, initialCampaignsPromise]);
 
             if (!metricsResponse.ok) {
-                 const errorData = await metricsResponse.json();
-                 throw new Error(errorData.error || 'Failed to fetch performance metrics.');
+                const errorData = await metricsResponse.json();
+                throw new Error(errorData.error || 'Failed to fetch performance metrics.');
             }
-            if (!campaignsResponse.ok) {
-                const errorData = await campaignsResponse.json();
-                throw new Error(errorData.message || 'Failed to fetch campaigns.');
+            if (!initialCampaignsResponse.ok) {
+                const errorData = await initialCampaignsResponse.json();
+                throw new Error(errorData.message || 'Failed to fetch initial campaigns.');
             }
 
-            const metricsData: CampaignStreamMetrics[] = await metricsResponse.json();
-            const campaignsData = await campaignsResponse.json();
+            const metricsData: CampaignStreamMetrics[] = await metricsResponse.json() || [];
+            const initialCampaignsResult = await initialCampaignsResponse.json();
+            let allCampaigns: Campaign[] = initialCampaignsResult.campaigns || [];
+            
+            const existingCampaignIds = new Set(allCampaigns.map(c => c.campaignId));
+            const missingCampaignIds = metricsData
+                .map(m => m.campaignId)
+                .filter(id => !existingCampaignIds.has(id));
+
+            if (missingCampaignIds.length > 0) {
+                console.log(`Found ${missingCampaignIds.length} campaigns with metrics but missing metadata. Fetching...`);
+                const missingCampaignsResponse = await fetch('/api/amazon/campaigns/list', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        profileId: selectedProfileId,
+                        stateFilter: ["ENABLED", "PAUSED", "ARCHIVED"], 
+                        campaignIdFilter: missingCampaignIds,
+                    }),
+                });
+
+                if (missingCampaignsResponse.ok) {
+                    const missingCampaignsData = await missingCampaignsResponse.json();
+                    const fetchedMissingCampaigns = missingCampaignsData.campaigns || [];
+                    allCampaigns = [...allCampaigns, ...fetchedMissingCampaigns];
+                } else {
+                    console.warn(`Failed to fetch metadata for ${missingCampaignIds.length} campaigns by ID.`);
+                }
+            }
             
             const metricsMap = metricsData.reduce((acc, metric) => {
                 acc[metric.campaignId] = metric;
                 return acc;
             }, {} as Record<number, CampaignStreamMetrics>);
 
-            setCampaigns(campaignsData.campaigns || []);
+            setCampaigns(allCampaigns);
             setPerformanceMetrics(metricsMap);
 
         } catch (err) {
@@ -162,7 +224,7 @@ export function PPCManagementView() {
         } finally {
             setLoading(prev => ({ ...prev, data: false }));
         }
-    }, [selectedProfileId]);
+    }, [selectedProfileId, dateRange]);
 
 
     useEffect(() => {
@@ -175,9 +237,20 @@ export function PPCManagementView() {
         }
     }, [selectedProfileId]);
 
+    const handleApplyDateRange = (newRange: { start: Date; end: Date }) => {
+        setDateRange(newRange);
+        setDatePickerOpen(false);
+    };
+
+    const formatDateRangeDisplay = (start: Date, end: Date) => {
+        const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
+        const startDateStr = start.toLocaleDateString('en-US', options);
+        const endDateStr = end.toLocaleDateString('en-US', options);
+        return startDateStr === endDateStr ? startDateStr : `${startDateStr} - ${endDateStr}`;
+    };
+    
     const handleUpdateCampaign = async (campaignId: number, update: any) => {
         const originalCampaigns = [...campaigns];
-        // Optimistic update
         setCampaigns(prev => prev.map(c => c.campaignId === campaignId ? { ...c, ...(update.budget ? {dailyBudget: update.budget.amount} : update) } : c));
 
         try {
@@ -195,8 +268,9 @@ export function PPCManagementView() {
     };
 
     const combinedCampaignData: CampaignWithMetrics[] = useMemo(() => {
-        return campaigns.map(campaign => {
+        const enrichedCampaigns = campaigns.map(campaign => {
             const metrics = performanceMetrics[campaign.campaignId] || {
+                campaignId: campaign.campaignId,
                 impressions: 0,
                 clicks: 0,
                 spend: 0,
@@ -219,9 +293,10 @@ export function PPCManagementView() {
                 ctr: impressions > 0 ? clicks / impressions : 0,
             };
         });
+
+        return enrichedCampaigns.filter(c => c.impressions > 0 || c.clicks > 0 || c.spend > 0 || c.orders > 0 || c.sales > 0);
     }, [campaigns, performanceMetrics]);
     
-    // Summary metrics should be calculated on the currently filtered data
     const dataForSummary = useMemo(() => {
          if (!searchTerm) return combinedCampaignData;
          return combinedCampaignData.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -251,7 +326,6 @@ export function PPCManagementView() {
     const finalDisplayData: CampaignWithMetrics[] = useMemo(() => {
         let data = combinedCampaignData;
 
-        // Apply filters
         if (statusFilter !== 'all') {
             data = data.filter(c => c.state === statusFilter);
         }
@@ -259,7 +333,6 @@ export function PPCManagementView() {
             data = data.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
         }
 
-        // Apply sorting
         if (sortConfig !== null) {
             data.sort((a, b) => {
                 const aValue = a[sortConfig.key] ?? 0;
@@ -298,7 +371,7 @@ export function PPCManagementView() {
 
             <section style={styles.controlsContainer}>
                  <div style={styles.controlGroup}>
-                    <label htmlFor="profile-select">Profile:</label>
+                    <label htmlFor="profile-select" style={{ fontWeight: 500 }}>Profile:</label>
                     <select
                         id="profile-select"
                         style={styles.profileSelector}
@@ -316,7 +389,7 @@ export function PPCManagementView() {
                     </select>
                 </div>
                  <div style={styles.controlGroup}>
-                    <label htmlFor="status-filter">Status:</label>
+                    <label htmlFor="status-filter" style={{ fontWeight: 500 }}>Status:</label>
                     <select
                         id="status-filter"
                         style={styles.profileSelector}
@@ -343,13 +416,27 @@ export function PPCManagementView() {
                         disabled={loading.data}
                     />
                 </div>
+                <div style={{...styles.controlGroup, marginLeft: 'auto'}}>
+                     <div style={{ position: 'relative' }}>
+                         <button style={styles.dateButton} onClick={() => setDatePickerOpen(o => !o)}>
+                           {formatDateRangeDisplay(dateRange.start, dateRange.end)}
+                        </button>
+                        {isDatePickerOpen && 
+                            <DateRangePicker 
+                                initialRange={dateRange}
+                                onApply={handleApplyDateRange} 
+                                onClose={() => setDatePickerOpen(false)} 
+                            />
+                        }
+                    </div>
+                </div>
             </section>
 
             <SummaryMetrics metrics={summaryMetrics} loading={loading.data} />
             
             {loading.data ? (
                 <div style={styles.loader}>Loading campaign data...</div>
-            ) : finalDisplayData.length > 0 ? (
+            ) : finalDisplayData.length > 0 || searchTerm ? (
                 <>
                     <CampaignTable 
                         campaigns={paginatedCampaigns} 
@@ -360,7 +447,7 @@ export function PPCManagementView() {
                     <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
                 </>
             ) : (
-                <div style={styles.loader}>No campaign data found for the selected profile and date range.</div>
+                <div style={{...styles.loader, color: '#666'}}>No campaign data found for the selected profile and date range.</div>
             )}
         </div>
     );

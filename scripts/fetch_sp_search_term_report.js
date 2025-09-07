@@ -37,19 +37,16 @@ const REPORT_TYPE_ID = 'spSearchTerm';
 // --- Amazon Ads API V3 Client ---
 
 const getAccessToken = async () => {
-    const body = new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: ADS_API_REFRESH_TOKEN,
-        client_id: ADS_API_CLIENT_ID,
-        client_secret: ADS_API_CLIENT_SECRET,
-    });
-
     const response = await fetch('https://api.amazon.com/auth/o2/token', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body.toString(),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            grant_type: 'refresh_token',
+            refresh_token: ADS_API_REFRESH_TOKEN,
+            client_id: ADS_API_CLIENT_ID,
+            client_secret: ADS_API_CLIENT_SECRET,
+        }),
     });
-    
     const data = await response.json();
     if (!response.ok) {
         throw new Error(`Failed to get access token: ${data.error_description || JSON.stringify(data)}`);

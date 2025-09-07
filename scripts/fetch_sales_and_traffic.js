@@ -31,17 +31,15 @@ const REPORT_TYPE = 'GET_SALES_AND_TRAFFIC_REPORT';
 // --- SP-API Client ---
 
 const getAccessToken = async () => {
-    const body = new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: SP_API_REFRESH_TOKEN,
-        client_id: SP_API_CLIENT_ID,
-        client_secret: SP_API_CLIENT_SECRET,
-    });
-    
     const response = await fetch('https://api.amazon.com/auth/o2/token', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body.toString(),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            grant_type: 'refresh_token',
+            refresh_token: SP_API_REFRESH_TOKEN,
+            client_id: SP_API_CLIENT_ID,
+            client_secret: SP_API_CLIENT_SECRET,
+        }),
     });
     const data = await response.json();
     if (!response.ok) {

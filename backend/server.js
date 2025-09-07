@@ -1,75 +1,56 @@
 // backend/server.js
+import express from 'express';
+import cors from 'cors';
 import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
-// --- Configuration ---
-// Load environment variables FIRST. This is the most critical step.
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.resolve(__dirname, '.env') });
+// Load environment variables from .env file
+dotenv.config();
 
-// --- Dynamic Import & Server Startup ---
-// We wrap the server startup in an async function.
-// This allows us to use dynamic `await import(...)` statements, which execute
-// sequentially and are NOT hoisted. This guarantees that modules like `./db.js`
-// are only loaded *after* dotenv has populated `process.env`.
-async function startServer() {
-    // Dynamically import modules
-    const express = (await import('express')).default;
-    const cors = (await import('cors')).default;
+// Import API route modules
+import ppcManagementApiRoutes from './routes/ppcManagementApi.js';
+import spSearchTermsRoutes from './routes/spSearchTerms.js';
+import streamRoutes from './routes/stream.js';
+import ppcManagementRoutes from './routes/ppcManagement.js';
 
-    // We don't need the `pool` export here, but importing the module
-    // ensures the database connection logic (and its pre-flight check) runs.
-    await import('./db.js');
+const app = express();
+const port = process.env.PORT || 4001;
 
-    const ppcManagementApiRoutes = (await import('./routes/ppcManagementApi.js')).default;
-    const spSearchTermsRoutes = (await import('./routes/spSearchTerms.js')).default;
-    const streamRoutes = (await import('./routes/stream.js')).default;
-    const ppcManagementRoutes = (await import('./routes/ppcManagement.js')).default;
+// --- Middlewares ---
+// Enable Cross-Origin Resource Sharing for all routes
+app.use(cors());
+// Enable parsing of JSON request bodies
+app.use(express.json());
 
-    const app = express();
-    const port = process.env.PORT || 4001;
+// --- API Routes ---
+// Mount the various API routers to their respective base paths.
+// This ensures that frontend requests are directed to the correct handler.
+app.use('/api/amazon', ppcManagementApiRoutes);
+app.use('/api', spSearchTermsRoutes);
+app.use('/api', streamRoutes);
+app.use('/api', ppcManagementRoutes);
 
-    // --- Middlewares ---
-    app.use(cors());
-    app.use(express.json());
+// --- Root Endpoint for health checks ---
+app.get('/', (req, res) => {
+  res.send('PPC Auto Backend is running!');
+});
 
-    // --- API Routes ---
-    app.use('/api/amazon', ppcManagementApiRoutes);
-    app.use('/api', spSearchTermsRoutes);
-    app.use('/api', streamRoutes);
-    app.use('/api', ppcManagementRoutes);
+// --- Error Handling ---
+// Catch-all middleware for requests to undefined routes
+app.use((req, res, next) => {
+    res.status(404).json({ message: 'Endpoint not found.' });
+});
 
-    // --- Root Endpoint ---
-    app.get('/', (req, res) => {
-      res.send('PPC Auto Backend is running!');
-    });
+// Generic error handler middleware
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).json({ message: 'An internal server error occurred.' });
+});
 
-    // --- Server Initialization ---
-    const server = app.listen(port, () => {
-        console.log(`🚀 Backend server is listening at http://localhost:${port}`);
-        // The check in db.js already validates this, but a warning here is still useful.
-        if (!process.env.DB_PASSWORD || !process.env.ADS_API_CLIENT_ID) {
-            console.warn('⚠️ WARNING: Essential environment variables (e.g., DB_PASSWORD, ADS_API_CLIENT_ID) are not set. The application will not work correctly.');
-        }
-    });
-
-    server.on('error', (err) => {
-        if (err.code === 'EADDRINUSE') {
-            console.error(`❌ FATAL ERROR: Port ${port} is already in use.`);
-        } else {
-            console.error('❌ FATAL ERROR on server startup:', err);
-        }
-        process.exit(1);
-    });
-}
-
-// Execute the async startup function
-startServer().catch(err => {
-    // This will catch errors from both the dynamic imports and the server setup.
-    // The pre-flight check in `db.js` will cause `process.exit(1)`, so this might not
-    // always be reached, but it's good practice for other potential import errors.
-    console.error('💥 Failed to start server due to a critical error:', err);
-    process.exit(1);
+// --- Start Server ---
+app.listen(port, () => {
+    console.log(`🚀 Backend server is listening at http://localhost:${port}`);
+    // A simple check on startup to warn if essential environment variables are missing
+    if (!process.env.DB_USER || !process.env.ADS_API_CLIENT_ID) {
+        console.warn('⚠️ WARNING: Essential environment variables (e.g., DB_USER, ADS_API_CLIENT_ID) are not set. The application may not function correctly.');
+    }
 });

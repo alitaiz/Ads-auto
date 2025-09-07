@@ -84,6 +84,7 @@ export function PPCManagementView() {
     const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [metrics, setMetrics] = useState<CampaignStreamMetrics[]>([]);
+    const [campaignNameMap, setCampaignNameMap] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState({ profiles: true, data: false });
     const [error, setError] = useState<string | null>(null);
     
@@ -137,12 +138,22 @@ export function PPCManagementView() {
         const formattedEndDate = formatDate(dateRange.end);
 
         try {
-            // Step 1: Fetch metrics from the stream first. This is our source of truth.
-            const metricsResponse = await fetch(`/api/stream/campaign-metrics?startDate=${formattedStartDate}&endDate=${formattedEndDate}`);
+            // Fetch metrics, names, and initial campaign list in parallel for efficiency
+            const metricsPromise = fetch(`/api/stream/campaign-metrics?startDate=${formattedStartDate}&endDate=${formattedEndDate}`);
+            const namesPromise = fetch('/api/ppc/campaign-names');
+            
+            const [metricsResponse, namesResponse] = await Promise.all([metricsPromise, namesPromise]);
+
             if (!metricsResponse.ok) throw new Error('Failed to fetch performance metrics.');
             const metricsData: CampaignStreamMetrics[] = (await metricsResponse.json()) || [];
-            
             setMetrics(metricsData);
+
+            if (namesResponse.ok) {
+                setCampaignNameMap(await namesResponse.json());
+            } else {
+                console.warn('Could not fetch historical campaign names.');
+                setCampaignNameMap({});
+            }
 
             // If there's no performance data, we don't need to fetch metadata.
             if (metricsData.length === 0) {
@@ -150,16 +161,14 @@ export function PPCManagementView() {
                 return;
             }
 
-            // Step 2: Extract unique campaign IDs from the metrics.
             const campaignIdsFromMetrics = [...new Set(metricsData.map(m => m.campaignId))];
 
-            // Step 3: Fetch metadata (name, status, budget) for only those campaigns.
             const campaignsResponse = await fetch('/api/amazon/campaigns/list', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     profileId: selectedProfileId,
-                    stateFilter: ["ENABLED", "PAUSED", "ARCHIVED"], // Get all states to match against metrics
+                    stateFilter: ["ENABLED", "PAUSED", "ARCHIVED"],
                     campaignIdFilter: campaignIdsFromMetrics
                 }),
             });
@@ -169,7 +178,7 @@ export function PPCManagementView() {
                 setCampaigns(campaignsResult.campaigns || []);
             } else {
                 console.warn('Failed to fetch campaign metadata. Campaigns may be missing names.');
-                setCampaigns([]); // Proceed with empty metadata; names will be defaulted.
+                setCampaigns([]);
             }
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to fetch data.');
@@ -221,25 +230,23 @@ export function PPCManagementView() {
         }
     };
 
-    // 1. Combine data, with METRICS as the source of truth.
     const combinedCampaignData: CampaignWithMetrics[] = useMemo(() => {
-        // Create a map for quick metadata lookup from the 'campaigns' state
         const campaignMetadataMap = new Map(campaigns.map(c => [c.campaignId, c]));
 
-        // Iterate over metrics, as they are the definitive list of campaigns to show.
         return metrics.map(metric => {
             const metadata = campaignMetadataMap.get(metric.campaignId);
             const spend = metric.spend ?? 0;
             const sales = metric.sales ?? 0;
             const clicks = metric.clicks ?? 0;
-            
-            // If metadata wasn't found (e.g., campaign was deleted), provide sensible defaults.
+            const impressions = metric.impressions ?? 0;
+            const orders = metric.orders ?? 0;
+
             const campaignBase = metadata || {
                 campaignId: metric.campaignId,
-                name: `Campaign ${metric.campaignId}`, // Default name
+                name: campaignNameMap[metric.campaignId] || `Campaign ${metric.campaignId}`,
                 campaignType: 'sponsoredProducts',
                 targetingType: 'auto',
-                state: 'archived' as CampaignState, // Assume archived if not found
+                state: 'archived' as CampaignState,
                 dailyBudget: 0,
                 startDate: 'N/A',
                 endDate: null,
@@ -247,19 +254,19 @@ export function PPCManagementView() {
             
             return {
                 ...campaignBase,
-                impressions: metric.impressions ?? 0,
-                clicks: clicks,
-                spend: spend,
-                sales: sales,
-                orders: metric.orders ?? 0,
+                impressions,
+                clicks,
+                spend,
+                sales,
+                orders,
                 acos: sales > 0 ? spend / sales : 0,
                 roas: spend > 0 ? sales / spend : 0,
                 cpc: clicks > 0 ? spend / clicks : 0,
+                ctr: impressions > 0 ? clicks / impressions : 0,
             };
         });
-    }, [campaigns, metrics]);
+    }, [campaigns, metrics, campaignNameMap]);
     
-    // 2. Create the dataset for summary calculations (only filter by search term).
     const dataForSummary = useMemo(() => {
          if (!searchTerm) return combinedCampaignData;
          return combinedCampaignData.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -286,7 +293,6 @@ export function PPCManagementView() {
         };
     }, [dataForSummary, loading.data]);
 
-    // 3. Create the final dataset for the table (apply status filter, search term, and sorting).
     const finalDisplayData: CampaignWithMetrics[] = useMemo(() => {
         let data = combinedCampaignData;
 
@@ -358,7 +364,10 @@ export function PPCManagementView() {
                         id="status-filter"
                         style={styles.profileSelector}
                         value={statusFilter}
-                        onChange={e => setStatusFilter(e.target.value as any)}
+                        onChange={e => {
+                            setStatusFilter(e.target.value as any);
+                            setCurrentPage(1);
+                        }}
                         disabled={loading.data}
                     >
                         <option value="enabled">Enabled</option>

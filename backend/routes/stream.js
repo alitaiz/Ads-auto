@@ -148,21 +148,24 @@ router.get('/stream/campaign-metrics', async (req, res) => {
         
         const metrics = result.rows
             .map(row => {
-                // The campaignId from the DB is a string, which could be null for some events.
                 if (!row.campaignId) {
                     return null;
                 }
                 const campaignIdNumber = Number(row.campaignId);
 
-                // Filter out invalid IDs (0, NaN) that could result from Number(null) or Number('abc')
                 if (!campaignIdNumber || isNaN(campaignIdNumber)) {
                     console.warn(`[Stream Metrics] Filtering out invalid campaign ID from DB: ${row.campaignId}`);
                     return null;
                 }
                 
+                // Explicitly parse bigint/numeric fields to prevent issues with JS type coercion.
                 return {
-                    ...row,
-                    campaignId: campaignIdNumber
+                    campaignId: campaignIdNumber,
+                    impressions: parseInt(row.impressions || '0', 10),
+                    clicks: parseInt(row.clicks || '0', 10),
+                    spend: parseFloat(row.spend || '0'),
+                    orders: parseInt(row.orders || '0', 10),
+                    sales: parseFloat(row.sales || '0'),
                 };
             })
             .filter(Boolean); // This effectively removes all the null entries.

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Profile, Campaign, CampaignWithMetrics, CampaignStreamMetrics, SummaryMetricsData } from '../types';
 import { DateRangePicker } from './components/DateRangePicker';
 import { SummaryMetrics } from './components/SummaryMetrics';
@@ -43,6 +43,14 @@ const styles: { [key: string]: React.CSSProperties } = {
         fontSize: '1rem',
         minWidth: '250px',
     },
+    dateButton: {
+        padding: '8px 12px',
+        borderRadius: '4px',
+        border: '1px solid var(--border-color)',
+        fontSize: '1rem',
+        background: 'white',
+        cursor: 'pointer',
+    },
     loader: {
         textAlign: 'center',
         padding: '50px',
@@ -68,18 +76,18 @@ export function PPCManagementView() {
     const [error, setError] = useState<string | null>(null);
     
     const today = new Date();
-    const lastWeek = new Date(today);
+    const lastWeek = new Date();
     lastWeek.setDate(today.getDate() - 7);
-    const formatDate = (d: Date) => d.toISOString().split('T')[0];
     
-    const [startDate, setStartDate] = useState(formatDate(lastWeek));
-    const [endDate, setEndDate] = useState(formatDate(today));
+    const [dateRange, setDateRange] = useState({ start: lastWeek, end: today });
+    const [isDatePickerOpen, setDatePickerOpen] = useState(false);
+    const datePickerButtonRef = useRef<HTMLButtonElement>(null);
+
     const [currentPage, setCurrentPage] = useState(1);
     const [searchTerm, setSearchTerm] = useState('');
     const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' } | null>({ key: 'spend', direction: 'descending' });
 
 
-    // Fetch profiles on mount, filtering for US market
     useEffect(() => {
         const fetchProfiles = async () => {
             try {
@@ -105,46 +113,50 @@ export function PPCManagementView() {
         fetchProfiles();
     }, []);
 
-    // Fetch metrics first, then campaign details for campaigns with metrics
     const fetchData = useCallback(async () => {
         if (!selectedProfileId) return;
 
-        setLoading(prev => ({ ...prev, campaigns: true, metrics: true }));
+        setLoading({ profiles: false, campaigns: true, metrics: true });
         setError(null);
-        setCampaigns([]);
-        setMetrics([]);
         setCurrentPage(1);
 
-        try {
-            // Step 1: Fetch metrics from our local DB
-            const metricsResponse = await fetch(`/api/stream/campaign-metrics?startDate=${startDate}&endDate=${endDate}`);
-            if (!metricsResponse.ok) throw new Error('Failed to fetch metrics.');
-            const metricsData: CampaignStreamMetrics[] = await metricsResponse.json();
-            setMetrics(metricsData || []);
-            setLoading(prev => ({ ...prev, metrics: false }));
+        const formatDate = (d: Date) => d.toISOString().split('T')[0];
+        const formattedStartDate = formatDate(dateRange.start);
+        const formattedEndDate = formatDate(dateRange.end);
 
-            // Step 2: If we have metrics, fetch campaign details only for those campaigns
-            if (metricsData && metricsData.length > 0) {
-                const campaignIdFilter = metricsData.map(m => m.campaignId);
-                
-                const campaignsResponse = await fetch('/api/amazon/campaigns/list', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ profileId: selectedProfileId, campaignIdFilter }),
-                });
-                if (!campaignsResponse.ok) throw new Error('Failed to fetch campaign details.');
-                const campaignsData = await campaignsResponse.json();
-                setCampaigns(campaignsData.campaigns || []);
-            } else {
-                setCampaigns([]); // No metrics, so no campaigns to show
-            }
+        try {
+            const metricsPromise = fetch(`/api/stream/campaign-metrics?startDate=${formattedStartDate}&endDate=${formattedEndDate}`);
+            const campaignsPromise = fetch('/api/amazon/campaigns/list', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    profileId: selectedProfileId,
+                    stateFilter: ["ENABLED", "PAUSED", "ARCHIVED"]
+                }),
+            });
+
+            // FIX: Corrected variable name from campaignsResponse to campaignsPromise
+            const [metricsResponse, campaignsResponse] = await Promise.all([metricsPromise, campaignsPromise]);
+
+            if (!metricsResponse.ok) throw new Error('Failed to fetch performance metrics.');
+            if (!campaignsResponse.ok) throw new Error('Failed to fetch campaigns.');
+            
+            const metricsData: CampaignStreamMetrics[] = (await metricsResponse.json()) || [];
+            const campaignsResult = await campaignsResponse.json();
+            const allCampaigns: Campaign[] = campaignsResult.campaigns || [];
+            
+            setCampaigns(allCampaigns);
+            setMetrics(metricsData);
 
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to fetch data.');
+            setCampaigns([]);
+            setMetrics([]);
         } finally {
-             setLoading({ profiles: false, campaigns: false, metrics: false });
+            setLoading({ profiles: false, campaigns: false, metrics: false });
         }
-    }, [selectedProfileId, startDate, endDate]);
+    }, [selectedProfileId, dateRange]);
+
 
     useEffect(() => {
         fetchData();
@@ -155,6 +167,18 @@ export function PPCManagementView() {
             localStorage.setItem('selectedProfileId', selectedProfileId);
         }
     }, [selectedProfileId]);
+
+    const handleApplyDateRange = (newRange: { start: Date; end: Date }) => {
+        setDateRange(newRange);
+        setDatePickerOpen(false);
+    };
+
+    const formatDateRangeDisplay = (start: Date, end: Date) => {
+        const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
+        const startDateStr = start.toLocaleDateString('en-US', options);
+        const endDateStr = end.toLocaleDateString('en-US', options);
+        return startDateStr === endDateStr ? startDateStr : `${startDateStr} - ${endDateStr}`;
+    };
     
     const handleUpdateCampaign = async (campaignId: number, update: any) => {
         const originalCampaigns = [...campaigns];
@@ -191,25 +215,19 @@ export function PPCManagementView() {
                 roas: spend > 0 ? sales / spend : 0,
                 cpc: clicks > 0 ? spend / clicks : 0,
             };
-        });
+        }).filter(c => c.impressions > 0 || c.clicks > 0 || c.spend > 0 || c.sales > 0 || c.orders > 0);
 
-        // Apply search filter
         if (searchTerm) {
             combined = combined.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
         }
 
-        // Apply sorting
         if (sortConfig !== null) {
             combined.sort((a, b) => {
                 const aValue = a[sortConfig.key] ?? 0;
                 const bValue = b[sortConfig.key] ?? 0;
 
-                if (aValue < bValue) {
-                    return sortConfig.direction === 'ascending' ? -1 : 1;
-                }
-                if (aValue > bValue) {
-                    return sortConfig.direction === 'ascending' ? 1 : -1;
-                }
+                if (aValue < bValue) return sortConfig.direction === 'ascending' ? -1 : 1;
+                if (aValue > bValue) return sortConfig.direction === 'ascending' ? 1 : -1;
                 return 0;
             });
         }
@@ -265,12 +283,18 @@ export function PPCManagementView() {
                         value={searchTerm}
                         onChange={e => setSearchTerm(e.target.value)}
                     />
-                    <DateRangePicker
-                        startDate={startDate}
-                        endDate={endDate}
-                        onStartDateChange={setStartDate}
-                        onEndDateChange={setEndDate}
-                    />
+                    <div style={{ position: 'relative' }}>
+                         <button ref={datePickerButtonRef} style={styles.dateButton} onClick={() => setDatePickerOpen(o => !o)}>
+                           {formatDateRangeDisplay(dateRange.start, dateRange.end)}
+                        </button>
+                        {isDatePickerOpen && 
+                            <DateRangePicker 
+                                initialRange={dateRange}
+                                onApply={handleApplyDateRange} 
+                                onClose={() => setDatePickerOpen(false)} 
+                            />
+                        }
+                    </div>
                     <select
                         style={styles.profileSelector}
                         value={selectedProfileId || ''}

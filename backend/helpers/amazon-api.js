@@ -29,13 +29,18 @@ export async function getAdsApiAccessToken() {
 
     console.log("SERVER_LOG: Requesting new Amazon Ads API access token from LWA...");
     try {
-        const response = await axios.post(LWA_TOKEN_URL, new URLSearchParams({
+        // The LWA endpoint requires a URL-encoded form body.
+        const body = new URLSearchParams({
             grant_type: 'refresh_token',
             refresh_token: ADS_API_REFRESH_TOKEN,
             client_id: ADS_API_CLIENT_ID,
             client_secret: ADS_API_CLIENT_SECRET,
-        }), {
-            headers: { 'Content-Type': 'application/x-form-urlencoded' },
+        });
+
+        const response = await axios.post(LWA_TOKEN_URL, body, {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
         });
 
         const data = response.data;

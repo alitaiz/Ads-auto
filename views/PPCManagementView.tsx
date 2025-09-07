@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { Profile, Campaign, CampaignWithMetrics, CampaignStreamMetrics, SummaryMetricsData, CampaignState } from '../types';
 import { DateRangePicker } from './components/DateRangePicker';
 import { SummaryMetrics } from './components/SummaryMetrics';
@@ -92,7 +93,6 @@ export function PPCManagementView() {
     
     const [dateRange, setDateRange] = useState({ start: lastWeek, end: today });
     const [isDatePickerOpen, setDatePickerOpen] = useState(false);
-    const datePickerButtonRef = useRef<HTMLButtonElement>(null);
 
     const [currentPage, setCurrentPage] = useState(1);
     const [searchTerm, setSearchTerm] = useState('');
@@ -242,8 +242,11 @@ export function PPCManagementView() {
 
     // 1. Combine all campaign metadata with metrics. This is our base dataset.
     const combinedCampaignData: CampaignWithMetrics[] = useMemo(() => {
+        // Create a map for quick metric lookup
+        const metricsMap = new Map(metrics.map(m => [m.campaignId, m]));
+
         return campaigns.map(campaign => {
-            const campaignMetrics = metrics.find(m => m.campaignId === campaign.campaignId);
+            const campaignMetrics = metricsMap.get(campaign.campaignId);
             const spend = campaignMetrics?.spend ?? 0;
             const sales = campaignMetrics?.sales ?? 0;
             const clicks = campaignMetrics?.clicks ?? 0;
@@ -382,7 +385,7 @@ export function PPCManagementView() {
                 </div>
                 <div style={{...styles.controlGroup, marginLeft: 'auto'}}>
                      <div style={{ position: 'relative' }}>
-                         <button ref={datePickerButtonRef} style={styles.dateButton} onClick={() => setDatePickerOpen(o => !o)}>
+                         <button style={styles.dateButton} onClick={() => setDatePickerOpen(o => !o)}>
                            {formatDateRangeDisplay(dateRange.start, dateRange.end)}
                         </button>
                         {isDatePickerOpen && 

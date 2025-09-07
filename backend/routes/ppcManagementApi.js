@@ -23,6 +23,7 @@ router.get('/profiles', async (req, res) => {
 /**
  * POST /api/amazon/campaigns/list
  * Fetches a list of Sponsored Products campaigns.
+ * Now supports filtering by a list of campaign IDs.
  */
 router.post('/campaigns/list', async (req, res) => {
     const { profileId, stateFilter, campaignIdFilter } = req.body;
@@ -31,18 +32,24 @@ router.post('/campaigns/list', async (req, res) => {
     }
 
     try {
-        let allCampaigns = [];
-        let nextToken = null;
         const requestBody = {
             maxResults: 1000,
             stateFilter: { include: stateFilter || ["ENABLED", "PAUSED", "ARCHIVED"] },
         };
-        if (campaignIdFilter && campaignIdFilter.length > 0) {
+        // If a list of specific campaign IDs is provided, add it to the request.
+        // This is crucial for fetching metadata for campaigns that have metrics but might be outside the main state filter.
+        if (campaignIdFilter && Array.isArray(campaignIdFilter) && campaignIdFilter.length > 0) {
             requestBody.campaignIdFilter = { include: campaignIdFilter };
         }
 
+        let allCampaigns = [];
+        let nextToken = null;
+        
         do {
-            requestBody.nextToken = nextToken;
+            if (nextToken) {
+                requestBody.nextToken = nextToken;
+            }
+            
             const data = await amazonAdsApiRequest({
                 method: 'post',
                 url: '/sp/campaigns/list',
@@ -50,7 +57,10 @@ router.post('/campaigns/list', async (req, res) => {
                 data: requestBody,
                 headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
             });
-            if (data.campaigns) allCampaigns = allCampaigns.concat(data.campaigns);
+
+            if (data.campaigns) {
+                allCampaigns = allCampaigns.concat(data.campaigns);
+            }
             nextToken = data.nextToken;
         } while (nextToken);
         

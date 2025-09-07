@@ -82,9 +82,10 @@ router.post('/campaigns/list', async (req, res) => {
             campaignType: 'sponsoredProducts',
             targetingType: c.targetingType,
             state: c.state.toLowerCase(),
-            // Fix: Check for both `budget.amount` (used in PUT requests) and `campaignBudgetAmount` (used in reports)
-            // to ensure the actual budget is retrieved, defaulting to 0 if neither is found.
-            dailyBudget: c.budget?.amount ?? c.campaignBudgetAmount ?? 0,
+            // Correctly extract the budget amount. The campaign list response uses a `budget`
+            // object which contains a numeric `budget` property, which differs from the
+            // `budget.amount` structure used in update requests. Provide a fallback for safety.
+            dailyBudget: c.budget?.budget ?? c.budget?.amount ?? 0,
             startDate: c.startDate,
             endDate: c.endDate,
             bidding: c.bidding,

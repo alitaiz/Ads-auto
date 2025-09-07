@@ -37,3 +37,27 @@ export interface Campaign {
     acos?: number;
     roas?: number;
 }
+
+export interface AdGroup {
+    adGroupId: number;
+    name: string;
+    campaignId: number;
+    defaultBid: number;
+    state: EntityState;
+}
+
+export interface Keyword {
+    keywordId: number;
+    adGroupId: number;
+    campaignId: number;
+    keywordText: string;
+    matchType: 'broad' | 'phrase' | 'exact';
+    state: EntityState;
+    bid?: number;
+     // Performance metrics will be added later
+    impressions?: number;
+    clicks?: number;
+    spend?: number;
+    orders?: number;
+    sales?: number;
+}

@@ -1,0 +1,134 @@
+# ==============================================================================
+# == NGINX CONFIGURATION EXAMPLE / VÍ DỤ CẤU HÌNH NGINX                       ==
+# ==============================================================================
+#
+# This is a complete and recommended Nginx configuration file for the PPC app.
+# It correctly handles HTTPS (SSL) from Certbot and applies Basic Authentication
+# to the entire site, with a necessary exception for the data stream endpoint.
+#
+# Đây là file cấu hình Nginx hoàn chỉnh và được khuyến nghị cho ứng dụng PPC.
+# File này xử lý đúng HTTPS (SSL) từ Certbot và áp dụng Basic Authentication
+# cho toàn bộ trang web, với một ngoại lệ cần thiết cho endpoint nhận dữ liệu stream.
+#
+# HOW TO USE / CÁCH SỬ DỤNG:
+# 1. Copy the ENTIRE content of this file. / Sao chép TOÀN BỘ nội dung file này.
+# 2. Open your site's config file: / Mở file cấu hình của bạn:
+#    sudo nano /etc/nginx/sites-available/ppc.tababyco.com
+# 3. Delete all old content and paste this new content. / Xóa hết nội dung cũ và dán nội dung mới này vào.
+# 4. VERY IMPORTANT: Find and replace "ppc.tababyco.com" with your actual domain name.
+#    RẤT QUAN TRỌNG: Tìm và thay thế "ppc.tababyco.com" bằng tên miền thực tế của bạn.
+# 5. Check the 'root' path to make sure it points to your frontend's 'dist' folder.
+#    Kiểm tra đường dẫn 'root' để đảm bảo nó trỏ đúng đến thư mục 'dist' của frontend.
+# 6. Save the file and restart Nginx. / Lưu file và khởi động lại Nginx.
+#
+# ==============================================================================
+
+# --- BLOCK 1: HTTP to HTTPS Redirect ---
+# This block, often created by Certbot, catches all insecure HTTP traffic
+# on port 80 and permanently redirects it to the secure HTTPS version.
+# KHỐI 1: Chuyển hướng HTTP sang HTTPS
+# Khối này, thường được tạo bởi Certbot, bắt tất cả truy cập HTTP không an toàn
+# ở cổng 80 và chuyển hướng vĩnh viễn sang phiên bản HTTPS an toàn.
+server {
+    listen 80;
+    server_name ppc.tababyco.com; # <-- !!! CHANGE THIS TO YOUR DOMAIN / THAY ĐỔI TÊN MIỀN CỦA BẠN !!!
+
+    # This is the redirect rule.
+    # Đây là luật chuyển hướng.
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# --- BLOCK 2: Main HTTPS Server Configuration ---
+# This is the main block that handles all secure traffic on port 443.
+# **ALL authentication and application logic must go in here.**
+# KHỐI 2: Cấu hình Server HTTPS chính
+# Đây là khối chính xử lý tất cả truy cập an toàn trên cổng 443.
+# **TẤT CẢ logic xác thực và ứng dụng phải được đặt ở đây.**
+server {
+    listen 443 ssl http2;
+    server_name ppc.tababyco.com; # <-- !!! CHANGE THIS TO YOUR DOMAIN / THAY ĐỔI TÊN MIỀN CỦA BẠN !!!
+
+    # --- Path to the Frontend Application ---
+    # This should point to the 'dist' or 'build' folder of your React app.
+    # Đường dẫn đến thư mục 'dist' hoặc 'build' của ứng dụng React.
+    root /var/www/Ads-auto/dist; # <-- !!! CHECK THIS PATH / KIỂM TRA ĐƯỜNG DẪN NÀY !!!
+    index index.html;
+
+    # --- SSL Certificate Configuration (from Certbot) ---
+    # These lines enable HTTPS. Do not change them unless you know what you're doing.
+    # Cấu hình chứng chỉ SSL (từ Certbot). Đừng thay đổi nếu bạn không chắc chắn.
+    ssl_certificate /etc/letsencrypt/live/ppc.tababyco.com/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/ppc.tababyco.com/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+    # ==========================================================================
+    # == BASIC AUTHENTICATION - This protects the entire site with a password ==
+    # == XÁC THỰC CƠ BẢN - Bảo vệ toàn bộ trang web bằng mật khẩu              ==
+    # ==========================================================================
+    # The message that will appear in the login prompt.
+    # Tin nhắn sẽ xuất hiện trong hộp thoại đăng nhập.
+    auth_basic "Restricted Content - Please Log In";
+
+    # Path to the password file you created with htpasswd.
+    # Đường dẫn đến file mật khẩu bạn đã tạo bằng htpasswd.
+    auth_basic_user_file /etc/nginx/.htpasswd;
+    # ==========================================================================
+
+
+    # --- Location Block for Frontend (React App) ---
+    # This handles all requests that are not for the API.
+    # It will inherit the `auth_basic` rule from the server block above.
+    # Khối Location cho Frontend (Ứng dụng React).
+    # Xử lý tất cả các yêu cầu không phải là API.
+    # Nó sẽ kế thừa luật `auth_basic` từ khối server ở trên.
+    location / {
+        # This is crucial for single-page applications like React.
+        # It ensures that refreshing the page on a route like /campaigns still works.
+        # Rất quan trọng cho các ứng dụng trang đơn như React.
+        # Đảm bảo việc làm mới trang trên một route như /campaigns vẫn hoạt động.
+        try_files $uri $uri/ /index.html;
+    }
+
+    # --- Location Block for the API ---
+    # This proxies all requests starting with /api/ to your backend Node.js server.
+    # It will also inherit the `auth_basic` rule, protecting your API.
+    # Khối Location cho API.
+    # Chuyển tiếp tất cả các yêu cầu bắt đầu bằng /api/ đến server Node.js backend.
+    # Nó cũng sẽ kế thừa luật `auth_basic`, bảo vệ API của bạn.
+    location /api/ {
+        # --- EXCEPTION FOR STREAM INGEST ---
+        # We need to create a specific exception for the AWS Lambda endpoint.
+        # This nested location turns OFF authentication ONLY for this exact path.
+        # NGOẠI LỆ CHO VIỆC NHẬN DỮ LIỆU STREAM
+        # Chúng ta cần tạo một ngoại lệ riêng cho endpoint của AWS Lambda.
+        # Location lồng nhau này sẽ TẮT xác thực CHỈ cho đường dẫn chính xác này.
+        location = /api/stream-ingest {
+            auth_basic off; # <-- Authentication is disabled here / Tắt xác thực ở đây
+
+            # Proxy settings for the stream endpoint
+            # Cài đặt proxy cho endpoint stream
+            proxy_pass http://localhost:4001;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_cache_bypass $http_upgrade;
+        }
+
+        # General proxy settings for all other /api/ routes
+        # Cài đặt proxy chung cho tất cả các route /api/ khác
+        proxy_pass http://localhost:4001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_cache_bypass $http_upgrade;
+    }
+}

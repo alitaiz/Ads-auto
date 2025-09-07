@@ -6,12 +6,10 @@ const router = express.Router();
 
 /**
  * GET /api/amazon/profiles
- * Fetches all available advertising profiles. This call does not require a scope.
+ * Fetches all available advertising profiles.
  */
 router.get('/profiles', async (req, res) => {
     try {
-        // The /v2/profiles endpoint does not use the 'Amazon-Advertising-API-Scope' header.
-        // We call the helper without a profileId to prevent it from being added.
         const response = await amazonAdsApiRequest({
             method: 'get',
             url: '/v2/profiles',
@@ -24,7 +22,7 @@ router.get('/profiles', async (req, res) => {
 
 /**
  * POST /api/amazon/campaigns/list
- * Fetches a list of Sponsored Products campaigns for a given profile, handling pagination to retrieve all campaigns.
+ * Fetches a list of Sponsored Products campaigns.
  */
 router.post('/campaigns/list', async (req, res) => {
     const { profileId, stateFilter, campaignIdFilter } = req.body;
@@ -35,62 +33,33 @@ router.post('/campaigns/list', async (req, res) => {
     try {
         let allCampaigns = [];
         let nextToken = null;
-
-        console.log(`Fetching all campaigns for profile ${profileId}...`);
+        const requestBody = {
+            maxResults: 1000,
+            stateFilter: { include: stateFilter || ["ENABLED", "PAUSED", "ARCHIVED"] },
+        };
+        if (campaignIdFilter && campaignIdFilter.length > 0) {
+            requestBody.campaignIdFilter = { include: campaignIdFilter };
+        }
 
         do {
-            const amazonRequestBody = {
-                maxResults: 1000, // Request the maximum allowed per page
-                nextToken: nextToken,
-                stateFilter: {
-                    include: stateFilter || ["ENABLED", "PAUSED", "ARCHIVED"],
-                },
-            };
-            
-            if (campaignIdFilter && campaignIdFilter.length > 0) {
-               amazonRequestBody.campaignIdFilter = { include: campaignIdFilter };
-            }
-
+            requestBody.nextToken = nextToken;
             const data = await amazonAdsApiRequest({
                 method: 'post',
                 url: '/sp/campaigns/list',
                 profileId,
-                data: amazonRequestBody,
-                headers: {
-                    'Content-Type': 'application/vnd.spCampaign.v3+json',
-                    'Accept': 'application/vnd.spCampaign.v3+json',
-                },
+                data: requestBody,
+                headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
             });
-            
-            if (data.campaigns && data.campaigns.length > 0) {
-                allCampaigns = allCampaigns.concat(data.campaigns);
-            }
-            
+            if (data.campaigns) allCampaigns = allCampaigns.concat(data.campaigns);
             nextToken = data.nextToken;
-            if(nextToken) {
-                console.log(`...found another page of campaigns, fetching... (current total: ${allCampaigns.length})`);
-            }
-
         } while (nextToken);
-
-        console.log(`Successfully fetched a total of ${allCampaigns.length} campaigns.`);
         
-        // Transform data to match frontend's expected format
         const transformedCampaigns = allCampaigns.map(c => ({
-            campaignId: c.campaignId,
-            name: c.name,
-            campaignType: 'sponsoredProducts',
-            targetingType: c.targetingType,
-            state: c.state.toLowerCase(),
-            // Correctly extract the budget amount. The campaign list response uses a `budget`
-            // object which contains a numeric `budget` property, which differs from the
-            // `budget.amount` structure used in update requests. Provide a fallback for safety.
+            campaignId: c.campaignId, name: c.name, campaignType: 'sponsoredProducts',
+            targetingType: c.targetingType, state: c.state.toLowerCase(),
             dailyBudget: c.budget?.budget ?? c.budget?.amount ?? 0,
-            startDate: c.startDate,
-            endDate: c.endDate,
-            bidding: c.bidding,
+            startDate: c.startDate, endDate: c.endDate, bidding: c.bidding,
         }));
-
         res.json({ campaigns: transformedCampaigns });
     } catch (error) {
         res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred' });
@@ -102,52 +71,110 @@ router.post('/campaigns/list', async (req, res) => {
  * Updates one or more Sponsored Products campaigns.
  */
 router.put('/campaigns', async (req, res) => {
-    const { profileId, updates } = req.body; // Expects an array of update objects
+    const { profileId, updates } = req.body;
     if (!profileId || !Array.isArray(updates) || updates.length === 0) {
         return res.status(400).json({ message: 'profileId and a non-empty updates array are required.' });
     }
-
     try {
-        // Transform the update payload from our internal format to the format Amazon's API expects.
         const transformedUpdates = updates.map(update => {
             const newUpdate = { campaignId: update.campaignId };
-
-            // Transform state if it exists
-            if (update.state) {
-                newUpdate.state = update.state.toUpperCase();
-            }
-
-            // Transform budget if it exists. The API requires both `budget` (the amount) and `budgetType`.
-            // The frontend sends `{ budget: { amount: X } }`.
+            if (update.state) newUpdate.state = update.state.toUpperCase();
             if (update.budget && typeof update.budget.amount === 'number') {
-                newUpdate.budget = {
-                    budget: update.budget.amount,
-                    budgetType: 'DAILY'
-                };
+                newUpdate.budget = { budget: update.budget.amount, budgetType: 'DAILY' };
             }
-            
             return newUpdate;
         });
-
-        // Amazon API expects the updates to be wrapped in a 'campaigns' property
-        const amazonRequestBody = { campaigns: transformedUpdates };
-
         const data = await amazonAdsApiRequest({
-            method: 'put',
-            url: '/sp/campaigns',
-            profileId,
-            data: amazonRequestBody,
-            headers: {
-                'Content-Type': 'application/vnd.spCampaign.v3+json',
-                'Accept': 'application/vnd.spCampaign.v3+json',
-            },
+            method: 'put', url: '/sp/campaigns', profileId,
+            data: { campaigns: transformedUpdates },
+            headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
         });
-
         res.json(data);
     } catch (error) {
         res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred' });
     }
 });
 
+/**
+ * POST /api/amazon/campaigns/:campaignId/adgroups
+ * Fetches ad groups for a specific campaign.
+ */
+router.post('/campaigns/:campaignId/adgroups', async (req, res) => {
+    const { campaignId } = req.params;
+    const { profileId } = req.body;
+    if (!profileId) return res.status(400).json({ message: 'profileId is required.' });
+    
+    try {
+        const data = await amazonAdsApiRequest({
+            method: 'post', url: '/sp/adGroups/list', profileId,
+            data: { campaignIdFilter: { include: [parseInt(campaignId)] } },
+            headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' },
+        });
+        const adGroups = data.adGroups.map(ag => ({
+            adGroupId: ag.adGroupId, name: ag.name, campaignId: ag.campaignId,
+            defaultBid: ag.defaultBid, state: ag.state.toLowerCase(),
+        }));
+        res.json({ adGroups });
+    } catch (error) {
+        res.status(error.status || 500).json(error.details || { message: `Failed to fetch ad groups for campaign ${campaignId}` });
+    }
+});
+
+/**
+ * POST /api/amazon/adgroups/:adGroupId/keywords
+ * Fetches keywords for a specific ad group.
+ */
+router.post('/adgroups/:adGroupId/keywords', async (req, res) => {
+    const { adGroupId } = req.params;
+    const { profileId } = req.body;
+    if (!profileId) return res.status(400).json({ message: 'profileId is required.' });
+
+    try {
+        const data = await amazonAdsApiRequest({
+            method: 'post', url: '/sp/keywords/list', profileId,
+            data: { adGroupIdFilter: { include: [parseInt(adGroupId)] } },
+            headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
+        });
+        
+        // The API returns 'bid' in a top-level property, which needs to be handled carefully.
+        const keywords = data.keywords.map(kw => ({
+            keywordId: kw.keywordId, adGroupId: kw.adGroupId, campaignId: kw.campaignId,
+            keywordText: kw.keywordText, matchType: kw.matchType.toLowerCase(),
+            state: kw.state.toLowerCase(), bid: kw.bid,
+        }));
+        
+        res.json({ keywords, adGroupName: `Ad Group ${adGroupId}`, campaignId: keywords[0]?.campaignId });
+    } catch (error) {
+        res.status(error.status || 500).json(error.details || { message: `Failed to fetch keywords for ad group ${adGroupId}` });
+    }
+});
+
+/**
+ * PUT /api/amazon/keywords
+ * Updates one or more Sponsored Products keywords.
+ */
+router.put('/keywords', async (req, res) => {
+    const { profileId, updates } = req.body;
+    if (!profileId || !Array.isArray(updates) || updates.length === 0) {
+        return res.status(400).json({ message: 'profileId and a non-empty updates array are required.' });
+    }
+    try {
+         const transformedUpdates = updates.map(update => {
+            const newUpdate = { keywordId: update.keywordId };
+            if (update.state) newUpdate.state = update.state.toUpperCase();
+            if (update.bid) newUpdate.bid = update.bid;
+            return newUpdate;
+        });
+        
+        const data = await amazonAdsApiRequest({
+            method: 'put', url: '/sp/keywords', profileId,
+            data: { keywords: transformedUpdates },
+            headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
+        });
+        res.json(data);
+    } catch (error) {
+        res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred' });
+    }
+});
 
 export default router;

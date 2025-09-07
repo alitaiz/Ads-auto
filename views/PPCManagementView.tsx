@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Link } from 'react-router-dom';
 // Fix: Import EntityState to resolve typing error.
 import { Profile, Campaign, EntityState } from '../types';
 import { formatPrice, formatNumber } from '../utils';
@@ -958,9 +959,9 @@ export function PPCManagementView() {
                             {paginatedCampaigns.length > 0 ? paginatedCampaigns.map((c) => (
                                 <tr key={c.campaignId}>
                                     <td style={{...styles.td, width: `${columnWidths.name}px`}}>
-                                        <a href="#" onClick={(e) => e.preventDefault()} style={{...styles.campaignLink, cursor: 'not-allowed'}} title="Drill-down coming soon">
+                                        <Link to={`/campaigns/${c.campaignId}/adgroups`} style={styles.campaignLink} title={`View ad groups in ${c.name}`}>
                                             {c.name}
-                                        </a>
+                                        </Link>
                                     </td>
                                     <td style={{...styles.td, width: `${columnWidths.status}px`}}>
                                         <button

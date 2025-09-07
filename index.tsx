@@ -2,6 +2,8 @@ import React, { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { PPCManagementView } from './views/PPCManagementView';
+import { AdGroupView } from './views/AdGroupView';
+import { KeywordView } from './views/KeywordView';
 
 // Basic global styles
 const styles = `
@@ -44,12 +46,12 @@ function App() {
     };
   }, []); // Empty dependency array ensures this effect runs only once.
 
-  // For now, the app has one main view. We set up routing to allow for future expansion
-  // with Ad Group and Keyword views.
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/campaigns" element={<PPCManagementView />} />
+        <Route path="/campaigns/:campaignId/adgroups" element={<AdGroupView />} />
+        <Route path="/adgroups/:adGroupId/keywords" element={<KeywordView />} />
         {/* Default route redirects to the main campaigns view */}
         <Route path="*" element={<Navigate to="/campaigns" />} />
       </Routes>

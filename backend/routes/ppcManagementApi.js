@@ -10,13 +10,16 @@ const router = express.Router();
  */
 router.get('/profiles', async (req, res) => {
     try {
+        console.log("SERVER_LOG: Received request for /api/amazon/profiles.");
         const response = await amazonAdsApiRequest({
             method: 'get',
             url: '/v2/profiles',
         });
+        console.log("SERVER_LOG: Successfully fetched profiles from Amazon API.");
         res.json(response);
     } catch (error) {
-        res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred' });
+        console.error('SERVER_LOG: An error occurred in the /profiles endpoint:', JSON.stringify(error, null, 2));
+        res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred while fetching profiles.' });
     }
 });
 

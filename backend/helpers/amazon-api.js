@@ -21,18 +21,26 @@ export async function getAdsApiAccessToken() {
     const clientSecret = process.env.ADS_API_CLIENT_SECRET || process.env.AMAZON_CLIENT_SECRET;
     const refreshToken = process.env.ADS_API_REFRESH_TOKEN || process.env.AMAZON_REFRESH_TOKEN;
 
+    console.log('SERVER_LOG: Attempting to get access token. Checking credentials...');
+    console.log(`SERVER_LOG: - Client ID found: ${!!clientId}`);
+    console.log(`SERVER_LOG: - Client Secret found: ${!!clientSecret}`);
+    console.log(`SERVER_LOG: - Refresh Token found: ${!!refreshToken}`);
+
+
     if (!clientId || !clientSecret || !refreshToken) {
         // The error message guides the user to the current standard variable names.
-        throw new Error('Missing Amazon Ads API credentials in .env file. Please ensure ADS_API_CLIENT_ID, ADS_API_CLIENT_SECRET, and ADS_API_REFRESH_TOKEN are set.');
+        const errorMessage = 'Missing Amazon Ads API credentials in .env file. Please ensure ADS_API_CLIENT_ID, ADS_API_CLIENT_SECRET, and ADS_API_REFRESH_TOKEN are set.';
+        console.error(`SERVER_LOG: ERROR - ${errorMessage}`);
+        throw new Error(errorMessage);
     }
 
     // If we have a valid token in cache, return it
     if (accessTokenCache.token && Date.now() < accessTokenCache.expiresAt) {
-        console.log("Using cached Amazon Ads API access token.");
+        console.log("SERVER_LOG: Using cached Amazon Ads API access token.");
         return accessTokenCache.token;
     }
 
-    console.log("Requesting new Amazon Ads API access token...");
+    console.log("SERVER_LOG: Requesting new Amazon Ads API access token from LWA...");
     try {
         const response = await axios.post(LWA_TOKEN_URL, new URLSearchParams({
             grant_type: 'refresh_token',
@@ -49,11 +57,12 @@ export async function getAdsApiAccessToken() {
             // Cache token for 55 minutes (it expires in 60)
             expiresAt: Date.now() + 55 * 60 * 1000,
         };
-        console.log("Successfully obtained and cached new Amazon Ads API access token.");
+        console.log("SERVER_LOG: Successfully obtained and cached new Amazon Ads API access token.");
         return accessTokenCache.token;
     } catch (error) {
-        console.error("Error refreshing Amazon Ads API access token:", error.response?.data || error.message);
-        throw new Error('Could not refresh Amazon Ads API access token. Please check your credentials.');
+        const errorDetails = error.response?.data || error.message;
+        console.error("SERVER_LOG: CRITICAL - Error refreshing Amazon Ads API access token. Details from Amazon:", JSON.stringify(errorDetails, null, 2));
+        throw new Error('Could not refresh Amazon Ads API access token. Please check your credentials and server logs.');
     }
 }
 
@@ -97,7 +106,7 @@ export async function amazonAdsApiRequest({ method, url, profileId, data, header
 
         return response.data;
     } catch (error) {
-        console.error(`Amazon Ads API request failed for ${method.toUpperCase()} ${url}:`, error.response?.data || error.message);
+        console.error(`SERVER_LOG: Amazon Ads API request failed for ${method.toUpperCase()} ${url}:`, error.response?.data || error.message);
         // Re-throw a structured error for the caller to handle
         const errorDetails = error.response?.data || { message: error.message };
         const status = error.response?.status || 500;

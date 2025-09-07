@@ -146,17 +146,31 @@ export function PPCManagementView() {
                 setLoading(prev => ({ ...prev, profiles: true }));
                 setError(null);
                 const response = await fetch('/api/amazon/profiles');
-                if (!response.ok) throw new Error('Failed to fetch profiles.');
+                
+                if (!response.ok) {
+                    let errorDetails = 'Could not retrieve error details from server.';
+                    try {
+                        const errorData = await response.json();
+                        errorDetails = errorData.message || JSON.stringify(errorData.details || errorData);
+                    } catch (e) {
+                        // Response might not be JSON
+                        errorDetails = await response.text();
+                    }
+                    console.error('FRONTEND_LOG: Failed to fetch profiles. Status:', response.status, 'Details:', errorDetails);
+                    throw new Error(`Failed to fetch profiles. Server says: "${errorDetails}"`);
+                }
+
                 const data = await response.json();
                 const usProfiles = data.filter((p: Profile) => p.countryCode === 'US');
 
                 setProfiles(usProfiles);
                 if (usProfiles.length > 0) {
                     const storedProfileId = localStorage.getItem('selectedProfileId');
-                    const profileIdToSet = storedProfileId && usProfiles.find((p: Profile) => p.profileId === storedProfileId) ? storedProfileId : usProfiles[0].profileId;
+                    const profileIdToSet = storedProfileId && usProfiles.find((p: Profile) => p.profileId.toString() === storedProfileId) ? storedProfileId : usProfiles[0].profileId.toString();
                     setSelectedProfileId(profileIdToSet);
                 }
             } catch (err) {
+                 console.error('FRONTEND_LOG: An unexpected error occurred during fetchProfiles:', err);
                 setError(err instanceof Error ? err.message : 'An unknown error occurred.');
             } finally {
                 setLoading(prev => ({ ...prev, profiles: false }));

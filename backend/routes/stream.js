@@ -71,8 +71,8 @@ router.get('/stream/metrics', async (req, res) => {
             SELECT
                 COALESCE(SUM((event_data->>'clicks')::bigint) FILTER (WHERE event_type = 'sp-traffic'), 0) as click_count,
                 COALESCE(SUM((event_data->>'cost')::numeric) FILTER (WHERE event_type = 'sp-traffic'), 0.00) as total_spend,
-                COALESCE(SUM((event_data->>'attributed_conversions_1d')::bigint) FILTER (WHERE event_type = 'sp-conversion'), 0) as total_orders,
-                COALESCE(SUM((event_data->>'attributed_sales_1d')::numeric) FILTER (WHERE event_type = 'sp-conversion'), 0.00) as total_sales,
+                COALESCE(SUM((event_data->>'conversions')::bigint) FILTER (WHERE event_type = 'sp-conversion'), 0) as total_orders,
+                COALESCE(SUM((event_data->>'attributedSales1d')::numeric) FILTER (WHERE event_type = 'sp-conversion'), 0.00) as total_sales,
                 MAX(received_at) as last_event_timestamp
             FROM raw_stream_events
             WHERE received_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC');
@@ -117,7 +117,7 @@ router.get('/stream/campaign-metrics', async (req, res) => {
         const query = `
             WITH traffic_data AS (
                 SELECT
-                    (event_data->>'campaign_id') as campaign_id_text,
+                    (event_data->>'campaignId') as campaign_id_text,
                     COALESCE(SUM((event_data->>'impressions')::bigint), 0) as impressions,
                     COALESCE(SUM((event_data->>'clicks')::bigint), 0) as clicks,
                     COALESCE(SUM((event_data->>'cost')::numeric), 0.00) as spend
@@ -127,9 +127,9 @@ router.get('/stream/campaign-metrics', async (req, res) => {
             ),
             conversion_data AS (
                 SELECT
-                    (event_data->>'campaign_id') as campaign_id_text,
-                    COALESCE(SUM((event_data->>'attributed_conversions_1d')::bigint), 0) as orders,
-                    COALESCE(SUM((event_data->>'attributed_sales_1d')::numeric), 0.00) as sales
+                    (event_data->>'campaignId') as campaign_id_text,
+                    COALESCE(SUM((event_data->>'conversions')::bigint), 0) as orders,
+                    COALESCE(SUM((event_data->>'attributedSales1d')::numeric), 0.00) as sales
                 FROM raw_stream_events
                 WHERE event_type = 'sp-conversion' AND received_at >= ($1)::date AND received_at < ($2)::date + interval '1 day'
                 GROUP BY 1
@@ -151,10 +151,10 @@ router.get('/stream/campaign-metrics', async (req, res) => {
         if (timezone) {
             // Basic validation to prevent SQL injection. A real app should use a whitelist of IANA timezones.
             if (!/^[A-Za-z_\/]+$/.test(timezone)) {
-                throw new Error(`Invalid timezone format: ${timezone}`);
+                throw new Error(\`Invalid timezone format: \${timezone}\`);
             }
-            // Set the timezone for the duration of this transaction. This makes the `::date` cast respect the user's selected timezone.
-            await client.query(`SET LOCAL TIME ZONE $1`, [timezone]);
+            // Set the timezone for the duration of this transaction. This makes the \`::date\` cast respect the user's selected timezone.
+            await client.query(\`SET LOCAL TIME ZONE $1\`, [timezone]);
         }
         
         const result = await client.query(query, [startDate, endDate]);
@@ -169,7 +169,7 @@ router.get('/stream/campaign-metrics', async (req, res) => {
                 const campaignIdNumber = Number(row.campaignId);
 
                 if (!campaignIdNumber || isNaN(campaignIdNumber)) {
-                    console.warn(`[Stream Metrics] Filtering out invalid campaign ID from DB: ${row.campaignId}`);
+                    console.warn(\`[Stream Metrics] Filtering out invalid campaign ID from DB: \${row.campaignId}\`);
                     return null;
                 }
                 

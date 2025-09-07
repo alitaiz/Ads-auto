@@ -1,13 +1,10 @@
 // backend/db.js
 import pg from 'pg';
-import dotenv from 'dotenv';
-
-// Load environment variables from .env file
-dotenv.config();
 
 const { Pool } = pg;
 
 // Create a new PostgreSQL connection pool using credentials from the .env file
+// These process.env variables are now populated by the central config in server.js
 const pool = new Pool({
   user: process.env.DB_USER,
   host: process.env.DB_HOST,

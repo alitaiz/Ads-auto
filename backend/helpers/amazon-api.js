@@ -1,10 +1,8 @@
 // backend/helpers/amazon-api.js
 import axios from 'axios';
-import dotenv from 'dotenv';
-
-dotenv.config();
 
 // Configuration from environment variables
+// These are now reliably populated by the central dotenv config in server.js
 const {
     ADS_API_CLIENT_ID,
     ADS_API_CLIENT_SECRET,

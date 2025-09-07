@@ -234,54 +234,77 @@ export function PPCManagementView() {
         setError(null);
         setCampaigns([]);
         setPerformanceMetrics({});
+        setCampaignNameMap({});
         setCampaignSearch('');
         setCurrentPage(1);
 
         try {
-            // Fetch campaigns (metadata) in parallel with metrics and historical names
-            const campaignsPromise = fetch('/api/amazon/campaigns/list', {
+            // Step 1: Fetch metrics, initial campaigns, and historical names in parallel.
+            const metricsPromise = fetch('/api/stream/campaign-metrics');
+            const initialCampaignsPromise = fetch('/api/amazon/campaigns/list', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ profileId: selectedProfileId }),
             });
-
-            // Fetch performance metrics from stream data for today
-            const metricsPromise = fetch('/api/stream/campaign-metrics');
-            
-            // Fetch historical campaign names as a fallback
             const namesPromise = fetch('/api/ppc/campaign-names');
 
-            // Fix: Corrected typo where `namesResponse` was used before declaration. It should be `namesPromise`.
-            const [campaignsResponse, metricsResponse, namesResponse] = await Promise.all([campaignsPromise, metricsPromise, namesPromise]);
+            const [metricsResponse, initialCampaignsResponse, namesResponse] = await Promise.all([
+                metricsPromise,
+                initialCampaignsPromise,
+                namesPromise,
+            ]);
 
-            if (!campaignsResponse.ok) {
-                const errorData = await campaignsResponse.json();
-                throw new Error(errorData.message || 'Failed to fetch campaigns.');
-            }
-             if (!metricsResponse.ok) {
-                const errorData = await metricsResponse.json();
-                throw new Error(errorData.error || 'Failed to fetch performance metrics.');
-            }
-
-            const campaignsData = await campaignsResponse.json();
-            // Fix: Use the correct type for the fetched metrics data.
+            // Error handling for primary fetches
+            if (!metricsResponse.ok) throw new Error((await metricsResponse.json()).error || 'Failed to fetch performance metrics.');
+            if (!initialCampaignsResponse.ok) throw new Error((await initialCampaignsResponse.json()).message || 'Failed to fetch campaigns.');
+            
             const metricsData: CampaignPerformanceMetrics[] = await metricsResponse.json();
+            const initialCampaignsData = await initialCampaignsResponse.json();
+            let allCampaigns = initialCampaignsData.campaigns || [];
             
             if (namesResponse.ok) {
-                const namesData = await namesResponse.json();
-                setCampaignNameMap(namesData);
+                setCampaignNameMap(await namesResponse.json());
             } else {
                 console.warn('Could not fetch historical campaign names.');
             }
+            
+            // Step 2: Identify and fetch any campaigns that have metrics but are missing from the initial list.
+            const campaignIdsFromApi = new Set(allCampaigns.map(c => c.campaignId));
+            const missingCampaignIds = metricsData
+                .map(m => m.campaignId)
+                .filter(id => !campaignIdsFromApi.has(id));
 
-            setCampaigns(campaignsData.campaigns || []);
+            if (missingCampaignIds.length > 0) {
+                console.log(`Found ${missingCampaignIds.length} campaigns with metrics but missing metadata. Fetching them...`);
+                
+                const missingCampaignsResponse = await fetch('/api/amazon/campaigns/list', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        profileId: selectedProfileId,
+                        stateFilter: ["ENABLED", "PAUSED", "ARCHIVED"], 
+                        campaignIdFilter: missingCampaignIds 
+                    }),
+                });
 
-            // Fix: Use the correct type for the metrics map accumulator.
+                if (missingCampaignsResponse.ok) {
+                    const missingCampaignsData = await missingCampaignsResponse.json();
+                    const fetchedMissingCampaigns = missingCampaignsData.campaigns || [];
+                    allCampaigns = [...allCampaigns, ...fetchedMissingCampaigns];
+                    console.log(`Successfully fetched and merged metadata for ${fetchedMissingCampaigns.length} campaigns.`);
+                } else {
+                    console.warn('Failed to fetch metadata for missing campaigns.');
+                }
+            }
+            
+            // Step 3: Set the final state once all data is collected.
             const metricsMap = metricsData.reduce((acc, metric) => {
                 acc[metric.campaignId] = metric;
                 return acc;
             }, {} as Record<string, CampaignPerformanceMetrics>);
+
             setPerformanceMetrics(metricsMap);
+            setCampaigns(allCampaigns);
 
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An unknown error occurred while fetching data.');

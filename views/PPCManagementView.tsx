@@ -344,22 +344,18 @@ export function PPCManagementView() {
     }, [campaigns, selectedProfileId, editingCampaign]);
 
     const campaignsWithMetrics: CampaignWithMetrics[] = useMemo(() => {
-        // Create a Map of all campaigns from the API for O(1) lookup
+        // Create a Map of all campaigns fetched from the API for O(1) metadata lookup.
         const campaignsFromApi = new Map(campaigns.map(c => [c.campaignId, c]));
-        
-        // Get all unique campaign IDs from both metrics and the API list
-        const allCampaignIds = new Set([
-            ...campaigns.map(c => c.campaignId),
-            ...Object.values(performanceMetrics).map(m => m.campaignId)
-        ]);
     
-        const combinedCampaigns: CampaignWithMetrics[] = Array.from(allCampaignIds).map(campaignId => {
+        // The list of campaigns to display is now driven ONLY by campaigns that have performance metrics in our database.
+        const campaignsWithDataInDB = Object.values(performanceMetrics);
+    
+        const combinedCampaigns: CampaignWithMetrics[] = campaignsWithDataInDB.map(metrics => {
+            const campaignId = metrics.campaignId;
             const campaignInfo = campaignsFromApi.get(campaignId);
-            // Fix: Explicitly type `metrics` to allow safe access to its optional properties.
-            const metrics: Partial<CampaignPerformanceMetrics> = performanceMetrics[campaignId] || {};
     
-            // Use live campaign info if available, otherwise create a placeholder
-            // which conforms to the Campaign interface.
+            // Use live campaign info from the API if available.
+            // If not found (e.g., campaign is now archived and wasn't fetched), create a placeholder using historical data.
             const baseCampaign: Campaign = campaignInfo
                 ? campaignInfo
                 : {
@@ -367,7 +363,7 @@ export function PPCManagementView() {
                     name: campaignNameMap[String(campaignId)] || `Campaign ${campaignId}`,
                     campaignType: 'sponsoredProducts',
                     targetingType: 'unknown',
-                    state: 'archived', // A safe, non-interactive default from EntityState
+                    state: 'archived', // A safe, non-interactive default
                     dailyBudget: 0,
                     startDate: 'N/A',
                     endDate: null,
@@ -629,7 +625,7 @@ export function PPCManagementView() {
                             )) : (
                                 <tr>
                                     <td colSpan={12} style={{...styles.td, textAlign: 'center', borderBottom: 'none'}}>
-                                        {campaignSearch ? 'No campaigns match your search.' : 'No campaigns found for this profile.'}
+                                        {campaignSearch ? 'No campaigns match your search.' : 'No campaigns with performance data found for this profile.'}
                                     </td>
                                 </tr>
                             )}

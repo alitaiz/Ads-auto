@@ -115,14 +115,34 @@ router.post('/campaigns/:campaignId/adgroups', async (req, res) => {
     if (!profileId) return res.status(400).json({ message: 'profileId is required.' });
     
     try {
-        const data = await amazonAdsApiRequest({
-            method: 'post', url: '/sp/adGroups/list', profileId,
-            data: { campaignIdFilter: { include: [parseInt(campaignId)] } },
-            headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' },
-        });
-        const adGroups = data.adGroups.map(ag => ({
+        const requestBody = {
+            campaignIdFilter: { include: [parseInt(campaignId)] },
+            stateFilter: { include: ["ENABLED", "PAUSED", "ARCHIVED"] },
+            maxResults: 500,
+        };
+
+        let allAdGroups = [];
+        let nextToken = null;
+
+        do {
+            if (nextToken) {
+                requestBody.nextToken = nextToken;
+            }
+            const data = await amazonAdsApiRequest({
+                method: 'post', url: '/sp/adGroups/list', profileId,
+                data: requestBody,
+                headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' },
+            });
+            
+            if (data.adGroups && Array.isArray(data.adGroups)) {
+                allAdGroups = allAdGroups.concat(data.adGroups);
+            }
+            nextToken = data.nextToken;
+        } while (nextToken);
+        
+        const adGroups = allAdGroups.map(ag => ({
             adGroupId: ag.adGroupId, name: ag.name, campaignId: ag.campaignId,
-            defaultBid: ag.defaultBid, state: ag.state.toLowerCase(),
+            defaultBid: ag.defaultBid, state: (ag.state || 'archived').toLowerCase(),
         }));
         res.json({ adGroups });
     } catch (error) {
@@ -140,17 +160,35 @@ router.post('/adgroups/:adGroupId/keywords', async (req, res) => {
     if (!profileId) return res.status(400).json({ message: 'profileId is required.' });
 
     try {
-        const data = await amazonAdsApiRequest({
-            method: 'post', url: '/sp/keywords/list', profileId,
-            data: { adGroupIdFilter: { include: [parseInt(adGroupId)] } },
-            headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
-        });
+        const requestBody = {
+            adGroupIdFilter: { include: [parseInt(adGroupId)] },
+            stateFilter: { include: ["ENABLED", "PAUSED", "ARCHIVED"] },
+            maxResults: 1000,
+        };
+
+        let allKeywords = [];
+        let nextToken = null;
+
+        do {
+            if (nextToken) {
+                requestBody.nextToken = nextToken;
+            }
+            const data = await amazonAdsApiRequest({
+                method: 'post', url: '/sp/keywords/list', profileId,
+                data: requestBody,
+                headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
+            });
+            
+            if (data.keywords && Array.isArray(data.keywords)) {
+                allKeywords = allKeywords.concat(data.keywords);
+            }
+            nextToken = data.nextToken;
+        } while (nextToken);
         
-        // The API returns 'bid' in a top-level property, which needs to be handled carefully.
-        const keywords = data.keywords.map(kw => ({
+        const keywords = allKeywords.map(kw => ({
             keywordId: kw.keywordId, adGroupId: kw.adGroupId, campaignId: kw.campaignId,
-            keywordText: kw.keywordText, matchType: kw.matchType.toLowerCase(),
-            state: kw.state.toLowerCase(), bid: kw.bid,
+            keywordText: kw.keywordText, matchType: (kw.matchType || 'unknown').toLowerCase(),
+            state: (kw.state || 'archived').toLowerCase(), bid: kw.bid,
         }));
         
         res.json({ keywords, adGroupName: `Ad Group ${adGroupId}`, campaignId: keywords[0]?.campaignId });

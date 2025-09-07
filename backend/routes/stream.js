@@ -151,10 +151,10 @@ router.get('/stream/campaign-metrics', async (req, res) => {
         if (timezone) {
             // Basic validation to prevent SQL injection. A real app should use a whitelist of IANA timezones.
             if (!/^[A-Za-z_\/]+$/.test(timezone)) {
-                throw new Error(\`Invalid timezone format: \${timezone}\`);
+                throw new Error(`Invalid timezone format: ${timezone}`);
             }
-            // Set the timezone for the duration of this transaction. This makes the \`::date\` cast respect the user's selected timezone.
-            await client.query(\`SET LOCAL TIME ZONE $1\`, [timezone]);
+            // Set the timezone for the duration of this transaction. This makes the `::date` cast respect the user's selected timezone.
+            await client.query(`SET LOCAL TIME ZONE $1`, [timezone]);
         }
         
         const result = await client.query(query, [startDate, endDate]);
@@ -169,7 +169,7 @@ router.get('/stream/campaign-metrics', async (req, res) => {
                 const campaignIdNumber = Number(row.campaignId);
 
                 if (!campaignIdNumber || isNaN(campaignIdNumber)) {
-                    console.warn(\`[Stream Metrics] Filtering out invalid campaign ID from DB: \${row.campaignId}\`);
+                    console.warn(`[Stream Metrics] Filtering out invalid campaign ID from DB: ${row.campaignId}`);
                     return null;
                 }
                 

@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "server:start": "node backend/server.js",
+    "server:dev": "node --watch backend/server.js",
+    "stream:subscribe": "node scripts/subscribe_to_stream.js",
+    "fetch:sp-search-terms": "node scripts/fetch_sp_search_term_report.js",
+    "fetch:sales-traffic": "node scripts/fetch_sales_and_traffic.js"
   },
   "dependencies": {
     "react": "^19.1.1",

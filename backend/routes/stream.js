@@ -111,6 +111,11 @@ router.get('/stream/campaign-metrics', async (req, res) => {
         return res.status(400).json({ error: 'startDate and endDate query parameters are required.' });
     }
 
+    // This ensures that the date range selected by the user is interpreted in a
+    // consistent timezone (e.g., US Pacific Time), rather than the server's UTC default.
+    // This resolves discrepancies where late-night events on day X would appear as day X+1.
+    const reportingTimezone = 'America/Los_Angeles';
+
     try {
         const query = `
             WITH traffic_data AS (
@@ -120,7 +125,9 @@ router.get('/stream/campaign-metrics', async (req, res) => {
                     COALESCE(SUM((event_data->>'clicks')::bigint), 0) as clicks,
                     COALESCE(SUM((event_data->>'cost')::numeric), 0.00) as spend
                 FROM raw_stream_events
-                WHERE event_type = 'sp-traffic' AND (event_data->>'time_window_start')::timestamptz >= ($1)::date AND (event_data->>'time_window_start')::timestamptz < ($2)::date + interval '1 day'
+                WHERE event_type = 'sp-traffic' 
+                  AND (event_data->>'time_window_start')::timestamptz >= (($1)::timestamp AT TIME ZONE '${reportingTimezone}') 
+                  AND (event_data->>'time_window_start')::timestamptz < ((($2)::date + interval '1 day')::timestamp AT TIME ZONE '${reportingTimezone}')
                 GROUP BY 1
             ),
             conversion_data AS (
@@ -129,7 +136,9 @@ router.get('/stream/campaign-metrics', async (req, res) => {
                     COALESCE(SUM((event_data->>'attributed_conversions_1d')::bigint), 0) as orders,
                     COALESCE(SUM((event_data->>'attributed_sales_1d')::numeric), 0.00) as sales
                 FROM raw_stream_events
-                WHERE event_type = 'sp-conversion' AND (event_data->>'time_window_start')::timestamptz >= ($1)::date AND (event_data->>'time_window_start')::timestamptz < ($2)::date + interval '1 day'
+                WHERE event_type = 'sp-conversion'
+                  AND (event_data->>'time_window_start')::timestamptz >= (($1)::timestamp AT TIME ZONE '${reportingTimezone}') 
+                  AND (event_data->>'time_window_start')::timestamptz < ((($2)::date + interval '1 day')::timestamp AT TIME ZONE '${reportingTimezone}')
                 GROUP BY 1
             )
             SELECT

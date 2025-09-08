@@ -120,7 +120,7 @@ router.get('/stream/campaign-metrics', async (req, res) => {
                     COALESCE(SUM((event_data->>'clicks')::bigint), 0) as clicks,
                     COALESCE(SUM((event_data->>'cost')::numeric), 0.00) as spend
                 FROM raw_stream_events
-                WHERE event_type = 'sp-traffic' AND received_at >= ($1)::date AND received_at < ($2)::date + interval '1 day'
+                WHERE event_type = 'sp-traffic' AND (event_data->>'time_window_start')::timestamptz >= ($1)::date AND (event_data->>'time_window_start')::timestamptz < ($2)::date + interval '1 day'
                 GROUP BY 1
             ),
             conversion_data AS (
@@ -129,7 +129,7 @@ router.get('/stream/campaign-metrics', async (req, res) => {
                     COALESCE(SUM((event_data->>'attributed_conversions_1d')::bigint), 0) as orders,
                     COALESCE(SUM((event_data->>'attributed_sales_1d')::numeric), 0.00) as sales
                 FROM raw_stream_events
-                WHERE event_type = 'sp-conversion' AND received_at >= ($1)::date AND received_at < ($2)::date + interval '1 day'
+                WHERE event_type = 'sp-conversion' AND (event_data->>'time_window_start')::timestamptz >= ($1)::date AND (event_data->>'time_window_start')::timestamptz < ($2)::date + interval '1 day'
                 GROUP BY 1
             )
             SELECT

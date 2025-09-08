@@ -202,18 +202,27 @@ export function PPCManagementView() {
                 }
             }
             
+            // De-duplicate the combined campaign list to handle potential overlaps or API duplicates.
+            const uniqueCampaignsMap = new Map<number, Campaign>();
+            for (const campaign of allCampaigns) {
+                if (campaign?.campaignId) {
+                    uniqueCampaignsMap.set(campaign.campaignId, campaign);
+                }
+            }
+            const uniqueCampaigns = Array.from(uniqueCampaignsMap.values());
+
             const metricsMap = metricsData.reduce((acc, metric) => {
                 acc[metric.campaignId] = metric;
                 return acc;
             }, {} as Record<number, CampaignStreamMetrics>);
 
-            setCampaigns(allCampaigns);
+            setCampaigns(uniqueCampaigns);
             setPerformanceMetrics(metricsMap);
             // Update the global cache
             setCache(prev => ({
                 ...prev,
                 ppcManagement: {
-                    campaigns: allCampaigns,
+                    campaigns: uniqueCampaigns,
                     performanceMetrics: metricsMap,
                     profileId: selectedProfileId,
                     dateRange: dateRange,

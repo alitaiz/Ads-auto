@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CampaignWithMetrics, CampaignState } from '../../types';
+import { CampaignWithMetrics, CampaignState, AdGroup } from '../../types';
 import { formatPrice, formatNumber } from '../../utils';
 
 const styles: { [key: string]: React.CSSProperties } = {
@@ -13,7 +13,7 @@ const styles: { [key: string]: React.CSSProperties } = {
     table: {
         width: '100%',
         borderCollapse: 'collapse',
-        tableLayout: 'fixed', // Important for resizing
+        tableLayout: 'fixed',
     },
     th: {
         padding: '12px 15px',
@@ -22,12 +22,8 @@ const styles: { [key: string]: React.CSSProperties } = {
         backgroundColor: '#f8f9fa',
         fontWeight: 600,
         cursor: 'pointer',
-        position: 'relative', // For resize handle and sort icon
+        position: 'relative',
         whiteSpace: 'nowrap',
-    },
-    thResizable: {
-        resize: 'horizontal',
-        overflow: 'hidden',
     },
     sortIcon: {
         marginLeft: '5px',
@@ -57,6 +53,38 @@ const styles: { [key: string]: React.CSSProperties } = {
     },
     capitalize: {
         textTransform: 'capitalize',
+    },
+    expandCell: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        cursor: 'pointer',
+    },
+    expandIcon: {
+        transition: 'transform 0.2s',
+    },
+    adGroupSubTableContainer: {
+        backgroundColor: '#f8f9fa',
+        padding: '15px 25px 15px 50px', // Indent the sub-table
+    },
+    adGroupSubTable: {
+        width: '100%',
+        borderCollapse: 'collapse',
+    },
+    adGroupTh: {
+        textAlign: 'left',
+        padding: '8px',
+        borderBottom: '1px solid #dee2e6',
+        fontWeight: 600,
+    },
+    adGroupTd: {
+        textAlign: 'left',
+        padding: '8px',
+        borderBottom: '1px solid #e9ecef',
+    },
+    subError: {
+        color: 'var(--danger-color)',
+        padding: '10px'
     }
 };
 
@@ -67,82 +95,115 @@ interface CampaignTableProps {
     onUpdateCampaign: (campaignId: number, update: { state?: CampaignState; budget?: { amount: number } }) => void;
     sortConfig: { key: SortableKeys; direction: 'ascending' | 'descending' } | null;
     onRequestSort: (key: SortableKeys) => void;
+    expandedCampaignId: number | null;
+    onToggleExpand: (campaignId: number) => void;
+    adGroups: Record<number, AdGroup[]>;
+    loadingAdGroups: number | null;
+    adGroupError: string | null;
+    campaignName: string;
 }
 
 const SortableHeader = ({
-    label,
-    sortKey,
-    sortConfig,
-    onRequestSort,
+    label, sortKey, sortConfig, onRequestSort,
 }: {
-    label: string,
-    sortKey: SortableKeys,
-    sortConfig: CampaignTableProps['sortConfig'],
-    onRequestSort: CampaignTableProps['onRequestSort'],
+    label: string; sortKey: SortableKeys; sortConfig: CampaignTableProps['sortConfig']; onRequestSort: CampaignTableProps['onRequestSort'];
 }) => {
     const isSorted = sortConfig?.key === sortKey;
     const directionIcon = sortConfig?.direction === 'ascending' ? '▲' : '▼';
 
     return (
-        <th style={{...styles.th, ...styles.thResizable}} onClick={() => onRequestSort(sortKey)}>
+        <th style={styles.th} onClick={() => onRequestSort(sortKey)}>
             {label}
             {isSorted && <span style={styles.sortIcon}>{directionIcon}</span>}
         </th>
     );
 };
 
-export function CampaignTable({ campaigns, onUpdateCampaign, sortConfig, onRequestSort }: CampaignTableProps) {
+export function CampaignTable({
+    campaigns, onUpdateCampaign, sortConfig, onRequestSort,
+    expandedCampaignId, onToggleExpand, adGroups, loadingAdGroups, adGroupError, campaignName
+}: CampaignTableProps) {
     const [editingCell, setEditingCell] = useState<{ id: number; field: 'state' | 'budget' } | null>(null);
     const [tempValue, setTempValue] = useState<string | number>('');
 
     const handleCellClick = (campaign: CampaignWithMetrics, field: 'state' | 'budget') => {
         setEditingCell({ id: campaign.campaignId, field });
-        if (field === 'state') {
-            setTempValue(campaign.state);
-        } else if (field === 'budget') {
-            setTempValue(campaign.dailyBudget);
-        }
+        if (field === 'state') setTempValue(campaign.state);
+        else if (field === 'budget') setTempValue(campaign.dailyBudget);
     };
 
     const handleUpdate = (campaignId: number) => {
         if (!editingCell) return;
-
-        if (editingCell.field === 'state') {
-            onUpdateCampaign(campaignId, { state: tempValue as CampaignState });
-        } else if (editingCell.field === 'budget') {
+        if (editingCell.field === 'state') onUpdateCampaign(campaignId, { state: tempValue as CampaignState });
+        else if (editingCell.field === 'budget') {
             const newBudget = parseFloat(tempValue as string);
-            if (!isNaN(newBudget) && newBudget > 0) {
-                onUpdateCampaign(campaignId, { budget: { amount: newBudget } });
-            }
+            if (!isNaN(newBudget) && newBudget > 0) onUpdateCampaign(campaignId, { budget: { amount: newBudget } });
         }
         setEditingCell(null);
     };
 
     const handleKeyDown = (e: React.KeyboardEvent, campaignId: number) => {
-        if (e.key === 'Enter') {
-            handleUpdate(campaignId);
-        } else if (e.key === 'Escape') {
-            setEditingCell(null);
-        }
+        if (e.key === 'Enter') handleUpdate(campaignId);
+        else if (e.key === 'Escape') setEditingCell(null);
     };
-
+    
     const formatPercent = (value?: number) => (value ? `${(value * 100).toFixed(2)}%` : '0.00%');
     const formatRoAS = (value?: number) => (value ? `${value.toFixed(2)}` : '0.00');
+
+    const renderAdGroupSubTable = (campaignId: number) => {
+        if (loadingAdGroups === campaignId) return <div style={{ padding: '20px' }}>Loading ad groups...</div>;
+        if (adGroupError && expandedCampaignId === campaignId) return <div style={styles.subError}>Error: {adGroupError}</div>;
+
+        const currentAdGroups = adGroups[campaignId];
+        if (!currentAdGroups) return null;
+
+        return (
+            <div style={styles.adGroupSubTableContainer}>
+                {currentAdGroups.length > 0 ? (
+                     <table style={styles.adGroupSubTable}>
+                        <thead>
+                            <tr>
+                                <th style={{...styles.adGroupTh, width: '60%'}}>Ad Group Name</th>
+                                <th style={{...styles.adGroupTh, width: '20%'}}>Status</th>
+                                <th style={{...styles.adGroupTh, width: '20%'}}>Default Bid</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {currentAdGroups.map(ag => (
+                                <tr key={ag.adGroupId}>
+                                    <td style={styles.adGroupTd}>
+                                        <Link 
+                                            to={`/adgroups/${ag.adGroupId}/keywords`} 
+                                            state={{ adGroupName: ag.name, campaignName: campaignName }}
+                                            style={styles.link}
+                                        >
+                                            {ag.name}
+                                        </Link>
+                                    </td>
+                                    <td style={{...styles.adGroupTd, textTransform: 'capitalize'}}>{ag.state}</td>
+                                    <td style={styles.adGroupTd}>{formatPrice(ag.defaultBid)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                ) : (
+                    <div>No ad groups found in this campaign.</div>
+                )}
+            </div>
+        );
+    };
+    
+    const totalColumns = 10;
     
     return (
         <div style={styles.tableContainer}>
             <table style={styles.table}>
-                <colgroup>
-                    <col style={{ width: '25%' }} />
-                    <col style={{ width: '10%' }} />
-                    <col style={{ width: '10%' }} />
-                    <col style={{ width: '9%' }} />
-                    <col style={{ width: '9%' }} />
-                    <col style={{ width: '9%' }} />
-                    <col style={{ width: '9%' }} />
-                    <col style={{ width: '9%' }} />
-                    <col style={{ width: '5%' }} />
-                    <col style={{ width: '5%' }} />
+                 <colgroup>
+                    <col style={{ width: '25%' }} /> <col style={{ width: '10%' }} />
+                    <col style={{ width: '10%' }} /> <col style={{ width: '9%' }} />
+                    <col style={{ width: '9%' }} /> <col style={{ width: '9%' }} />
+                    <col style={{ width: '9%' }} /> <col style={{ width: '9%' }} />
+                    <col style={{ width: '5%' }} /> <col style={{ width: '5%' }} />
                 </colgroup>
                 <thead>
                     <tr>
@@ -160,53 +221,42 @@ export function CampaignTable({ campaigns, onUpdateCampaign, sortConfig, onReque
                 </thead>
                 <tbody>
                     {campaigns.map(campaign => (
-                        <tr key={campaign.campaignId}>
-                            <td style={styles.td} title={campaign.name}>
-                                <Link to={`/campaigns/${campaign.campaignId}/adgroups`} state={{ campaignName: campaign.name }} style={styles.link}>
-                                    {campaign.name}
-                                </Link>
-                            </td>
-                            <td style={{ ...styles.td, cursor: 'pointer' }} onClick={() => handleCellClick(campaign, 'state')}>
-                                {editingCell?.id === campaign.campaignId && editingCell.field === 'state' ? (
-                                    <select
-                                        style={styles.select}
-                                        value={tempValue}
-                                        onChange={(e) => setTempValue(e.target.value)}
-                                        onBlur={() => handleUpdate(campaign.campaignId)}
-                                        onKeyDown={(e) => handleKeyDown(e, campaign.campaignId)}
-                                        autoFocus
-                                    >
-                                        <option value="enabled">Enabled</option>
-                                        <option value="paused">Paused</option>
-                                        <option value="archived">Archived</option>
-                                    </select>
-                                ) : (
-                                    <span style={styles.capitalize}>{campaign.state}</span>
-                                )}
-                            </td>
-                            <td style={{ ...styles.td, cursor: 'pointer' }} onClick={() => handleCellClick(campaign, 'budget')}>
-                                {editingCell?.id === campaign.campaignId && editingCell.field === 'budget' ? (
-                                    <input
-                                        type="number"
-                                        style={styles.input}
-                                        value={tempValue}
-                                        onChange={(e) => setTempValue(e.target.value)}
-                                        onBlur={() => handleUpdate(campaign.campaignId)}
-                                        onKeyDown={(e) => handleKeyDown(e, campaign.campaignId)}
-                                        autoFocus
-                                    />
-                                ) : (
-                                    formatPrice(campaign.dailyBudget)
-                                )}
-                            </td>
-                            <td style={styles.td}>{formatPrice(campaign.spend)}</td>
-                            <td style={styles.td}>{formatPrice(campaign.sales)}</td>
-                            <td style={styles.td}>{formatNumber(campaign.orders)}</td>
-                            <td style={styles.td}>{formatNumber(campaign.impressions)}</td>
-                            <td style={styles.td}>{formatNumber(campaign.clicks)}</td>
-                            <td style={styles.td}>{formatPercent(campaign.acos)}</td>
-                            <td style={styles.td}>{formatRoAS(campaign.roas)}</td>
-                        </tr>
+                        <React.Fragment key={campaign.campaignId}>
+                            <tr>
+                                <td style={styles.td} title={campaign.name}>
+                                    <div style={styles.expandCell} onClick={() => onToggleExpand(campaign.campaignId)}>
+                                        <span style={{...styles.expandIcon, transform: expandedCampaignId === campaign.campaignId ? 'rotate(90deg)' : 'rotate(0deg)'}}>►</span>
+                                        <span>{campaign.name}</span>
+                                    </div>
+                                </td>
+                                <td style={{ ...styles.td, cursor: 'pointer' }} onClick={() => handleCellClick(campaign, 'state')}>
+                                    {editingCell?.id === campaign.campaignId && editingCell.field === 'state' ? (
+                                        <select style={styles.select} value={tempValue} onChange={(e) => setTempValue(e.target.value)} onBlur={() => handleUpdate(campaign.campaignId)} onKeyDown={(e) => handleKeyDown(e, campaign.campaignId)} autoFocus>
+                                            <option value="enabled">Enabled</option> <option value="paused">Paused</option> <option value="archived">Archived</option>
+                                        </select>
+                                    ) : <span style={styles.capitalize}>{campaign.state}</span>}
+                                </td>
+                                <td style={{ ...styles.td, cursor: 'pointer' }} onClick={() => handleCellClick(campaign, 'budget')}>
+                                    {editingCell?.id === campaign.campaignId && editingCell.field === 'budget' ? (
+                                        <input type="number" style={styles.input} value={tempValue} onChange={(e) => setTempValue(e.target.value)} onBlur={() => handleUpdate(campaign.campaignId)} onKeyDown={(e) => handleKeyDown(e, campaign.campaignId)} autoFocus />
+                                    ) : formatPrice(campaign.dailyBudget)}
+                                </td>
+                                <td style={styles.td}>{formatPrice(campaign.spend)}</td>
+                                <td style={styles.td}>{formatPrice(campaign.sales)}</td>
+                                <td style={styles.td}>{formatNumber(campaign.orders)}</td>
+                                <td style={styles.td}>{formatNumber(campaign.impressions)}</td>
+                                <td style={styles.td}>{formatNumber(campaign.clicks)}</td>
+                                <td style={styles.td}>{formatPercent(campaign.acos)}</td>
+                                <td style={styles.td}>{formatRoAS(campaign.roas)}</td>
+                            </tr>
+                            {expandedCampaignId === campaign.campaignId && (
+                                <tr>
+                                    <td colSpan={totalColumns} style={{padding: 0, borderTop: 0}}>
+                                        {renderAdGroupSubTable(campaign.campaignId)}
+                                    </td>
+                                </tr>
+                            )}
+                        </React.Fragment>
                     ))}
                 </tbody>
             </table>

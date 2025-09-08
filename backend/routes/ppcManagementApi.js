@@ -129,7 +129,7 @@ router.post('/campaigns/:campaignId/adgroups', async (req, res) => {
                 requestBody.nextToken = nextToken;
             }
             const data = await amazonAdsApiRequest({
-                method: 'post', url: '/sp/adgroups/list', profileId,
+                method: 'post', url: '/sp/adGroups/list', profileId,
                 data: requestBody,
                 headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' },
             });

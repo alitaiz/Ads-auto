@@ -1,6 +1,7 @@
 // backend/helpers/amazon-api.js
 import axios from 'axios';
 import { URLSearchParams } from 'url';
+import https from 'https'; // Import the native https module
 
 // Configuration from environment variables
 const {
@@ -13,8 +14,9 @@ const LWA_TOKEN_URL = 'https://api.amazon.com/auth/o2/token';
 const ADS_API_ENDPOINT = 'https://advertising-api.amazon.com';
 
 /**
- * Retrieves a new, valid LWA (Login with Amazon) access token for every request.
- * This function intentionally avoids caching to prevent token reuse issues.
+ * Retrieves a new LWA access token.
+ * This function now explicitly disables HTTP Keep-Alive to ensure a fresh,
+ * uncorrupted connection to the authentication server for every request.
  * @returns {Promise<string>} A fresh, valid access token.
  */
 export async function getAdsApiAccessToken() {
@@ -22,7 +24,7 @@ export async function getAdsApiAccessToken() {
         throw new Error('Missing Amazon Ads API credentials in .env file.');
     }
     
-    console.log("Requesting new Amazon Ads API access token for every request...");
+    console.log("Requesting new Amazon Ads API access token with a fresh connection...");
     try {
         const params = new URLSearchParams();
         params.append('grant_type', 'refresh_token');
@@ -30,11 +32,13 @@ export async function getAdsApiAccessToken() {
         params.append('client_id', ADS_API_CLIENT_ID);
         params.append('client_secret', ADS_API_CLIENT_SECRET);
         
-        const response = await axios.post(LWA_TOKEN_URL, params);
+        // Create a new agent that disables keep-alive. This is the core of the fix.
+        const agent = new https.Agent({ keepAlive: false });
+
+        const response = await axios.post(LWA_TOKEN_URL, params, { httpsAgent: agent });
 
         const data = response.data;
         console.log("Successfully obtained new Amazon Ads API access token.");
-        // Return the new token directly without caching.
         return data.access_token.trim();
 
     } catch (error) {
@@ -44,7 +48,9 @@ export async function getAdsApiAccessToken() {
 }
 
 /**
- * A wrapper function for making authenticated requests to the Amazon Ads API.
+ * A wrapper for making authenticated requests to the Amazon Ads API.
+ * This now forces a new, non-keep-alive connection for every request to
+ * prevent any potential connection reuse issues that could corrupt headers.
  * @param {object} config - The configuration for the API request.
  * @param {string} config.method - The HTTP method (get, post, put, etc.).
  * @param {string} config.url - The API endpoint path (e.g., '/v2/profiles').
@@ -63,16 +69,19 @@ export async function amazonAdsApiRequest({ method, url, profileId, data, header
             ...headers
         };
 
-        // Add the profile scope header ONLY if a profileId is provided.
         if (profileId) {
             defaultHeaders['Amazon-Advertising-API-Scope'] = profileId;
         }
+
+        // Create a new agent for this specific request, disabling keep-alive.
+        const agent = new https.Agent({ keepAlive: false });
 
         const response = await axios({
             method,
             url: `${ADS_API_ENDPOINT}${url}`,
             headers: defaultHeaders,
             data,
+            httpsAgent: agent, // Use the new, non-keep-alive agent
         });
 
         return response.data;

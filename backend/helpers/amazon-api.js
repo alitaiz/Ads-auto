@@ -35,12 +35,12 @@ export async function getAdsApiAccessToken() {
 
     console.log("Requesting new Amazon Ads API access token...");
     try {
-        const response = await axios.post(LWA_TOKEN_URL, new URLSearchParams({
+        const response = await axios.post(LWA_TOKEN_URL, {
             grant_type: 'refresh_token',
             refresh_token: ADS_API_REFRESH_TOKEN,
             client_id: ADS_API_CLIENT_ID,
             client_secret: ADS_API_CLIENT_SECRET,
-        }), {
+        }, {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         });
 

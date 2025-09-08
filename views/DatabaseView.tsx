@@ -24,6 +24,27 @@ const styles: { [key: string]: React.CSSProperties } = {
         boxShadow: 'var(--box-shadow)',
         padding: '20px',
     },
+    viewSelector: {
+        display: 'flex',
+        gap: '10px',
+        borderBottom: '1px solid var(--border-color)',
+        marginBottom: '20px',
+    },
+    viewButton: {
+        padding: '10px 15px',
+        border: 'none',
+        background: 'none',
+        cursor: 'pointer',
+        fontSize: '1rem',
+        fontWeight: 500,
+        color: '#555',
+        borderBottom: '3px solid transparent',
+        transition: 'color 0.2s, border-bottom-color 0.2s',
+    },
+    viewButtonActive: {
+        color: 'var(--primary-color)',
+        borderBottom: '3px solid var(--primary-color)',
+    },
     filterGrid: {
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
@@ -55,7 +76,7 @@ const styles: { [key: string]: React.CSSProperties } = {
         color: 'white',
         fontSize: '1rem',
         cursor: 'pointer',
-        height: '40px', // Align with inputs
+        height: '40px', 
     },
     resultsContainer: {
         marginTop: '20px',
@@ -101,7 +122,9 @@ const styles: { [key: string]: React.CSSProperties } = {
     },
 };
 
-interface Filters {
+type ViewType = 'streamEvents' | 'searchTermReport' | 'salesTrafficReport';
+
+interface StreamFilters {
     eventType: string;
     startDate: string;
     endDate: string;
@@ -113,6 +136,17 @@ interface Filters {
     sortOrder: 'DESC' | 'ASC';
 }
 
+interface SearchTermFilters {
+    startDate: string;
+    endDate: string;
+    limit: number;
+}
+
+interface SalesTrafficFilters {
+    date: string;
+    limit: number;
+}
+
 const getYesterday = () => {
     const d = new Date();
     d.setDate(d.getDate() - 1);
@@ -120,25 +154,32 @@ const getYesterday = () => {
 };
 
 export function DatabaseView() {
-    const [filters, setFilters] = useState<Filters>({
-        eventType: '',
-        startDate: getYesterday(),
-        endDate: getYesterday(),
-        campaignId: '',
-        adGroupId: '',
-        keywordId: '',
-        limit: 100,
-        sortBy: 'received_at',
-        sortOrder: 'DESC',
+    const [currentView, setCurrentView] = useState<ViewType>('streamEvents');
+    
+    const [streamFilters, setStreamFilters] = useState<StreamFilters>({
+        eventType: '', startDate: getYesterday(), endDate: getYesterday(),
+        campaignId: '', adGroupId: '', keywordId: '',
+        limit: 100, sortBy: 'received_at', sortOrder: 'DESC',
     });
+
+    const [searchTermFilters, setSearchTermFilters] = useState<SearchTermFilters>({
+        startDate: getYesterday(), endDate: getYesterday(), limit: 100,
+    });
+
+    const [salesTrafficFilters, setSalesTrafficFilters] = useState<SalesTrafficFilters>({
+        date: getYesterday(), limit: 100,
+    });
+
     const [results, setResults] = useState<any[]>([]);
     const [columns, setColumns] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [hasRun, setHasRun] = useState(false);
     
-    const handleFilterChange = (field: keyof Filters, value: string | number) => {
-        setFilters(prev => ({ ...prev, [field]: value }));
+    const handleFilterChange = (view: ViewType, field: string, value: string | number) => {
+        if (view === 'streamEvents') setStreamFilters(prev => ({ ...prev, [field]: value }));
+        else if (view === 'searchTermReport') setSearchTermFilters(prev => ({ ...prev, [field]: value }));
+        else if (view === 'salesTrafficReport') setSalesTrafficFilters(prev => ({ ...prev, [field]: value }));
     };
 
     const handleApplyFilters = async (e: React.FormEvent) => {
@@ -149,11 +190,29 @@ export function DatabaseView() {
         setColumns([]);
         setHasRun(true);
 
+        let endpoint = '';
+        let body: any = {};
+
+        switch(currentView) {
+            case 'streamEvents':
+                endpoint = '/api/events/query';
+                body = streamFilters;
+                break;
+            case 'searchTermReport':
+                endpoint = '/api/database/sp-search-terms';
+                body = searchTermFilters;
+                break;
+            case 'salesTrafficReport':
+                endpoint = '/api/database/sales-traffic';
+                body = salesTrafficFilters;
+                break;
+        }
+
         try {
-            const response = await fetch('/api/events/query', {
+            const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(filters),
+                body: JSON.stringify(body),
             });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'An unknown error occurred.');
@@ -177,62 +236,100 @@ export function DatabaseView() {
         return String(value);
     };
 
+    const renderFilters = () => {
+        switch(currentView) {
+            case 'searchTermReport':
+                return (
+                    <div style={styles.filterGrid}>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="st-startDate">Start Date</label>
+                            <input type="date" id="st-startDate" style={styles.input} value={searchTermFilters.startDate} onChange={e => handleFilterChange('searchTermReport', 'startDate', e.target.value)} />
+                        </div>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="st-endDate">End Date</label>
+                            <input type="date" id="st-endDate" style={styles.input} value={searchTermFilters.endDate} onChange={e => handleFilterChange('searchTermReport', 'endDate', e.target.value)} />
+                        </div>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="st-limit">Result Limit</label>
+                            <select id="st-limit" style={styles.input} value={searchTermFilters.limit} onChange={e => handleFilterChange('searchTermReport', 'limit', Number(e.target.value))}>
+                                <option value="100">100 rows</option><option value="500">500 rows</option><option value="1000">1000 rows</option>
+                            </select>
+                        </div>
+                    </div>
+                );
+            case 'salesTrafficReport':
+                return (
+                     <div style={styles.filterGrid}>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="sat-date">Date</label>
+                            <input type="date" id="sat-date" style={styles.input} value={salesTrafficFilters.date} onChange={e => handleFilterChange('salesTrafficReport', 'date', e.target.value)} />
+                        </div>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="sat-limit">Result Limit</label>
+                            <select id="sat-limit" style={styles.input} value={salesTrafficFilters.limit} onChange={e => handleFilterChange('salesTrafficReport', 'limit', Number(e.target.value))}>
+                                <option value="100">100 rows</option><option value="500">500 rows</option><option value="1000">1000 rows</option>
+                            </select>
+                        </div>
+                    </div>
+                );
+            case 'streamEvents':
+            default:
+                return (
+                    <div style={styles.filterGrid}>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="eventType">Event Type</label>
+                            <select id="eventType" style={styles.input} value={streamFilters.eventType} onChange={e => handleFilterChange('streamEvents', 'eventType', e.target.value)}>
+                                <option value="">All Types</option><option value="sp-traffic">SP Traffic</option><option value="sp-conversion">SP Conversion</option>
+                            </select>
+                        </div>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="startDate">Start Date (Event Time)</label>
+                            <input type="date" id="startDate" style={styles.input} value={streamFilters.startDate} onChange={e => handleFilterChange('streamEvents', 'startDate', e.target.value)} />
+                        </div>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="endDate">End Date (Event Time)</label>
+                            <input type="date" id="endDate" style={styles.input} value={streamFilters.endDate} onChange={e => handleFilterChange('streamEvents', 'endDate', e.target.value)} />
+                        </div>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="campaignId">Campaign ID</label>
+                            <input type="text" id="campaignId" style={styles.input} placeholder="e.g., 3179..." value={streamFilters.campaignId} onChange={e => handleFilterChange('streamEvents', 'campaignId', e.target.value)} />
+                        </div>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="limit">Result Limit</label>
+                            <select id="limit" style={styles.input} value={streamFilters.limit} onChange={e => handleFilterChange('streamEvents', 'limit', Number(e.target.value))}>
+                                <option value="100">100</option><option value="500">500</option><option value="1000">1000</option>
+                            </select>
+                        </div>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="sortOrder">Sort Order</label>
+                            <select id="sortOrder" style={styles.input} value={streamFilters.sortOrder} onChange={e => handleFilterChange('streamEvents', 'sortOrder', e.target.value)}>
+                                <option value="DESC">Newest First</option><option value="ASC">Oldest First</option>
+                            </select>
+                        </div>
+                    </div>
+                );
+        }
+    };
+
     return (
         <div style={styles.container}>
             <header style={styles.header}>
-                <h1 style={styles.title}>Event Explorer</h1>
-                <p style={styles.subtitle}>Query raw stream events from the database using powerful filters without writing SQL.</p>
+                <h1 style={styles.title}>Database Explorer</h1>
+                <p style={styles.subtitle}>Directly query the raw data collected from Amazon APIs without writing SQL.</p>
             </header>
 
             <form onSubmit={handleApplyFilters} style={styles.filterContainer}>
-                <div style={styles.filterGrid}>
-                    <div style={styles.filterGroup}>
-                        <label style={styles.label} htmlFor="eventType">Event Type</label>
-                        <select id="eventType" style={styles.input} value={filters.eventType} onChange={e => handleFilterChange('eventType', e.target.value)}>
-                            <option value="">All Types</option>
-                            <option value="sp-traffic">SP Traffic</option>
-                            <option value="sp-conversion">SP Conversion</option>
-                        </select>
-                    </div>
-                     <div style={styles.filterGroup}>
-                        <label style={styles.label} htmlFor="startDate">Start Date (time_window_start)</label>
-                        <input type="date" id="startDate" style={styles.input} value={filters.startDate} onChange={e => handleFilterChange('startDate', e.target.value)} />
-                    </div>
-                     <div style={styles.filterGroup}>
-                        <label style={styles.label} htmlFor="endDate">End Date (time_window_start)</label>
-                        <input type="date" id="endDate" style={styles.input} value={filters.endDate} onChange={e => handleFilterChange('endDate', e.target.value)} />
-                    </div>
-                    <div style={styles.filterGroup}>
-                        <label style={styles.label} htmlFor="campaignId">Campaign ID</label>
-                        <input type="text" id="campaignId" style={styles.input} placeholder="e.g., 3179..." value={filters.campaignId} onChange={e => handleFilterChange('campaignId', e.target.value)} />
-                    </div>
-                    <div style={styles.filterGroup}>
-                        <label style={styles.label} htmlFor="adGroupId">Ad Group ID</label>
-                        <input type="text" id="adGroupId" style={styles.input} placeholder="e.g., 4969..." value={filters.adGroupId} onChange={e => handleFilterChange('adGroupId', e.target.value)} />
-                    </div>
-                    <div style={styles.filterGroup}>
-                        <label style={styles.label} htmlFor="keywordId">Keyword ID</label>
-                        <input type="text" id="keywordId" style={styles.input} placeholder="e.g., 4841..." value={filters.keywordId} onChange={e => handleFilterChange('keywordId', e.target.value)} />
-                    </div>
-                    <div style={styles.filterGroup}>
-                        <label style={styles.label} htmlFor="limit">Result Limit</label>
-                         <select id="limit" style={styles.input} value={filters.limit} onChange={e => handleFilterChange('limit', Number(e.target.value))}>
-                            <option value="100">100 rows</option>
-                            <option value="500">500 rows</option>
-                            <option value="1000">1000 rows</option>
-                        </select>
-                    </div>
-                    <div style={styles.filterGroup}>
-                        <label style={styles.label} htmlFor="sortOrder">Sort Order</label>
-                         <select id="sortOrder" style={styles.input} value={filters.sortOrder} onChange={e => handleFilterChange('sortOrder', e.target.value)}>
-                            <option value="DESC">Newest First</option>
-                            <option value="ASC">Oldest First</option>
-                        </select>
-                    </div>
+                <div style={styles.viewSelector}>
+                    <button type="button" style={currentView === 'streamEvents' ? {...styles.viewButton, ...styles.viewButtonActive} : styles.viewButton} onClick={() => setCurrentView('streamEvents')}>Stream Events</button>
+                    <button type="button" style={currentView === 'searchTermReport' ? {...styles.viewButton, ...styles.viewButtonActive} : styles.viewButton} onClick={() => setCurrentView('searchTermReport')}>SP Search Term Report</button>
+                    <button type="button" style={currentView === 'salesTrafficReport' ? {...styles.viewButton, ...styles.viewButtonActive} : styles.viewButton} onClick={() => setCurrentView('salesTrafficReport')}>Sales & Traffic Report</button>
                 </div>
+                
+                {renderFilters()}
+                
                 <div style={{ marginTop: '20px', borderTop: '1px solid var(--border-color)', paddingTop: '20px', display: 'flex', justifyContent: 'flex-end' }}>
                      <button type="submit" style={styles.button} disabled={loading}>
-                        {loading ? 'Applying...' : 'Apply Filters'}
+                        {loading ? 'Querying...' : 'Run Query'}
                     </button>
                 </div>
             </form>
@@ -240,12 +337,12 @@ export function DatabaseView() {
             <div style={styles.resultsContainer}>
                 {loading && <div style={styles.message}>Loading results...</div>}
                 {error && <div style={styles.error} role="alert">{error}</div>}
-                {!loading && !error && hasRun && results.length === 0 && <div style={styles.message}>No events found matching your criteria.</div>}
+                {!loading && !error && hasRun && results.length === 0 && <div style={styles.message}>No records found matching your criteria.</div>}
                 {!loading && !error && results.length > 0 && (
                     <div style={styles.tableContainer}>
                         <table style={styles.table}>
                             <thead>
-                                <tr>{columns.map(col => <th key={col} style={styles.th}>{col}</th>)}</tr>
+                                <tr>{columns.map(col => <th key={col} style={styles.th}>{col.replace(/_/g, ' ')}</th>)}</tr>
                             </thead>
                             <tbody>
                                 {results.map((row, rowIndex) => (

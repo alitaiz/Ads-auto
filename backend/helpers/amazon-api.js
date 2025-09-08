@@ -46,7 +46,7 @@ export async function getAdsApiAccessToken() {
 
         const data = response.data;
         accessTokenCache = {
-            token: data.access_token,
+            token: data.access_token.trim(),
             // Cache token for 55 minutes (it expires in 60)
             expiresAt: Date.now() + 55 * 60 * 1000,
         };

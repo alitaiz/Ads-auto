@@ -39,7 +39,7 @@ router.post('/campaigns/list', async (req, res) => {
         // If a list of specific campaign IDs is provided, add it to the request.
         // This is crucial for fetching metadata for campaigns that have metrics but might be outside the main state filter.
         if (campaignIdFilter && Array.isArray(campaignIdFilter) && campaignIdFilter.length > 0) {
-            requestBody.campaignIdFilter = { include: campaignIdFilter };
+            requestBody.campaignIdFilter = { include: campaignIdFilter.map(id => id.toString()) };
         }
 
         let allCampaigns = [];
@@ -121,7 +121,7 @@ router.post('/campaigns/:campaignId/adgroups', async (req, res) => {
 
     try {
         const requestBody = {
-            campaignIdFilter: { include: [campaignIdNum] },
+            campaignIdFilter: { include: [campaignId] },
             stateFilter: { include: ["ENABLED", "PAUSED", "ARCHIVED"] },
             maxResults: 500,
         };
@@ -171,7 +171,7 @@ router.post('/adgroups/:adGroupId/keywords', async (req, res) => {
 
     try {
         const requestBody = {
-            adGroupIdFilter: { include: [adGroupIdNum] },
+            adGroupIdFilter: { include: [adGroupId] },
             stateFilter: { include: ["ENABLED", "PAUSED", "ARCHIVED"] },
             maxResults: 1000,
         };

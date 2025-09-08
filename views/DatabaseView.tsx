@@ -120,6 +120,33 @@ const styles: { [key: string]: React.CSSProperties } = {
         marginTop: '20px',
         whiteSpace: 'pre-wrap',
     },
+    integrityCheckContainer: {
+        marginTop: '20px',
+        padding: '15px',
+        backgroundColor: '#fffbe6',
+        border: '1px solid #ffe58f',
+        borderRadius: 'var(--border-radius)',
+    },
+    integrityTitle: {
+        margin: '0 0 10px 0',
+        fontWeight: 600,
+        color: '#d46b08',
+    },
+    missingDateItem: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '8px',
+        borderBottom: '1px solid #ffe58f',
+    },
+    fetchButton: {
+        padding: '6px 12px',
+        border: '1px solid #d46b08',
+        borderRadius: '4px',
+        backgroundColor: 'white',
+        color: '#d46b08',
+        cursor: 'pointer',
+    },
 };
 
 type ViewType = 'streamEvents' | 'searchTermReport' | 'salesTrafficReport';
@@ -149,12 +176,12 @@ interface SalesTrafficFilters {
 
 const getYesterday = () => {
     const d = new Date();
-    d.setDate(d.getDate() - 1);
+    d.setDate(d.getDate() - 2); // Default to 2 days ago for data availability
     return d.toISOString().split('T')[0];
 };
 
 export function DatabaseView() {
-    const [currentView, setCurrentView] = useState<ViewType>('streamEvents');
+    const [currentView, setCurrentView] = useState<ViewType>('searchTermReport');
     
     const [streamFilters, setStreamFilters] = useState<StreamFilters>({
         eventType: '', startDate: getYesterday(), endDate: getYesterday(),
@@ -175,11 +202,38 @@ export function DatabaseView() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [hasRun, setHasRun] = useState(false);
+    const [missingDates, setMissingDates] = useState<string[]>([]);
+    const [fetchStatus, setFetchStatus] = useState<Record<string, 'fetching' | 'success' | 'error' | 'idle'>>({});
     
     const handleFilterChange = (view: ViewType, field: string, value: string | number) => {
         if (view === 'streamEvents') setStreamFilters(prev => ({ ...prev, [field]: value }));
         else if (view === 'searchTermReport') setSearchTermFilters(prev => ({ ...prev, [field]: value }));
         else if (view === 'salesTrafficReport') setSalesTrafficFilters(prev => ({ ...prev, [field]: value }));
+    };
+
+    const checkForMissingDates = async () => {
+        if (currentView === 'streamEvents') return; // Not applicable for stream events
+
+        const body = {
+            source: currentView,
+            startDate: currentView === 'searchTermReport' ? searchTermFilters.startDate : salesTrafficFilters.date,
+            endDate: currentView === 'searchTermReport' ? searchTermFilters.endDate : salesTrafficFilters.date,
+        };
+
+        try {
+            const response = await fetch('/api/database/check-missing-dates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            const data = await response.json();
+            if (response.ok) {
+                setMissingDates(data.missingDates || []);
+                setFetchStatus({}); // Reset statuses on new check
+            }
+        } catch (err) {
+            console.error("Failed to check for missing dates:", err);
+        }
     };
 
     const handleApplyFilters = async (e: React.FormEvent) => {
@@ -189,6 +243,7 @@ export function DatabaseView() {
         setResults([]);
         setColumns([]);
         setHasRun(true);
+        setMissingDates([]);
 
         let endpoint = '';
         let body: any = {};
@@ -223,10 +278,31 @@ export function DatabaseView() {
             } else {
                 setResults([]);
             }
+            // After fetching results, check for missing dates in the range
+            await checkForMissingDates();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to execute query.');
         } finally {
             setLoading(false);
+        }
+    };
+    
+    const handleFetchMissingDay = async (date: string) => {
+        setFetchStatus(prev => ({ ...prev, [date]: 'fetching' }));
+        try {
+            const response = await fetch('/api/database/fetch-missing-day', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source: currentView, date }),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error);
+            setFetchStatus(prev => ({ ...prev, [date]: 'success' }));
+            // Remove the date from the missing list upon success
+            setMissingDates(prev => prev.filter(d => d !== date));
+        } catch (err) {
+            setFetchStatus(prev => ({ ...prev, [date]: 'error' }));
+            alert(`Failed to fetch data for ${date}: ${err instanceof Error ? err.message : 'Unknown error'}`);
         }
     };
 
@@ -311,6 +387,21 @@ export function DatabaseView() {
         }
     };
 
+    const renderFetchButton = (date: string) => {
+        const status = fetchStatus[date] || 'idle';
+        let text = 'Fetch';
+        let disabled = false;
+
+        switch (status) {
+            case 'fetching': text = 'Fetching...'; disabled = true; break;
+            case 'success': text = 'Success!'; disabled = true; break;
+            case 'error': text = 'Error - Retry'; disabled = false; break;
+            default: text = 'Fetch'; disabled = false; break;
+        }
+
+        return <button style={styles.fetchButton} onClick={() => handleFetchMissingDay(date)} disabled={disabled}>{text}</button>;
+    };
+
     return (
         <div style={styles.container}>
             <header style={styles.header}>
@@ -333,6 +424,19 @@ export function DatabaseView() {
                     </button>
                 </div>
             </form>
+
+            {missingDates.length > 0 && (
+                <div style={styles.integrityCheckContainer}>
+                    <h3 style={styles.integrityTitle}>⚠️ Data Integrity Check</h3>
+                    <p>The following dates have missing data in the selected range. You can fetch them individually.</p>
+                    {missingDates.map(date => (
+                        <div key={date} style={styles.missingDateItem}>
+                            <span>Missing data for: <strong>{date}</strong></span>
+                            {renderFetchButton(date)}
+                        </div>
+                    ))}
+                </div>
+            )}
 
             <div style={styles.resultsContainer}>
                 {loading && <div style={styles.message}>Loading results...</div>}

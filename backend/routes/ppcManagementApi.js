@@ -163,10 +163,15 @@ router.post('/adgroups/:adGroupId/keywords', async (req, res) => {
     const { adGroupId } = req.params;
     const { profileId } = req.body;
     if (!profileId) return res.status(400).json({ message: 'profileId is required.' });
+    
+    const adGroupIdNum = Number(adGroupId);
+    if (Number.isNaN(adGroupIdNum)) {
+        return res.status(400).json({ message: 'Invalid adGroupId.' });
+    }
 
     try {
         const requestBody = {
-            adGroupIdFilter: { include: [parseInt(adGroupId)] },
+            adGroupIdFilter: { include: [adGroupIdNum] },
             stateFilter: { include: ["ENABLED", "PAUSED", "ARCHIVED"] },
             maxResults: 1000,
         };

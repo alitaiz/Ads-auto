@@ -8,7 +8,7 @@ import spSearchTermsRoutes from './routes/spSearchTerms.js';
 import streamRoutes from './routes/stream.js';
 import ppcManagementRoutes from './routes/ppcManagement.js';
 import salesAndTrafficRoutes from './routes/salesAndTraffic.js';
-import databaseRoutes from './routes/database.js';
+import eventsRoutes from './routes/events.js'; // Replaced databaseRoutes
 
 const app = express();
 const port = process.env.PORT || 4001;
@@ -27,7 +27,7 @@ app.use('/api', spSearchTermsRoutes);
 app.use('/api', streamRoutes);
 app.use('/api', ppcManagementRoutes);
 app.use('/api', salesAndTrafficRoutes);
-app.use('/api', databaseRoutes);
+app.use('/api', eventsRoutes); // Use the new events router
 
 // --- Root Endpoint for health checks ---
 app.get('/', (req, res) => {

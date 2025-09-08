@@ -113,20 +113,20 @@ router.post('/database/sp-search-terms', async (req, res) => {
 
 // POST /api/database/sales-traffic: Queries the Sales & Traffic by ASIN table.
 router.post('/database/sales-traffic', async (req, res) => {
-    const { date, limit = 100 } = req.body;
+    const { startDate, endDate, limit = 100 } = req.body;
 
-    if (!date) {
-        return res.status(400).json({ error: 'A date is required.' });
+    if (!startDate || !endDate) {
+        return res.status(400).json({ error: 'A startDate and endDate are required.' });
     }
 
     try {
         const query = `
             SELECT * 
             FROM sales_and_traffic_by_asin 
-            WHERE report_date = $1 
+            WHERE report_date BETWEEN $1 AND $2
             ORDER BY (traffic_data->>'sessions')::int DESC NULLS LAST 
-            LIMIT $2`;
-        const params = [date, parseInt(limit, 10)];
+            LIMIT $3`;
+        const params = [startDate, endDate, parseInt(limit, 10)];
         const result = await pool.query(query, params);
         res.json(result.rows);
     } catch (error) {

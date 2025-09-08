@@ -170,7 +170,8 @@ interface SearchTermFilters {
 }
 
 interface SalesTrafficFilters {
-    date: string;
+    startDate: string;
+    endDate: string;
     limit: number;
 }
 
@@ -194,7 +195,7 @@ export function DatabaseView() {
     });
 
     const [salesTrafficFilters, setSalesTrafficFilters] = useState<SalesTrafficFilters>({
-        date: getYesterday(), limit: 100,
+        startDate: getYesterday(), endDate: getYesterday(), limit: 100,
     });
 
     const [results, setResults] = useState<any[]>([]);
@@ -216,8 +217,8 @@ export function DatabaseView() {
 
         const body = {
             source: currentView,
-            startDate: currentView === 'searchTermReport' ? searchTermFilters.startDate : salesTrafficFilters.date,
-            endDate: currentView === 'searchTermReport' ? searchTermFilters.endDate : salesTrafficFilters.date,
+            startDate: currentView === 'searchTermReport' ? searchTermFilters.startDate : salesTrafficFilters.startDate,
+            endDate: currentView === 'searchTermReport' ? searchTermFilters.endDate : salesTrafficFilters.endDate,
         };
 
         try {
@@ -337,8 +338,12 @@ export function DatabaseView() {
                 return (
                      <div style={styles.filterGrid}>
                         <div style={styles.filterGroup}>
-                            <label style={styles.label} htmlFor="sat-date">Date</label>
-                            <input type="date" id="sat-date" style={styles.input} value={salesTrafficFilters.date} onChange={e => handleFilterChange('salesTrafficReport', 'date', e.target.value)} />
+                            <label style={styles.label} htmlFor="sat-startDate">Start Date</label>
+                            <input type="date" id="sat-startDate" style={styles.input} value={salesTrafficFilters.startDate} onChange={e => handleFilterChange('salesTrafficReport', 'startDate', e.target.value)} />
+                        </div>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="sat-endDate">End Date</label>
+                            <input type="date" id="sat-endDate" style={styles.input} value={salesTrafficFilters.endDate} onChange={e => handleFilterChange('salesTrafficReport', 'endDate', e.target.value)} />
                         </div>
                         <div style={styles.filterGroup}>
                             <label style={styles.label} htmlFor="sat-limit">Result Limit</label>

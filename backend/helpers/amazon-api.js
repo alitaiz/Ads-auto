@@ -1,8 +1,8 @@
 // backend/helpers/amazon-api.js
 import axios from 'axios';
+import { URLSearchParams } from 'url';
 
 // Configuration from environment variables
-// These are now reliably populated by the central dotenv config in server.js
 const {
     ADS_API_CLIENT_ID,
     ADS_API_CLIENT_SECRET,
@@ -35,14 +35,18 @@ export async function getAdsApiAccessToken() {
 
     console.log("Requesting new Amazon Ads API access token...");
     try {
-        const response = await axios.post(LWA_TOKEN_URL, {
-            grant_type: 'refresh_token',
-            refresh_token: ADS_API_REFRESH_TOKEN,
-            client_id: ADS_API_CLIENT_ID,
-            client_secret: ADS_API_CLIENT_SECRET,
-        }, {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        });
+        // DEFINITIVE FIX: Manually construct the URLSearchParams body.
+        // This is the most robust way to ensure the Content-Type and body
+        // are formatted exactly as the Amazon LWA endpoint expects.
+        const params = new URLSearchParams();
+        params.append('grant_type', 'refresh_token');
+        params.append('refresh_token', ADS_API_REFRESH_TOKEN);
+        params.append('client_id', ADS_API_CLIENT_ID);
+        params.append('client_secret', ADS_API_CLIENT_SECRET);
+        
+        // When axios receives a URLSearchParams object, it automatically sets the
+        // correct 'Content-Type': 'application/x-www-form-urlencoded' header.
+        const response = await axios.post(LWA_TOKEN_URL, params);
 
         const data = response.data;
         accessTokenCache = {
@@ -92,7 +96,7 @@ export async function amazonAdsApiRequest({ method, url, profileId, data, header
 
         return response.data;
     } catch (error) {
-        console.error(`Amazon Ads API request failed for ${method.toUpperCase()} ${url}:`, error.response?.data || error.message);
+        console.error(`Amazon Ads API request failed for ${method.toUpperCase()} ${url}:`, error.response?.data || { message: error.message });
         // Re-throw a structured error for the caller to handle
         const errorDetails = error.response?.data || { message: error.message };
         const status = error.response?.status || 500;

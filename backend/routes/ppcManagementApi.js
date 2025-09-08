@@ -114,9 +114,14 @@ router.post('/campaigns/:campaignId/adgroups', async (req, res) => {
     const { profileId } = req.body;
     if (!profileId) return res.status(400).json({ message: 'profileId is required.' });
     
+    const campaignIdNum = Number(campaignId);
+    if (Number.isNaN(campaignIdNum)) {
+        return res.status(400).json({ message: 'Invalid campaignId.' });
+    }
+
     try {
         const requestBody = {
-            campaignIdFilter: { include: [parseInt(campaignId)] },
+            campaignIdFilter: { include: [campaignIdNum] },
             stateFilter: { include: ["ENABLED", "PAUSED", "ARCHIVED"] },
             maxResults: 500,
         };

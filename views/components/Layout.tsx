@@ -68,6 +68,9 @@ export function Layout() {
                     <NavLink to="/sales-and-traffic" style={getNavLinkStyle}>
                         Sales & Traffic
                     </NavLink>
+                    <NavLink to="/database" style={getNavLinkStyle}>
+                        Database Viewer
+                    </NavLink>
                 </nav>
             </header>
             <main style={styles.mainContent}>

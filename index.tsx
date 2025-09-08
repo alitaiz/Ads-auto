@@ -7,6 +7,7 @@ import { KeywordView } from './views/KeywordView';
 import { Layout } from './views/components/Layout';
 import { SalesAndTrafficView } from './views/SalesAndTrafficView';
 import { SPSearchTermsView } from './views/SPSearchTermsView';
+import { DatabaseView } from './views/DatabaseView';
 import { DataCacheProvider } from './contexts/DataCacheContext';
 
 // Basic global styles
@@ -60,6 +61,7 @@ function App() {
           <Route path="adgroups/:adGroupId/keywords" element={<KeywordView />} />
           <Route path="sp-search-terms" element={<SPSearchTermsView />} />
           <Route path="sales-and-traffic" element={<SalesAndTrafficView />} />
+          <Route path="database" element={<DatabaseView />} />
           <Route path="*" element={<Navigate to="/campaigns" replace />} />
         </Route>
       </Routes>

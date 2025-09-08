@@ -12,50 +12,31 @@ const {
 const LWA_TOKEN_URL = 'https://api.amazon.com/auth/o2/token';
 const ADS_API_ENDPOINT = 'https://advertising-api.amazon.com';
 
-// In-memory cache for the access token to avoid unnecessary refreshes
-let accessTokenCache = {
-    token: null,
-    expiresAt: 0,
-};
-
 /**
- * Retrieves a valid LWA (Login with Amazon) access token, refreshing if necessary.
- * @returns {Promise<string>} A valid access token.
+ * Retrieves a new, valid LWA (Login with Amazon) access token for every request.
+ * This function intentionally avoids caching to prevent token reuse issues.
+ * @returns {Promise<string>} A fresh, valid access token.
  */
 export async function getAdsApiAccessToken() {
     if (!ADS_API_CLIENT_ID || !ADS_API_CLIENT_SECRET || !ADS_API_REFRESH_TOKEN) {
         throw new Error('Missing Amazon Ads API credentials in .env file.');
     }
-
-    // If we have a valid token in cache, return it
-    if (accessTokenCache.token && Date.now() < accessTokenCache.expiresAt) {
-        console.log("Using cached Amazon Ads API access token.");
-        return accessTokenCache.token;
-    }
-
-    console.log("Requesting new Amazon Ads API access token...");
+    
+    console.log("Requesting new Amazon Ads API access token for every request...");
     try {
-        // DEFINITIVE FIX: Manually construct the URLSearchParams body.
-        // This is the most robust way to ensure the Content-Type and body
-        // are formatted exactly as the Amazon LWA endpoint expects.
         const params = new URLSearchParams();
         params.append('grant_type', 'refresh_token');
         params.append('refresh_token', ADS_API_REFRESH_TOKEN);
         params.append('client_id', ADS_API_CLIENT_ID);
         params.append('client_secret', ADS_API_CLIENT_SECRET);
         
-        // When axios receives a URLSearchParams object, it automatically sets the
-        // correct 'Content-Type': 'application/x-www-form-urlencoded' header.
         const response = await axios.post(LWA_TOKEN_URL, params);
 
         const data = response.data;
-        accessTokenCache = {
-            token: data.access_token.trim(),
-            // Cache token for 55 minutes (it expires in 60)
-            expiresAt: Date.now() + 55 * 60 * 1000,
-        };
-        console.log("Successfully obtained and cached new Amazon Ads API access token.");
-        return accessTokenCache.token;
+        console.log("Successfully obtained new Amazon Ads API access token.");
+        // Return the new token directly without caching.
+        return data.access_token.trim();
+
     } catch (error) {
         console.error("Error refreshing Amazon Ads API access token:", error.response?.data || error.message);
         throw new Error('Could not refresh Amazon Ads API access token. Please check your credentials.');

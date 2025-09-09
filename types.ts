@@ -1,75 +1,78 @@
 // types.ts
 
-export interface Profile {
-  profileId: string;
+export type Profile = {
+  profileId: number;
   countryCode: string;
-  name?: string; // Profiles from /v2/profiles might have more fields
-}
+};
 
-export interface Portfolio {
-    portfolioId: number;
-    name: string;
-    state: 'enabled' | 'archived';
-    inBudget: boolean;
-}
+export type Portfolio = {
+  portfolioId: number;
+  name: string;
+  state: 'enabled' | 'archived';
+};
 
 export type CampaignState = 'enabled' | 'paused' | 'archived';
 
-export interface Campaign {
-  campaignId: number;
-  name: string;
-  campaignType: 'sponsoredProducts'; // Assuming only SP for now
-  targetingType: 'auto' | 'manual';
-  state: CampaignState;
-  dailyBudget: number;
-  startDate: string;
-  endDate: string | null;
-  bidding?: any; // Bidding strategy can be complex
-  portfolioId?: number;
-}
+export type Campaign = {
+    campaignId: number;
+    name: string;
+    campaignType: string;
+    targetingType: string;
+    state: CampaignState;
+    dailyBudget: number;
+    startDate: string;
+    endDate: string | null;
+    bidding: any;
+    portfolioId: number | null;
+};
 
-export interface AdGroup {
-  adGroupId: number;
-  name: string;
-  campaignId: number;
-  defaultBid: number;
-  state: 'enabled' | 'paused' | 'archived';
-}
-
-export interface Keyword {
-  keywordId: number;
-  adGroupId: number;
-  campaignId: number;
-  keywordText: string;
-  matchType: 'broad' | 'phrase' | 'exact';
-  state: 'enabled' | 'paused' | 'archived';
-  bid?: number;
-}
-
-export interface CampaignStreamMetrics {
+export type CampaignStreamMetrics = {
     campaignId: number;
     impressions: number;
     clicks: number;
     spend: number;
     orders: number;
     sales: number;
-}
+};
 
-// Combined type for campaign data and its performance metrics
-export interface CampaignWithMetrics extends Campaign {
-    impressions?: number;
-    clicks?: number;
-    spend?: number;
-    sales?: number;
-    orders?: number;
-    acos?: number;
-    roas?: number;
-    cpc?: number;
-    ctr?: number;
-    cvr?: number;
-}
+export type CampaignWithMetrics = Campaign & CampaignStreamMetrics & {
+    acos: number;
+    roas: number;
+    cpc: number;
+    ctr: number;
+};
 
-export interface PortfolioWithMetrics extends Portfolio {
+export type SummaryMetricsData = {
+    spend: number;
+    sales: number;
+    orders: number;
+    clicks: number;
+    impressions: number;
+    acos: number;
+    roas: number;
+    cpc: number;
+    ctr: number;
+};
+
+export type AdGroup = {
+    adGroupId: number;
+    name: string;
+    campaignId: number;
+    defaultBid: number;
+    state: 'enabled' | 'paused' | 'archived';
+};
+
+export type Keyword = {
+    keywordId: number;
+    adGroupId: number;
+    campaignId: number;
+    keywordText: string;
+    matchType: 'broad' | 'phrase' | 'exact' | 'unknown';
+    state: 'enabled' | 'paused' | 'archived';
+    bid?: number;
+};
+
+export type PortfolioMetrics = {
     impressions: number;
     clicks: number;
     spend: number;
@@ -80,58 +83,45 @@ export interface PortfolioWithMetrics extends Portfolio {
     cpc: number;
     ctr: number;
     campaignCount: number;
-}
+};
 
+export type PortfolioWithMetrics = Portfolio & PortfolioMetrics;
 
-export interface SummaryMetricsData {
+// For SPSearchTermsView.tsx
+export interface SearchTermData {
+    report_date: string;
+    campaign_name: string;
+    campaign_id: number;
+    ad_group_name: string;
+    ad_group_id: number;
+    customer_search_term: string;
+    impressions: number;
     clicks: number;
     spend: number;
-    orders: number;
-    sales: number;
-    acos: number;
-    roas: number;
-    cpc: number;
-    ctr: number;
-    impressions: number;
+    seven_day_total_sales: number;
+    seven_day_total_orders: number;
+    seven_day_acos: number;
+    seven_day_roas: number;
+    seven_day_total_units: number;
+    asin: string | null;
 }
 
+export interface SearchTermFilterOptions {
+    asins: string[];
+    campaignNames: string[];
+}
 
-// --- New Types for Report Views ---
-
+// For SalesAndTrafficView.tsx
 export interface SalesAndTrafficData {
     parentAsin: string;
     childAsin: string;
-    sku: string | null;
-    unitsOrdered?: number;
-    orderedProductSales?: number;
-    sessions?: number;
-    pageViews?: number;
-    featuredOfferPercentage?: number;
-    unitSessionPercentage?: number;
-    totalOrderItems?: number;
-    averageSalesPerOrderItem?: number;
-}
-
-export interface SPSearchTermReportData {
-    campaignName: string;
-    campaignId: number;
-    adGroupName: string;
-    adGroupId: number;
-    keywordId?: number;
-    keywordBid?: number;
-    customerSearchTerm: string;
-    impressions: number;
-    clicks: number;
-    costPerClick: number;
-    spend: number;
-    sevenDayTotalSales: number;
-    sevenDayAcos: number;
-    asin: string | null;
-    targeting: string;
-    matchType: string;
-    sevenDayRoas: number;
-    sevenDayTotalOrders: number;
-    sevenDayTotalUnits: number;
+    sku: string;
+    unitsOrdered: number;
+    orderedProductSales: number;
+    sessions: number;
+    pageViews: number;
+    unitSessionPercentage: number;
+    totalOrderItems: number;
 }
 
 export interface SPFilterOptions {
@@ -139,35 +129,20 @@ export interface SPFilterOptions {
     dates: string[];
 }
 
-// --- Types for Data Caching ---
-
-export interface PPCManagementCache {
-  campaigns: Campaign[];
-  performanceMetrics: Record<number, CampaignStreamMetrics>;
-  profileId: string | null;
-  dateRange: { start: Date; end: Date } | null;
-}
-
-export interface SPSearchTermsCache {
-    data: SPSearchTermReportData[];
-    filters: {
-        asin: string;
-        startDate: string;
-        endDate: string;
-    } | null;
-}
-
-export interface SalesAndTrafficCache {
-    data: SalesAndTrafficData[];
-    filters: {
-        asin: string;
-        date: string;
-    } | null;
-}
-
-
+// For DataCacheContext.tsx
 export interface AppDataCache {
-    ppcManagement: PPCManagementCache;
-    spSearchTerms: SPSearchTermsCache;
-    salesAndTraffic: SalesAndTrafficCache;
+    ppcManagement: {
+        campaigns: Campaign[];
+        performanceMetrics: Record<number, CampaignStreamMetrics>;
+        profileId: string | null;
+        dateRange: { start: Date; end: Date } | null;
+    };
+    spSearchTerms: {
+        data: SearchTermData[];
+        filters: { asin: string; campaignName: string; date: string } | null;
+    };
+    salesAndTraffic: {
+        data: SalesAndTrafficData[];
+        filters: { asin: string; date: string } | null;
+    };
 }

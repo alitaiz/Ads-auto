@@ -38,16 +38,17 @@ router.get('/sp-search-terms-filters', async (req, res) => {
 /**
  * GET /api/sp-search-terms
  * The main data endpoint. Fetches and aggregates all performance metrics based on provided filters.
+ * Now supports a date range.
  */
 router.get('/sp-search-terms', async (req, res) => {
-    const { date, asin, campaignName } = req.query;
-    if (!date) {
-        return res.status(400).json({ error: 'A date is required' });
+    const { startDate, endDate, asin, campaignName } = req.query;
+    if (!startDate || !endDate) {
+        return res.status(400).json({ error: 'A startDate and endDate are required' });
     }
 
     try {
-        const queryParams = [date];
-        let whereClauses = [`report_date = $1`];
+        const queryParams = [startDate, endDate];
+        let whereClauses = [`report_date BETWEEN $1 AND $2`];
 
         if (asin) {
             queryParams.push(asin);

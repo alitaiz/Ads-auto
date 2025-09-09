@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback, useContext } from 'react';
-import { SearchTermData, SearchTermFilterOptions } from '../types';
+import { SearchTermData, SearchTermFilterOptions, SummaryMetricsData } from '../types';
 import { formatNumber, formatPrice } from '../utils';
 import { DataCacheContext } from '../contexts/DataCacheContext';
+import { DateRangePicker } from './components/DateRangePicker';
+import { SummaryMetrics } from './components/SummaryMetrics';
 
-// Using styles similar to SalesAndTrafficView for consistency
 const styles: { [key: string]: React.CSSProperties } = {
     viewContainer: {
         padding: '20px',
@@ -64,6 +65,15 @@ const styles: { [key: string]: React.CSSProperties } = {
         fontSize: '1rem',
         cursor: 'pointer',
         alignSelf: 'flex-end',
+        marginLeft: 'auto',
+    },
+    dateButton: {
+        padding: '8px 12px',
+        borderRadius: '4px',
+        border: '1px solid var(--border-color)',
+        fontSize: '1rem',
+        background: 'white',
+        cursor: 'pointer',
     },
     tableContainer: {
         backgroundColor: 'var(--card-background-color)',
@@ -82,6 +92,7 @@ const styles: { [key: string]: React.CSSProperties } = {
         borderBottom: '2px solid var(--border-color)',
         backgroundColor: '#f8f9fa',
         fontWeight: 600,
+        cursor: 'pointer',
     },
     td: {
         padding: '12px 15px',
@@ -103,11 +114,18 @@ const styles: { [key: string]: React.CSSProperties } = {
     },
 };
 
-const getInitialDate = () => {
-    const d = new Date();
-    d.setDate(d.getDate() - 2); // Default to 2 days ago
-    return d.toISOString().split('T')[0];
+const getInitialDateRange = () => {
+    const end = new Date();
+    const start = new Date();
+    end.setDate(end.getDate() - 1); // Default to yesterday
+    start.setDate(start.getDate() - 7); // Default to 7 days ago
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
 };
+
+const formatDateForQuery = (d: Date) => d.toISOString().split('T')[0];
+type SortableKeys = keyof SearchTermData;
 
 export function SPSearchTermsView() {
     const { cache, setCache } = useContext(DataCacheContext);
@@ -115,19 +133,24 @@ export function SPSearchTermsView() {
     const [filterOptions, setFilterOptions] = useState<SearchTermFilterOptions>({ asins: [], campaignNames: [] });
     const [selectedAsin, setSelectedAsin] = useState<string>(cache.spSearchTerms.filters?.asin || '');
     const [selectedCampaign, setSelectedCampaign] = useState<string>(cache.spSearchTerms.filters?.campaignName || '');
-    const [selectedDate, setSelectedDate] = useState<string>(cache.spSearchTerms.filters?.date || getInitialDate());
+    const [dateRange, setDateRange] = useState(() => {
+        const f = cache.spSearchTerms.filters;
+        return f ? { start: new Date(f.startDate), end: new Date(f.endDate) } : getInitialDateRange();
+    });
+    const [isDatePickerOpen, setDatePickerOpen] = useState(false);
     
     const [data, setData] = useState<SearchTermData[]>(cache.spSearchTerms.data || []);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [hasAppliedFilters, setHasAppliedFilters] = useState(!!cache.spSearchTerms.filters);
+    const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' } | null>({ key: 'impressions', direction: 'descending' });
+
 
     useEffect(() => {
         const fetchFilters = async () => {
             if (filterOptions.asins.length > 0) return;
             try {
                 setLoading(true);
-                // NOTE: This endpoint is assumed to exist based on app structure.
                 const response = await fetch('/api/sp-search-terms-filters');
                 if (!response.ok) throw new Error('Failed to fetch filter options.');
                 const filters: SearchTermFilterOptions = await response.json();
@@ -142,11 +165,13 @@ export function SPSearchTermsView() {
     }, [filterOptions.asins.length]);
 
     const handleApply = useCallback(async () => {
-        if (!selectedDate) return;
-
-        const currentFilters = { asin: selectedAsin, campaignName: selectedCampaign, date: selectedDate };
-        if (JSON.stringify(cache.spSearchTerms.filters) === JSON.stringify(currentFilters) && cache.spSearchTerms.data.length > 0) {
-            setData(cache.spSearchTerms.data);
+        const startDate = formatDateForQuery(dateRange.start);
+        const endDate = formatDateForQuery(dateRange.end);
+        const currentFilters = { asin: selectedAsin, campaignName: selectedCampaign, startDate, endDate };
+        
+        const cached = cache.spSearchTerms;
+        if (JSON.stringify(cached.filters) === JSON.stringify(currentFilters) && cached.data.length > 0) {
+            setData(cached.data);
             setHasAppliedFilters(true);
             return;
         }
@@ -155,11 +180,10 @@ export function SPSearchTermsView() {
         setLoading(true);
         setError(null);
         try {
-            const params = new URLSearchParams({ date: selectedDate });
+            const params = new URLSearchParams({ startDate, endDate });
             if (selectedAsin) params.append('asin', selectedAsin);
             if (selectedCampaign) params.append('campaignName', selectedCampaign);
 
-            // NOTE: This endpoint is assumed to exist based on app structure.
             const response = await fetch(`/api/sp-search-terms?${params.toString()}`);
             if (!response.ok) {
                 const errorData = await response.json();
@@ -174,22 +198,66 @@ export function SPSearchTermsView() {
         } finally {
             setLoading(false);
         }
-    }, [selectedDate, selectedAsin, selectedCampaign, cache.spSearchTerms, setCache]);
+    }, [dateRange, selectedAsin, selectedCampaign, cache.spSearchTerms, setCache]);
+
+    const summaryMetrics: SummaryMetricsData | null = useMemo(() => {
+        if (loading || data.length === 0) return null;
+        
+        const total = data.reduce((acc, item) => {
+            acc.spend += item.spend || 0;
+            acc.sales += item.sevenDayTotalSales || 0;
+            acc.orders += item.sevenDayTotalOrders || 0;
+            acc.clicks += item.clicks || 0;
+            acc.impressions += item.impressions || 0;
+            return acc;
+        }, { spend: 0, sales: 0, orders: 0, clicks: 0, impressions: 0 });
+
+        return {
+            ...total,
+            acos: total.sales > 0 ? total.spend / total.sales : 0,
+            roas: total.spend > 0 ? total.sales / total.spend : 0,
+            cpc: total.clicks > 0 ? total.spend / total.clicks : 0,
+            ctr: total.impressions > 0 ? total.clicks / total.impressions : 0,
+        };
+    }, [data, loading]);
+
+    const requestSort = (key: SortableKeys) => {
+        let direction: 'ascending' | 'descending' = 'descending';
+        if (sortConfig?.key === key && sortConfig.direction === 'descending') {
+            direction = 'ascending';
+        }
+        setSortConfig({ key, direction });
+    };
 
     const sortedData = useMemo(() => {
-        return [...data].sort((a, b) => (b.impressions ?? 0) - (a.impressions ?? 0));
-    }, [data]);
+        if (!sortConfig) return data;
+        return [...data].sort((a, b) => {
+            const aVal = a[sortConfig.key] ?? 0;
+            const bVal = b[sortConfig.key] ?? 0;
+            if (aVal < bVal) return sortConfig.direction === 'ascending' ? -1 : 1;
+            if (aVal > bVal) return sortConfig.direction === 'ascending' ? 1 : -1;
+            return 0;
+        });
+    }, [data, sortConfig]);
     
+    const handleApplyDateRange = (newRange: { start: Date; end: Date }) => {
+        setDateRange(newRange);
+        setDatePickerOpen(false);
+    };
+
+    const formatDateRangeDisplay = (start: Date, end: Date) => {
+        const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
+        return `${start.toLocaleDateString('en-US', options)} - ${end.toLocaleDateString('en-US', options)}`;
+    };
+
     const formatPercent = (value: number | null | undefined): string => {
-        if (value === null || typeof value === 'undefined' || isNaN(value)) {
-            return '0.00%';
-        }
+        if (value === null || typeof value === 'undefined' || isNaN(value)) return '0.00%';
         return `${(value * 100).toFixed(2)}%`;
     };
 
     const renderContent = () => {
         if (loading && !data.length) return <div style={styles.message}>Loading data...</div>;
-        if (error) return null; // Error message is displayed separately
+        if (error) return null;
         if (!hasAppliedFilters) return <div style={styles.message}>Please select filters and click "Apply" to view data.</div>;
         if (sortedData.length === 0) return <div style={styles.message}>No data available for the selected filters.</div>;
         
@@ -197,31 +265,31 @@ export function SPSearchTermsView() {
             <table style={styles.table}>
                 <thead>
                     <tr>
-                        <th style={styles.th}>Search Term</th>
-                        <th style={styles.th}>Campaign</th>
-                        <th style={styles.th}>Ad Group</th>
-                        <th style={styles.th}>Impressions</th>
-                        <th style={styles.th}>Clicks</th>
-                        <th style={styles.th}>Spend</th>
-                        <th style={styles.th}>Sales (7d)</th>
-                        <th style={styles.th}>Orders (7d)</th>
-                        <th style={styles.th}>ACoS (7d)</th>
-                        <th style={styles.th}>RoAS (7d)</th>
+                        <th style={styles.th} onClick={() => requestSort('customerSearchTerm')}>Search Term</th>
+                        <th style={styles.th} onClick={() => requestSort('campaignName')}>Campaign</th>
+                        <th style={styles.th} onClick={() => requestSort('adGroupName')}>Ad Group</th>
+                        <th style={styles.th} onClick={() => requestSort('impressions')}>Impressions</th>
+                        <th style={styles.th} onClick={() => requestSort('clicks')}>Clicks</th>
+                        <th style={styles.th} onClick={() => requestSort('spend')}>Spend</th>
+                        <th style={styles.th} onClick={() => requestSort('sevenDayTotalSales')}>Sales (7d)</th>
+                        <th style={styles.th} onClick={() => requestSort('sevenDayTotalOrders')}>Orders (7d)</th>
+                        <th style={styles.th} onClick={() => requestSort('sevenDayAcos')}>ACoS (7d)</th>
+                        <th style={styles.th} onClick={() => requestSort('sevenDayRoas')}>RoAS (7d)</th>
                     </tr>
                 </thead>
                 <tbody>
                     {sortedData.map((item, index) => (
-                        <tr key={`${item.customer_search_term}-${index}`}>
-                            <td style={styles.td}>{item.customer_search_term}</td>
-                            <td style={styles.td}>{item.campaign_name}</td>
-                            <td style={styles.td}>{item.ad_group_name}</td>
+                        <tr key={`${item.customerSearchTerm}-${index}`}>
+                            <td style={styles.td}>{item.customerSearchTerm}</td>
+                            <td style={styles.td}>{item.campaignName}</td>
+                            <td style={styles.td}>{item.adGroupName}</td>
                             <td style={styles.td}>{formatNumber(item.impressions)}</td>
                             <td style={styles.td}>{formatNumber(item.clicks)}</td>
                             <td style={styles.td}>{formatPrice(item.spend)}</td>
-                            <td style={styles.td}>{formatPrice(item.seven_day_total_sales)}</td>
-                            <td style={styles.td}>{formatNumber(item.seven_day_total_orders)}</td>
-                            <td style={styles.td}>{formatPercent(item.seven_day_acos)}</td>
-                            <td style={styles.td}>{item.seven_day_roas?.toFixed(2)}</td>
+                            <td style={styles.td}>{formatPrice(item.sevenDayTotalSales)}</td>
+                            <td style={styles.td}>{formatNumber(item.sevenDayTotalOrders)}</td>
+                            <td style={styles.td}>{formatPercent(item.sevenDayAcos)}</td>
+                            <td style={styles.td}>{item.sevenDayRoas?.toFixed(2)}</td>
                         </tr>
                     ))}
                 </tbody>
@@ -237,8 +305,19 @@ export function SPSearchTermsView() {
             </header>
             <div style={styles.card}>
                 <div style={styles.filterGroup}>
-                    <label style={styles.label} htmlFor="date-select">Date</label>
-                    <input type="date" id="date-select" style={styles.input} value={selectedDate} onChange={e => setSelectedDate(e.target.value)} />
+                    <label style={styles.label} htmlFor="date-range">Date Range</label>
+                     <div style={{ position: 'relative' }}>
+                         <button style={styles.dateButton} onClick={() => setDatePickerOpen(o => !o)}>
+                           {formatDateRangeDisplay(dateRange.start, dateRange.end)}
+                        </button>
+                        {isDatePickerOpen && 
+                            <DateRangePicker 
+                                initialRange={dateRange}
+                                onApply={handleApplyDateRange} 
+                                onClose={() => setDatePickerOpen(false)} 
+                            />
+                        }
+                    </div>
                 </div>
                  <div style={styles.filterGroup}>
                     <label style={styles.label} htmlFor="asin-select">ASIN</label>
@@ -259,6 +338,9 @@ export function SPSearchTermsView() {
                 </button>
             </div>
             {error && <div style={styles.error}>{error}</div>}
+            
+            <SummaryMetrics metrics={summaryMetrics} loading={loading} />
+
             <div style={styles.tableContainer}>
                 {renderContent()}
             </div>

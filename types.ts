@@ -89,20 +89,19 @@ export type PortfolioWithMetrics = Portfolio & PortfolioMetrics;
 
 // For SPSearchTermsView.tsx
 export interface SearchTermData {
-    report_date: string;
-    campaign_name: string;
-    campaign_id: number;
-    ad_group_name: string;
-    ad_group_id: number;
-    customer_search_term: string;
+    campaignName: string;
+    campaignId: number;
+    adGroupName: string;
+    adGroupId: number;
+    customerSearchTerm: string;
     impressions: number;
     clicks: number;
     spend: number;
-    seven_day_total_sales: number;
-    seven_day_total_orders: number;
-    seven_day_acos: number;
-    seven_day_roas: number;
-    seven_day_total_units: number;
+    sevenDayTotalSales: number;
+    sevenDayTotalOrders: number;
+    sevenDayAcos: number;
+    sevenDayRoas: number;
+    sevenDayTotalUnits: number;
     asin: string | null;
 }
 
@@ -139,7 +138,7 @@ export interface AppDataCache {
     };
     spSearchTerms: {
         data: SearchTermData[];
-        filters: { asin: string; campaignName: string; date: string } | null;
+        filters: { asin: string; campaignName: string; startDate: string, endDate: string } | null;
     };
     salesAndTraffic: {
         data: SalesAndTrafficData[];

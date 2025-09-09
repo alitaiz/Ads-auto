@@ -59,8 +59,11 @@ export function Layout() {
             <header style={styles.header}>
                 <a href="/" style={styles.logo}>Ads Auto</a>
                 <nav style={styles.nav}>
-                    <NavLink to="/ppc-management" style={getNavLinkStyle}>
-                        PPC Management
+                    <NavLink to="/campaigns" style={getNavLinkStyle}>
+                        Campaigns
+                    </NavLink>
+                    <NavLink to="/search-terms" style={getNavLinkStyle}>
+                        Search Terms
                     </NavLink>
                     <NavLink to="/sales-and-traffic" style={getNavLinkStyle}>
                         Sales & Traffic

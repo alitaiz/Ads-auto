@@ -90,7 +90,7 @@ const getInitialDateRange = () => {
 
 const formatDateForQuery = (d: Date) => d.toISOString().split('T')[0];
 
-export function PPCManagementView() {
+export function CampaignsView() {
     const { cache, setCache } = useContext(DataCacheContext);
 
     const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -377,7 +377,7 @@ export function PPCManagementView() {
 
     return (
         <div style={styles.container}>
-            <header style={styles.header}> <h1 style={styles.title}>PPC Management Dashboard</h1> </header>
+            <header style={styles.header}> <h1 style={styles.title}>Campaigns</h1> </header>
             {error && <div style={styles.error} role="alert">{error}</div>}
             <section style={styles.controlsContainer}>
                  <div style={styles.controlGroup}>

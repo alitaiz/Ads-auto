@@ -1,10 +1,11 @@
 import React, { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { PPCManagementView } from './views/PPCManagementView';
+import { CampaignsView } from './views/PPCManagementView';
 import { Layout } from './views/components/Layout';
 import { SalesAndTrafficView } from './views/SalesAndTrafficView';
 import { DatabaseView } from './views/DatabaseView';
+import { SPSearchTermsView } from './views/SPSearchTermsView';
 import { DataCacheProvider } from './contexts/DataCacheContext';
 
 // Basic global styles
@@ -52,11 +53,12 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Layout />}>
-          <Route index element={<Navigate to="/ppc-management" replace />} />
-          <Route path="ppc-management" element={<PPCManagementView />} />
+          <Route index element={<Navigate to="/campaigns" replace />} />
+          <Route path="campaigns" element={<CampaignsView />} />
+          <Route path="search-terms" element={<SPSearchTermsView />} />
           <Route path="sales-and-traffic" element={<SalesAndTrafficView />} />
           <Route path="database" element={<DatabaseView />} />
-          <Route path="*" element={<Navigate to="/ppc-management" replace />} />
+          <Route path="*" element={<Navigate to="/campaigns" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>

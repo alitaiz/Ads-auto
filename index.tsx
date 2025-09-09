@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { PPCManagementView } from './views/PPCManagementView';
 import { AdGroupView } from './views/AdGroupView';
 import { KeywordView } from './views/KeywordView';
+import { SPSearchTermsView } from './views/SPSearchTermsView';
 import { Layout } from './views/components/Layout';
 import { SalesAndTrafficView } from './views/SalesAndTrafficView';
 import { DatabaseView } from './views/DatabaseView';
@@ -58,6 +59,7 @@ function App() {
           <Route path="campaigns" element={<PPCManagementView />} />
           <Route path="campaigns/:campaignId/adgroups" element={<AdGroupView />} />
           <Route path="adgroups/:adGroupId/keywords" element={<KeywordView />} />
+          <Route path="search-terms" element={<SPSearchTermsView />} />
           <Route path="sales-and-traffic" element={<SalesAndTrafficView />} />
           <Route path="database" element={<DatabaseView />} />
           <Route path="*" element={<Navigate to="/campaigns" replace />} />

@@ -65,8 +65,8 @@ const createReport = async (accessToken, date) => {
             groupBy: ["searchTerm"],
             columns: [
                 "date", "campaignName", "campaignId", "adGroupName", "adGroupId",
-                "targeting", "matchType", "searchTerm", "impressions", "clicks",
-                "costPerClick", "cost", // API uses 'cost', we map it to 'spend'
+                "keywordId", "keywordBid", "targeting", "matchType", "searchTerm",
+                "impressions", "clicks", "costPerClick", "cost", // API uses 'cost', we map it to 'spend'
                 "sales7d", "acosClicks7d", "roasClicks7d", "purchases7d", "unitsSoldClicks7d",
                 "attributedSalesSameSku7d", "unitsSoldSameSku7d", "salesOtherSku7d", "unitsSoldOtherSku7d"
             ],
@@ -188,18 +188,20 @@ const saveDataToDB = async (client, reportData) => {
 
         const query = `
             INSERT INTO sponsored_products_search_term_report (
-                report_date, campaign_id, campaign_name, ad_group_id, ad_group_name, targeting,
+                report_date, campaign_id, campaign_name, ad_group_id, ad_group_name,
+                keyword_id, keyword_bid, targeting,
                 match_type, customer_search_term, impressions, clicks, cost_per_click, spend,
                 seven_day_total_sales, seven_day_acos, seven_day_roas, seven_day_total_orders,
                 seven_day_total_units, seven_day_advertised_sku_sales, seven_day_advertised_sku_units,
                 seven_day_other_sku_sales, seven_day_other_sku_units, asin
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
-            ) ON CONFLICT (report_date, campaign_id, ad_group_id, customer_search_term, targeting) DO NOTHING;
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
+            ) ON CONFLICT (report_date, campaign_id, ad_group_id, keyword_id, customer_search_term, targeting) DO NOTHING;
         `;
         const values = [
             item.date, item.campaignId, item.campaignName, item.adGroupId, item.adGroupName,
-            item.targeting, item.matchType, item.searchTerm, item.impressions, item.clicks,
+            item.keywordId, item.keywordBid, item.targeting,
+            item.matchType, item.searchTerm, item.impressions, item.clicks,
             item.costPerClick, item.cost, // Map API 'cost' to DB 'spend'
             item.sales7d, item.acosClicks7d, item.roasClicks7d, item.purchases7d, item.unitsSoldClicks7d,
             item.attributedSalesSameSku7d, item.unitsSoldSameSku7d, item.salesOtherSku7d, item.unitsSoldOtherSku7d,

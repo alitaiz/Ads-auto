@@ -6,6 +6,13 @@ export interface Profile {
   name?: string; // Profiles from /v2/profiles might have more fields
 }
 
+export interface Portfolio {
+    portfolioId: number;
+    name: string;
+    state: 'enabled' | 'archived';
+    inBudget: boolean;
+}
+
 export type CampaignState = 'enabled' | 'paused' | 'archived';
 
 export interface Campaign {
@@ -18,6 +25,7 @@ export interface Campaign {
   startDate: string;
   endDate: string | null;
   bidding?: any; // Bidding strategy can be complex
+  portfolioId?: number;
 }
 
 export interface AdGroup {
@@ -61,6 +69,20 @@ export interface CampaignWithMetrics extends Campaign {
     cvr?: number;
 }
 
+export interface PortfolioWithMetrics extends Portfolio {
+    impressions: number;
+    clicks: number;
+    spend: number;
+    sales: number;
+    orders: number;
+    acos: number;
+    roas: number;
+    cpc: number;
+    ctr: number;
+    campaignCount: number;
+}
+
+
 export interface SummaryMetricsData {
     clicks: number;
     spend: number;
@@ -95,6 +117,8 @@ export interface SPSearchTermReportData {
     campaignId: number;
     adGroupName: string;
     adGroupId: number;
+    keywordId?: number;
+    keywordBid?: number;
     customerSearchTerm: string;
     impressions: number;
     clicks: number;

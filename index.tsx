@@ -9,6 +9,7 @@ import { SalesAndTrafficView } from './views/SalesAndTrafficView';
 import { SPSearchTermsView } from './views/SPSearchTermsView';
 import { DatabaseView } from './views/DatabaseView';
 import { DataCacheProvider } from './contexts/DataCacheContext';
+import { PortfoliosView } from './views/PortfoliosView';
 
 // Basic global styles
 const styles = `
@@ -55,14 +56,15 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Layout />}>
-          <Route index element={<Navigate to="/campaigns" replace />} />
+          <Route index element={<Navigate to="/portfolios" replace />} />
+          <Route path="portfolios" element={<PortfoliosView />} />
           <Route path="campaigns" element={<PPCManagementView />} />
           <Route path="campaigns/:campaignId/adgroups" element={<AdGroupView />} />
           <Route path="adgroups/:adGroupId/keywords" element={<KeywordView />} />
           <Route path="sp-search-terms" element={<SPSearchTermsView />} />
           <Route path="sales-and-traffic" element={<SalesAndTrafficView />} />
           <Route path="database" element={<DatabaseView />} />
-          <Route path="*" element={<Navigate to="/campaigns" replace />} />
+          <Route path="*" element={<Navigate to="/portfolios" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>

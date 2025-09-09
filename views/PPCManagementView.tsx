@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useContext } from 'react';
-import { Profile, Campaign, CampaignWithMetrics, CampaignStreamMetrics, SummaryMetricsData, CampaignState, AdGroup } from '../types';
+import { useLocation, Link } from 'react-router-dom';
+import { Profile, Campaign, CampaignWithMetrics, CampaignStreamMetrics, SummaryMetricsData, CampaignState, AdGroup, Portfolio } from '../types';
 import { DateRangePicker } from './components/DateRangePicker';
 import { SummaryMetrics } from './components/SummaryMetrics';
 import { CampaignTable } from './components/CampaignTable';
@@ -24,6 +25,16 @@ const styles: { [key: string]: React.CSSProperties } = {
     title: {
         fontSize: '2rem',
         margin: 0,
+    },
+    breadcrumb: {
+        marginBottom: '10px',
+        fontSize: '1rem',
+        color: '#555',
+    },
+    breadcrumbLink: {
+        textDecoration: 'none',
+        color: 'var(--primary-color)',
+        fontWeight: 500,
     },
     controlsContainer: {
         display: 'flex',
@@ -98,6 +109,8 @@ const formatDateForQuery = (d: Date) => {
 
 export function PPCManagementView() {
     const { cache, setCache } = useContext(DataCacheContext);
+    const location = useLocation();
+    const portfolioFilter = location.state?.portfolio as Portfolio | undefined;
 
     const [profiles, setProfiles] = useState<Profile[]>([]);
     const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
@@ -353,8 +366,14 @@ export function PPCManagementView() {
             };
         });
 
-        return enrichedCampaigns.filter(c => c.impressions > 0 || c.clicks > 0 || c.spend > 0 || c.orders > 0 || c.sales > 0);
-    }, [campaigns, performanceMetrics]);
+        const activeCampaigns = enrichedCampaigns.filter(c => c.impressions > 0 || c.clicks > 0 || c.spend > 0 || c.orders > 0 || c.sales > 0);
+        
+        if (portfolioFilter) {
+            return activeCampaigns.filter(c => c.portfolioId === portfolioFilter.portfolioId);
+        }
+
+        return activeCampaigns;
+    }, [campaigns, performanceMetrics, portfolioFilter]);
     
     const dataForSummary = useMemo(() => {
          if (!searchTerm) return combinedCampaignData;
@@ -422,8 +441,15 @@ export function PPCManagementView() {
 
     return (
         <div style={styles.container}>
+            {portfolioFilter && (
+                <div style={styles.breadcrumb}>
+                    <Link to="/portfolios" style={styles.breadcrumbLink}>Portfolios</Link>
+                    {' > '}
+                    <span>{portfolioFilter.name}</span>
+                </div>
+            )}
             <header style={styles.header}>
-                <h1 style={styles.title}>PPC Management Dashboard</h1>
+                <h1 style={styles.title}>{portfolioFilter ? 'Campaigns' : 'PPC Management Dashboard'}</h1>
             </header>
 
             {error && <div style={styles.error} role="alert">{error}</div>}

@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS sponsored_products_search_term_report (
     campaign_name TEXT,
     ad_group_id BIGINT NOT NULL,
     ad_group_name TEXT,
+    keyword_id BIGINT,
+    keyword_bid NUMERIC(10, 2),
     targeting TEXT,
     match_type VARCHAR(50),
     customer_search_term TEXT,
@@ -36,13 +38,15 @@ CREATE TABLE IF NOT EXISTS sponsored_products_search_term_report (
     seven_day_other_sku_units INTEGER,
     asin VARCHAR(255),
     -- Create a unique constraint to prevent duplicate rows based on the API's granularity
-    CONSTRAINT unique_sp_search_term_report_entry UNIQUE (report_date, campaign_id, ad_group_id, customer_search_term, targeting)
+    CONSTRAINT unique_sp_search_term_report_entry UNIQUE (report_date, campaign_id, ad_group_id, keyword_id, customer_search_term, targeting)
 );
 
 -- Add indexes to frequently queried columns to improve performance
 CREATE INDEX IF NOT EXISTS idx_sp_str_report_date ON sponsored_products_search_term_report(report_date);
 CREATE INDEX IF NOT EXISTS idx_sp_str_campaign_id ON sponsored_products_search_term_report(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_sp_str_asin ON sponsored_products_search_term_report(asin);
+CREATE INDEX IF NOT EXISTS idx_sp_str_keyword_id ON sponsored_products_search_term_report(keyword_id);
+
 
 -- =============================================================================
 -- Grant Permissions to Application User

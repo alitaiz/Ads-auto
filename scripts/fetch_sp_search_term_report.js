@@ -17,7 +17,7 @@ const {
     ADS_API_CLIENT_ID, ADS_API_PROFILE_ID
 } = process.env;
 
-const pool = new new Pool({
+const pool = new Pool({
   user: DB_USER,
   host: DB_HOST,
   database: DB_DATABASE,

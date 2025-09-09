@@ -7,25 +7,25 @@
 -- add any missing columns if it does. This version is updated to include ALL
 -- available base metrics from the Amazon Ads API documentation.
 --
--- V3: Replaced the PL/pgSQL function with direct ALTER TABLE statements for
--- simplicity and to prevent copy-paste errors. This requires PostgreSQL 9.6+.
+-- V4: Made the script fully robust by ensuring ALL columns, including keyword_id,
+-- are added with IF NOT EXISTS. This resolves migration failures on very old schemas.
 --
 
--- Create the table if it doesn't already exist.
+-- Create the table with a minimal structure if it doesn't already exist.
 CREATE TABLE IF NOT EXISTS sponsored_products_search_term_report (
     id SERIAL PRIMARY KEY,
     report_date DATE NOT NULL,
     campaign_id BIGINT,
     ad_group_id BIGINT,
-    keyword_id BIGINT,
     customer_search_term TEXT,
     targeting TEXT
 );
 
 -- Add all required columns using the simpler IF NOT EXISTS syntax.
--- This is much less prone to errors than the previous function-based approach.
+-- This is much less prone to errors and ensures older schemas are updated correctly.
 ALTER TABLE sponsored_products_search_term_report
     -- Dimensions
+    ADD COLUMN IF NOT EXISTS keyword_id BIGINT, -- CRITICAL FIX: Ensure this column exists
     ADD COLUMN IF NOT EXISTS portfolio_id BIGINT,
     ADD COLUMN IF NOT EXISTS campaign_name TEXT,
     ADD COLUMN IF NOT EXISTS ad_group_name TEXT,
@@ -97,6 +97,7 @@ CREATE INDEX IF NOT EXISTS idx_sstr_keyword_id ON sponsored_products_search_term
 CREATE INDEX IF NOT EXISTS idx_sstr_asin ON sponsored_products_search_term_report(asin);
 
 -- Define a unique constraint to prevent duplicate rows.
+-- First, drop the old constraint if it exists, then add the new, correct one.
 ALTER TABLE sponsored_products_search_term_report
 DROP CONSTRAINT IF EXISTS unique_sp_search_term_entry;
 

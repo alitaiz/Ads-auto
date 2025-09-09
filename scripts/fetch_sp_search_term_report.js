@@ -61,7 +61,8 @@ const createReport = async (accessToken, dateStr) => {
         configuration: {
             adProduct: "SPONSORED_PRODUCTS",
             groupBy: ["searchTerm"],
-            columns: API_METRICS,
+            // Correctly map 'keywordText' to 'keyword' for the API request
+            columns: API_METRICS.map(metric => metric === 'keywordText' ? 'keyword' : metric),
             filters: [
                 {
                     field: "keywordType",
@@ -155,7 +156,8 @@ const saveDataToDB = async (client, reportData) => {
         const values = dbColumns.map(col => {
              // Handle special cases and snake_case mapping
             if (col === 'asin') return extractAsinFromName(item.campaignName);
-            if (col === 'keyword_text') return item.keywordText;
+            // Map the API's 'keyword' field to our 'keyword_text' database column
+            if (col === 'keyword_text') return item.keyword;
             if (col === 'customer_search_term') return item.searchTerm;
             if (col === 'report_date') return item.date;
 

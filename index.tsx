@@ -2,9 +2,6 @@ import React, { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { PPCManagementView } from './views/PPCManagementView';
-import { AdGroupView } from './views/AdGroupView';
-import { KeywordView } from './views/KeywordView';
-import { SPSearchTermsView } from './views/SPSearchTermsView';
 import { Layout } from './views/components/Layout';
 import { SalesAndTrafficView } from './views/SalesAndTrafficView';
 import { DatabaseView } from './views/DatabaseView';
@@ -55,14 +52,11 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Layout />}>
-          <Route index element={<Navigate to="/campaigns" replace />} />
-          <Route path="campaigns" element={<PPCManagementView />} />
-          <Route path="campaigns/:campaignId/adgroups" element={<AdGroupView />} />
-          <Route path="adgroups/:adGroupId/keywords" element={<KeywordView />} />
-          <Route path="search-terms" element={<SPSearchTermsView />} />
+          <Route index element={<Navigate to="/ppc-management" replace />} />
+          <Route path="ppc-management" element={<PPCManagementView />} />
           <Route path="sales-and-traffic" element={<SalesAndTrafficView />} />
           <Route path="database" element={<DatabaseView />} />
-          <Route path="*" element={<Navigate to="/campaigns" replace />} />
+          <Route path="*" element={<Navigate to="/ppc-management" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>

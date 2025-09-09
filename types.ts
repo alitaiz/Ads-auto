@@ -87,6 +87,10 @@ export type KeywordWithMetrics = Keyword & {
     performance?: KeywordPerformanceMetrics;
 };
 
+export type AdGroupWithMetrics = AdGroup & {
+    performance?: KeywordPerformanceMetrics;
+};
+
 export interface SearchTermPerformanceData {
     customerSearchTerm: string;
     impressions: number;

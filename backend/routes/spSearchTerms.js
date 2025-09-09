@@ -128,4 +128,57 @@ router.get('/sp-search-terms', async (req, res) => {
     }
 });
 
+// POST /api/keyword-search-terms
+// Fetches search terms and their performance for a specific keyword within a date range.
+router.post('/keyword-search-terms', async (req, res) => {
+    const { keywordId, startDate, endDate } = req.body;
+    if (!keywordId || !startDate || !endDate) {
+        return res.status(400).json({ error: 'keywordId, startDate, and endDate are required.' });
+    }
+
+    try {
+        const query = `
+            SELECT 
+                customer_search_term,
+                SUM(impressions) as impressions,
+                SUM(clicks) as clicks,
+                SUM(cost) as spend,
+                SUM(purchases_7d) as seven_day_total_orders,
+                SUM(sales_7d) as seven_day_total_sales
+            FROM sponsored_products_search_term_report 
+            WHERE 
+                keyword_id = $1 AND
+                report_date BETWEEN $2 AND $3
+            GROUP BY 
+                customer_search_term
+            HAVING SUM(impressions) > 0 -- Only show terms with at least one impression
+            ORDER BY SUM(impressions) DESC NULLS LAST;
+        `;
+
+        const result = await pool.query(query, [keywordId, startDate, endDate]);
+        
+        const transformedData = result.rows.map(row => {
+            const spend = parseFloat(row.spend || 0);
+            const sales = parseFloat(row.seven_day_total_sales || 0);
+            const acos = sales > 0 ? spend / sales : 0;
+            
+            return {
+                customerSearchTerm: row.customer_search_term,
+                impressions: parseInt(row.impressions || 0),
+                clicks: parseInt(row.clicks || 0),
+                spend,
+                sevenDayTotalOrders: parseInt(row.seven_day_total_orders || 0),
+                sevenDayTotalSales: sales,
+                sevenDayAcos: acos,
+            };
+        });
+        
+        res.json(transformedData);
+
+    } catch (error) {
+        console.error("[Server] Error fetching keyword search terms:", error);
+        res.status(500).json({ error: "Failed to fetch keyword search term data." });
+    }
+});
+
 export default router;

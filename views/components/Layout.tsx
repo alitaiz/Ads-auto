@@ -62,9 +62,6 @@ export function Layout() {
                     <NavLink to="/campaigns" style={getNavLinkStyle}>
                         Campaigns
                     </NavLink>
-                    <NavLink to="/sp-search-terms" style={getNavLinkStyle}>
-                        SP Search Terms
-                    </NavLink>
                     <NavLink to="/sales-and-traffic" style={getNavLinkStyle}>
                         Sales & Traffic
                     </NavLink>

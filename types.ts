@@ -72,6 +72,50 @@ export type Keyword = {
     bid?: number;
 };
 
+export type KeywordPerformanceMetrics = {
+    impressions: number;
+    clicks: number;
+    spend: number;
+    orders: number;
+    sales: number;
+    acos: number;
+    cpc: number;
+    ctr: number;
+};
+
+export type KeywordWithMetrics = Keyword & {
+    performance?: KeywordPerformanceMetrics;
+};
+
+export interface SearchTermPerformanceData {
+    customerSearchTerm: string;
+    impressions: number;
+    clicks: number;
+    spend: number;
+    sevenDayTotalOrders: number;
+    sevenDayTotalSales: number;
+    sevenDayAcos: number;
+}
+
+// Fix: Add missing types for SPSearchTermsView
+export interface SearchTermData {
+    customerSearchTerm: string;
+    campaignName: string;
+    adGroupName: string;
+    impressions: number;
+    clicks: number;
+    spend: number;
+    sevenDayTotalSales: number;
+    sevenDayTotalOrders: number;
+    sevenDayAcos: number;
+    sevenDayRoas: number;
+}
+
+export interface SearchTermFilterOptions {
+    asins: string[];
+    campaignNames: string[];
+}
+
 export type PortfolioMetrics = {
     impressions: number;
     clicks: number;
@@ -86,29 +130,6 @@ export type PortfolioMetrics = {
 };
 
 export type PortfolioWithMetrics = Portfolio & PortfolioMetrics;
-
-// For SPSearchTermsView.tsx
-export interface SearchTermData {
-    campaignName: string;
-    campaignId: number;
-    adGroupName: string;
-    adGroupId: number;
-    customerSearchTerm: string;
-    impressions: number;
-    clicks: number;
-    spend: number;
-    sevenDayTotalSales: number;
-    sevenDayTotalOrders: number;
-    sevenDayAcos: number;
-    sevenDayRoas: number;
-    sevenDayTotalUnits: number;
-    asin: string | null;
-}
-
-export interface SearchTermFilterOptions {
-    asins: string[];
-    campaignNames: string[];
-}
 
 // For SalesAndTrafficView.tsx
 export interface SalesAndTrafficData {
@@ -136,9 +157,15 @@ export interface AppDataCache {
         profileId: string | null;
         dateRange: { start: Date; end: Date } | null;
     };
+    // Fix: Add spSearchTerms to the cache definition
     spSearchTerms: {
         data: SearchTermData[];
-        filters: { asin: string; campaignName: string; startDate: string, endDate: string } | null;
+        filters: {
+            asin: string;
+            campaignName: string;
+            startDate: string;
+            endDate: string;
+        } | null;
     };
     salesAndTraffic: {
         data: SalesAndTrafficData[];

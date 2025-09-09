@@ -1,10 +1,12 @@
 import React, { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { CampaignsView } from './views/CampaignsView';
 import { PPCManagementView } from './views/PPCManagementView';
+import { AdGroupView } from './views/AdGroupView';
+import { KeywordView } from './views/KeywordView';
 import { Layout } from './views/components/Layout';
 import { SalesAndTrafficView } from './views/SalesAndTrafficView';
+import { SPSearchTermsView } from './views/SPSearchTermsView';
 import { DatabaseView } from './views/DatabaseView';
 import { DataCacheProvider } from './contexts/DataCacheContext';
 
@@ -52,10 +54,12 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Layout />}> 
+        <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/campaigns" replace />} />
-          <Route path="campaigns" element={<CampaignsView />} />
-          <Route path="ppc-management" element={<PPCManagementView />} />
+          <Route path="campaigns" element={<PPCManagementView />} />
+          <Route path="campaigns/:campaignId/adgroups" element={<AdGroupView />} />
+          <Route path="adgroups/:adGroupId/keywords" element={<KeywordView />} />
+          <Route path="sp-search-terms" element={<SPSearchTermsView />} />
           <Route path="sales-and-traffic" element={<SalesAndTrafficView />} />
           <Route path="database" element={<DatabaseView />} />
           <Route path="*" element={<Navigate to="/campaigns" replace />} />

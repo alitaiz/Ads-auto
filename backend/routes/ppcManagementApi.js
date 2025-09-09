@@ -21,33 +21,6 @@ router.get('/profiles', async (req, res) => {
 });
 
 /**
- * POST /api/amazon/portfolios
- * Fetches advertising portfolios for a given profile ID.
- */
-router.post('/portfolios', async (req, res) => {
-    const { profileId } = req.body;
-    if (!profileId) {
-        return res.status(400).json({ message: 'profileId is required in the request body.' });
-    }
-    try {
-        const data = await amazonAdsApiRequest({
-            method: 'post',
-            url: '/v2/portfolios',
-            profileId,
-            data: {
-                portfolioStateFilter: {
-                    include: ["ENABLED", "ARCHIVED"]
-                }
-            }
-        });
-        res.json(data.portfolios || []);
-    } catch (error) {
-        res.status(error.status || 500).json(error.details || { message: 'Failed to fetch portfolios' });
-    }
-});
-
-
-/**
  * POST /api/amazon/campaigns/list
  * Fetches a list of Sponsored Products campaigns.
  * Now supports filtering by a list of campaign IDs.
@@ -96,7 +69,6 @@ router.post('/campaigns/list', async (req, res) => {
             targetingType: c.targetingType, state: c.state.toLowerCase(),
             dailyBudget: c.budget?.budget ?? c.budget?.amount ?? 0,
             startDate: c.startDate, endDate: c.endDate, bidding: c.bidding,
-            portfolioId: c.portfolioId,
         }));
         res.json({ campaigns: transformedCampaigns });
     } catch (error) {

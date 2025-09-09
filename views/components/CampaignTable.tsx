@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { CampaignWithMetrics, CampaignState, AdGroupWithMetrics, KeywordWithMetrics, SearchTermPerformanceData } from '../../types';
+import { Link } from 'react-router-dom';
+import { CampaignWithMetrics, CampaignState, AdGroup } from '../../types';
 import { formatPrice, formatNumber } from '../../utils';
 
 const styles: { [key: string]: React.CSSProperties } = {
@@ -12,6 +13,7 @@ const styles: { [key: string]: React.CSSProperties } = {
     table: {
         width: '100%',
         borderCollapse: 'collapse',
+        tableLayout: 'fixed',
     },
     th: {
         padding: '12px 15px',
@@ -20,7 +22,11 @@ const styles: { [key: string]: React.CSSProperties } = {
         backgroundColor: '#f8f9fa',
         fontWeight: 600,
         cursor: 'pointer',
+        position: 'relative',
         whiteSpace: 'nowrap',
+    },
+    sortIcon: {
+        marginLeft: '5px',
     },
     td: {
         padding: '12px 15px',
@@ -28,6 +34,11 @@ const styles: { [key: string]: React.CSSProperties } = {
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
+    },
+    link: {
+        textDecoration: 'none',
+        color: 'var(--primary-color)',
+        fontWeight: 500,
     },
     input: {
         padding: '8px',
@@ -40,17 +51,41 @@ const styles: { [key: string]: React.CSSProperties } = {
         borderRadius: '4px',
         border: '1px solid var(--border-color)',
     },
-    capitalize: { textTransform: 'capitalize' },
-    expandCell: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' },
-    expandIcon: { transition: 'transform 0.2s', width: '12px' },
-    subTableContainer: { backgroundColor: '#f8f9fa', padding: '15px 25px 15px 50px' },
-    subTable: { width: '100%', borderCollapse: 'collapse' },
-    subTh: { textAlign: 'left', padding: '8px 10px', borderBottom: '1px solid #dee2e6', fontWeight: 600, fontSize: '0.9em', whiteSpace: 'nowrap' },
-    subTd: { textAlign: 'left', padding: '8px 10px', borderBottom: '1px solid #e9ecef', fontSize: '0.9em', whiteSpace: 'nowrap' },
-    subError: { color: 'var(--danger-color)', padding: '10px' },
-    subLoader: { padding: '20px', textAlign: 'center' },
-    indentedCell: { paddingLeft: '30px' },
-    doubleIndentedCell: { paddingLeft: '60px' },
+    capitalize: {
+        textTransform: 'capitalize',
+    },
+    expandCell: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        cursor: 'pointer',
+    },
+    expandIcon: {
+        transition: 'transform 0.2s',
+    },
+    adGroupSubTableContainer: {
+        backgroundColor: '#f8f9fa',
+        padding: '15px 25px 15px 50px', // Indent the sub-table
+    },
+    adGroupSubTable: {
+        width: '100%',
+        borderCollapse: 'collapse',
+    },
+    adGroupTh: {
+        textAlign: 'left',
+        padding: '8px',
+        borderBottom: '1px solid #dee2e6',
+        fontWeight: 600,
+    },
+    adGroupTd: {
+        textAlign: 'left',
+        padding: '8px',
+        borderBottom: '1px solid #e9ecef',
+    },
+    subError: {
+        color: 'var(--danger-color)',
+        padding: '10px'
+    }
 };
 
 type SortableKeys = keyof CampaignWithMetrics;
@@ -60,117 +95,34 @@ interface CampaignTableProps {
     onUpdateCampaign: (campaignId: number, update: { state?: CampaignState; budget?: { amount: number } }) => void;
     sortConfig: { key: SortableKeys; direction: 'ascending' | 'descending' } | null;
     onRequestSort: (key: SortableKeys) => void;
-    expandedIds: { campaign: number | null, adGroup: number | null, keyword: number | null };
-    onToggleExpand: (level: 'campaign' | 'adGroup' | 'keyword', id: number) => void;
-    adGroups: Record<number, AdGroupWithMetrics[]>;
-    keywords: Record<number, KeywordWithMetrics[]>;
-    searchTerms: Record<number, SearchTermPerformanceData[]>;
-    loadingState: { adGroups: number | null, keywords: number | null, searchTerms: number | null };
-    errorState: { adGroups: string | null, keywords: string | null, searchTerms: string | null };
+    expandedCampaignId: number | null;
+    onToggleExpand: (campaignId: number) => void;
+    adGroups: Record<number, AdGroup[]>;
+    loadingAdGroups: number | null;
+    adGroupError: string | null;
+    campaignName: string;
 }
 
-const formatPercent = (value?: number) => (value && isFinite(value)) ? `${(value * 100).toFixed(2)}%` : '0.00%';
-const formatRoAS = (value?: number) => (value && isFinite(value)) ? `${value.toFixed(2)}` : '0.00';
-const calcCPO = (spend?: number, orders?: number) => (orders && spend) ? formatPrice(spend / orders) : formatPrice(0);
-const calcConvRate = (orders?: number, clicks?: number) => (clicks && orders) ? formatPercent(orders / clicks) : '0.00%';
+const SortableHeader = ({
+    label, sortKey, sortConfig, onRequestSort,
+}: {
+    label: string; sortKey: SortableKeys; sortConfig: CampaignTableProps['sortConfig']; onRequestSort: CampaignTableProps['onRequestSort'];
+}) => {
+    const isSorted = sortConfig?.key === sortKey;
+    const directionIcon = sortConfig?.direction === 'ascending' ? '▲' : '▼';
 
-const SearchTermTable = ({ keywordId, searchTerms, loadingState, errorState }: any) => {
-    if (loadingState.searchTerms === keywordId) return <div style={styles.subLoader}>Loading search terms...</div>;
-    if (errorState.searchTerms && loadingState.searchTerms === null) return <div style={styles.subError}>{errorState.searchTerms}</div>;
-    const terms = searchTerms[keywordId];
-    if (!terms) return null;
-    if (terms.length === 0) return <div style={{...styles.subLoader, color: '#666'}}>No search term data found.</div>;
     return (
-        <table style={styles.subTable}>
-            <thead><tr>
-                <th style={{...styles.subTh, ...styles.doubleIndentedCell}}>Search Term</th><th style={styles.subTh}>Spend</th><th style={styles.subTh}>Clicks</th>
-                <th style={styles.subTh}>Orders</th><th style={styles.subTh}>Sales</th><th style={styles.subTh}>ACoS</th>
-            </tr></thead>
-            <tbody>{terms.map(st => (
-                <tr key={st.customerSearchTerm}>
-                    <td style={{...styles.subTd, ...styles.doubleIndentedCell}}>{st.customerSearchTerm}</td><td style={styles.subTd}>{formatPrice(st.spend)}</td>
-                    <td style={styles.subTd}>{formatNumber(st.clicks)}</td><td style={styles.subTd}>{formatNumber(st.sevenDayTotalOrders)}</td>
-                    <td style={styles.subTd}>{formatPrice(st.sevenDayTotalSales)}</td><td style={styles.subTd}>{formatPercent(st.sevenDayAcos)}</td>
-                </tr>
-            ))}</tbody>
-        </table>
+        <th style={styles.th} onClick={() => onRequestSort(sortKey)}>
+            {label}
+            {isSorted && <span style={styles.sortIcon}>{directionIcon}</span>}
+        </th>
     );
 };
 
-const KeywordTable = ({ adGroupId, keywords, expandedIds, onToggleExpand, searchTerms, loadingState, errorState }: any) => {
-    if (loadingState.keywords === adGroupId) return <div style={styles.subLoader}>Loading keywords...</div>;
-    if (errorState.keywords && loadingState.keywords === null) return <div style={styles.subError}>{errorState.keywords}</div>;
-    const kws = keywords[adGroupId];
-    if (!kws) return null;
-    if (kws.length === 0) return <div style={{...styles.subLoader, color: '#666'}}>No keywords found.</div>;
-
-    return (
-        <table style={styles.subTable}>
-            <thead><tr>
-                <th style={{...styles.subTh, ...styles.indentedCell}}>Keyword</th><th style={styles.subTh}>Status</th><th style={styles.subTh}>Bid</th><th style={styles.subTh}>Spend</th><th style={styles.subTh}>Clicks</th>
-                <th style={styles.subTh}>Orders</th><th style={styles.subTh}>Sales</th><th style={styles.subTh}>ACoS</th>
-            </tr></thead>
-            <tbody>{kws.map((kw: KeywordWithMetrics) => (
-                <React.Fragment key={kw.keywordId}>
-                    <tr>
-                        <td style={{...styles.subTd, ...styles.indentedCell}}>
-                            <div style={styles.expandCell} onClick={() => onToggleExpand('keyword', kw.keywordId)}>
-                                <span style={{...styles.expandIcon, transform: expandedIds.keyword === kw.keywordId ? 'rotate(90deg)' : 'rotate(0deg)'}}>►</span>
-                                <span>{kw.keywordText} ({kw.matchType})</span>
-                            </div>
-                        </td>
-                        <td style={{...styles.subTd, ...styles.capitalize}}>{kw.state}</td><td style={styles.subTd}>{kw.bid ? formatPrice(kw.bid) : 'Default'}</td>
-                        <td style={styles.subTd}>{formatPrice(kw.performance?.spend)}</td><td style={styles.subTd}>{formatNumber(kw.performance?.clicks)}</td>
-                        <td style={styles.subTd}>{formatNumber(kw.performance?.orders)}</td><td style={styles.subTd}>{formatPrice(kw.performance?.sales)}</td>
-                        <td style={styles.subTd}>{formatPercent(kw.performance?.acos)}</td>
-                    </tr>
-                    {expandedIds.keyword === kw.keywordId && <tr><td colSpan={8} style={{padding: 0, border:0}}><SearchTermTable keywordId={kw.keywordId} searchTerms={searchTerms} loadingState={loadingState} errorState={errorState} /></td></tr>}
-                </React.Fragment>
-            ))}</tbody>
-        </table>
-    );
-};
-
-const AdGroupTable = ({ campaignId, adGroups, expandedIds, onToggleExpand, keywords, searchTerms, loadingState, errorState }: any) => {
-    if (loadingState.adGroups === campaignId) return <div style={styles.subLoader}>Loading ad groups...</div>;
-    if (errorState.adGroups && loadingState.adGroups === null) return <div style={styles.subError}>{errorState.adGroups}</div>;
-    const ags = adGroups[campaignId];
-    if (!ags) return null;
-    if (ags.length === 0) return <div style={{...styles.subLoader, color: '#666'}}>No ad groups found.</div>;
-
-    return (
-        <table style={styles.subTable}>
-            <thead><tr>
-                <th style={styles.subTh}>Ad Group</th><th style={styles.subTh}>Status</th><th style={styles.subTh}>Spend</th>
-                <th style={styles.subTh}>Clicks</th><th style={styles.subTh}>Orders</th><th style={styles.subTh}>Sales</th>
-                <th style={styles.subTh}>ACoS</th>
-            </tr></thead>
-            <tbody>{ags.map((ag: AdGroupWithMetrics) => (
-                <React.Fragment key={ag.adGroupId}>
-                    <tr>
-                        <td style={styles.subTd}>
-                            <div style={styles.expandCell} onClick={() => onToggleExpand('adGroup', ag.adGroupId)}>
-                                <span style={{...styles.expandIcon, transform: expandedIds.adGroup === ag.adGroupId ? 'rotate(90deg)' : 'rotate(0deg)'}}>►</span>
-                                <span>{ag.name}</span>
-                            </div>
-                        </td>
-                        <td style={{...styles.subTd, ...styles.capitalize}}>{ag.state}</td>
-                        <td style={styles.subTd}>{formatPrice(ag.performance?.spend)}</td>
-                        <td style={styles.subTd}>{formatNumber(ag.performance?.clicks)}</td>
-                        <td style={styles.subTd}>{formatNumber(ag.performance?.orders)}</td>
-                        <td style={styles.subTd}>{formatPrice(ag.performance?.sales)}</td>
-                        <td style={styles.subTd}>{formatPercent(ag.performance?.acos)}</td>
-                    </tr>
-                    {expandedIds.adGroup === ag.adGroupId && <tr><td colSpan={7} style={{padding:0, border:0}}><KeywordTable adGroupId={ag.adGroupId} keywords={keywords} expandedIds={expandedIds} onToggleExpand={onToggleExpand} searchTerms={searchTerms} loadingState={loadingState} errorState={errorState} /></td></tr>}
-                </React.Fragment>
-            ))}</tbody>
-        </table>
-    );
-};
-
-
-export function CampaignTable(props: CampaignTableProps) {
-    const { campaigns, onUpdateCampaign, sortConfig, onRequestSort, expandedIds, onToggleExpand } = props;
+export function CampaignTable({
+    campaigns, onUpdateCampaign, sortConfig, onRequestSort,
+    expandedCampaignId, onToggleExpand, adGroups, loadingAdGroups, adGroupError, campaignName
+}: CampaignTableProps) {
     const [editingCell, setEditingCell] = useState<{ id: number; field: 'state' | 'budget' } | null>(null);
     const [tempValue, setTempValue] = useState<string | number>('');
 
@@ -195,38 +147,92 @@ export function CampaignTable(props: CampaignTableProps) {
         else if (e.key === 'Escape') setEditingCell(null);
     };
     
+    const formatPercent = (value?: number) => (value ? `${(value * 100).toFixed(2)}%` : '0.00%');
+    const formatRoAS = (value?: number) => (value ? `${value.toFixed(2)}` : '0.00');
+
+    const renderAdGroupSubTable = (campaignId: number) => {
+        if (loadingAdGroups === campaignId) return <div style={{ padding: '20px' }}>Loading ad groups...</div>;
+        if (adGroupError && expandedCampaignId === campaignId) return <div style={styles.subError}>Error: {adGroupError}</div>;
+
+        const currentAdGroups = adGroups[campaignId];
+        if (!currentAdGroups) return null;
+
+        return (
+            <div style={styles.adGroupSubTableContainer}>
+                {currentAdGroups.length > 0 ? (
+                     <table style={styles.adGroupSubTable}>
+                        <thead>
+                            <tr>
+                                <th style={{...styles.adGroupTh, width: '60%'}}>Ad Group Name</th>
+                                <th style={{...styles.adGroupTh, width: '20%'}}>Status</th>
+                                <th style={{...styles.adGroupTh, width: '20%'}}>Default Bid</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {currentAdGroups.map(ag => (
+                                <tr key={ag.adGroupId}>
+                                    <td style={styles.adGroupTd}>
+                                        <Link 
+                                            to={`/adgroups/${ag.adGroupId}/keywords`} 
+                                            state={{ adGroupName: ag.name, campaignName: campaignName }}
+                                            style={styles.link}
+                                        >
+                                            {ag.name}
+                                        </Link>
+                                    </td>
+                                    <td style={{...styles.adGroupTd, textTransform: 'capitalize'}}>{ag.state}</td>
+                                    <td style={styles.adGroupTd}>{formatPrice(ag.defaultBid)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                ) : (
+                    <div>No ad groups found in this campaign.</div>
+                )}
+            </div>
+        );
+    };
+    
+    const totalColumns = 10;
+    
     return (
         <div style={styles.tableContainer}>
             <table style={styles.table}>
-                <thead><tr>
-                    <th style={styles.th} onClick={() => onRequestSort('name')}>Campaign Name</th>
-                    <th style={styles.th} onClick={() => onRequestSort('state')}>Status</th>
-                    <th style={styles.th} onClick={() => onRequestSort('dailyBudget')}>Budget</th>
-                    <th style={styles.th} onClick={() => onRequestSort('spend')}>Spend</th>
-                    <th style={styles.th} onClick={() => onRequestSort('sales')}>Sales</th>
-                    <th style={styles.th} onClick={() => onRequestSort('orders')}>Orders</th>
-                    <th style={styles.th}>CPO</th>
-                    <th style={styles.th} onClick={() => onRequestSort('clicks')}>Clicks</th>
-                    <th style={styles.th}>Conv. Rate</th>
-                    <th style={styles.th} onClick={() => onRequestSort('acos')}>ACoS</th>
-                    <th style={styles.th} onClick={() => onRequestSort('roas')}>RoAS</th>
-                </tr></thead>
+                 <colgroup>
+                    <col style={{ width: '25%' }} /> <col style={{ width: '10%' }} />
+                    <col style={{ width: '10%' }} /> <col style={{ width: '9%' }} />
+                    <col style={{ width: '9%' }} /> <col style={{ width: '9%' }} />
+                    <col style={{ width: '9%' }} /> <col style={{ width: '9%' }} />
+                    <col style={{ width: '5%' }} /> <col style={{ width: '5%' }} />
+                </colgroup>
+                <thead>
+                    <tr>
+                        <SortableHeader label="Campaign Name" sortKey="name" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="Status" sortKey="state" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="Daily Budget" sortKey="dailyBudget" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="Spend" sortKey="spend" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="Sales" sortKey="sales" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="Orders" sortKey="orders" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="Impressions" sortKey="impressions" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="Clicks" sortKey="clicks" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="ACoS" sortKey="acos" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <SortableHeader label="RoAS" sortKey="roas" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                    </tr>
+                </thead>
                 <tbody>
                     {campaigns.map(campaign => (
                         <React.Fragment key={campaign.campaignId}>
                             <tr>
                                 <td style={styles.td} title={campaign.name}>
-                                    <div style={styles.expandCell} onClick={() => onToggleExpand('campaign', campaign.campaignId)}>
-                                        <span style={{...styles.expandIcon, transform: expandedIds.campaign === campaign.campaignId ? 'rotate(90deg)' : 'rotate(0deg)'}}>
-                                            {campaigns.length > 0 ? '►' : ''}
-                                        </span>
+                                    <div style={styles.expandCell} onClick={() => onToggleExpand(campaign.campaignId)}>
+                                        <span style={{...styles.expandIcon, transform: expandedCampaignId === campaign.campaignId ? 'rotate(90deg)' : 'rotate(0deg)'}}>►</span>
                                         <span>{campaign.name}</span>
                                     </div>
                                 </td>
                                 <td style={{ ...styles.td, cursor: 'pointer' }} onClick={() => handleCellClick(campaign, 'state')}>
                                     {editingCell?.id === campaign.campaignId && editingCell.field === 'state' ? (
                                         <select style={styles.select} value={tempValue} onChange={(e) => setTempValue(e.target.value)} onBlur={() => handleUpdate(campaign.campaignId)} onKeyDown={(e) => handleKeyDown(e, campaign.campaignId)} autoFocus>
-                                            <option value="enabled">Enabled</option><option value="paused">Paused</option><option value="archived">Archived</option>
+                                            <option value="enabled">Enabled</option> <option value="paused">Paused</option> <option value="archived">Archived</option>
                                         </select>
                                     ) : <span style={styles.capitalize}>{campaign.state}</span>}
                                 </td>
@@ -238,18 +244,17 @@ export function CampaignTable(props: CampaignTableProps) {
                                 <td style={styles.td}>{formatPrice(campaign.spend)}</td>
                                 <td style={styles.td}>{formatPrice(campaign.sales)}</td>
                                 <td style={styles.td}>{formatNumber(campaign.orders)}</td>
-                                <td style={styles.td}>{calcCPO(campaign.spend, campaign.orders)}</td>
+                                <td style={styles.td}>{formatNumber(campaign.impressions)}</td>
                                 <td style={styles.td}>{formatNumber(campaign.clicks)}</td>
-                                <td style={styles.td}>{calcConvRate(campaign.orders, campaign.clicks)}</td>
                                 <td style={styles.td}>{formatPercent(campaign.acos)}</td>
                                 <td style={styles.td}>{formatRoAS(campaign.roas)}</td>
                             </tr>
-                            {expandedIds.campaign === campaign.campaignId && (
-                                <tr><td colSpan={11} style={{padding: 0, borderTop: 0}}>
-                                    <div style={styles.subTableContainer}>
-                                        <AdGroupTable campaignId={campaign.campaignId} {...props} />
-                                    </div>
-                                </td></tr>
+                            {expandedCampaignId === campaign.campaignId && (
+                                <tr>
+                                    <td colSpan={totalColumns} style={{padding: 0, borderTop: 0}}>
+                                        {renderAdGroupSubTable(campaign.campaignId)}
+                                    </td>
+                                </tr>
                             )}
                         </React.Fragment>
                     ))}

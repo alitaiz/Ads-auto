@@ -60,10 +60,10 @@ export function Layout() {
                 <a href="/" style={styles.logo}>Ads Auto</a>
                 <nav style={styles.nav}>
                     <NavLink to="/campaigns" style={getNavLinkStyle}>
-                        Campaigns
-                    </NavLink>
-                    <NavLink to="/ppc-management" style={getNavLinkStyle}>
                         PPC Management
+                    </NavLink>
+                    <NavLink to="/sp-search-terms" style={getNavLinkStyle}>
+                        SP Search Terms
                     </NavLink>
                     <NavLink to="/sales-and-traffic" style={getNavLinkStyle}>
                         Sales & Traffic

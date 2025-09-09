@@ -25,7 +25,7 @@ router.get('/ppc/campaign-names', async (req, res) => {
 
         res.json(nameMap);
 
-    } catch (error) => {
+    } catch (error) {
         console.error("[Server] Error fetching PPC campaign names:", error);
         res.status(500).json({ error: "Failed to fetch PPC campaign names." });
     }

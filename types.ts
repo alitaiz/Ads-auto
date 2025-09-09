@@ -92,6 +92,9 @@ export interface SalesAndTrafficData {
 
 export interface SPSearchTermReportData {
     campaignName: string;
+    campaignId: number;
+    adGroupName: string;
+    adGroupId: number;
     customerSearchTerm: string;
     impressions: number;
     clicks: number;

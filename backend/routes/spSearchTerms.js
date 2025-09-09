@@ -73,7 +73,10 @@ router.get('/sp-search-terms', async (req, res) => {
         
         const query = `
             SELECT 
-                campaign_name, 
+                campaign_name,
+                campaign_id,
+                ad_group_name,
+                ad_group_id,
                 customer_search_term, 
                 asin,
                 targeting, 
@@ -88,6 +91,9 @@ router.get('/sp-search-terms', async (req, res) => {
             WHERE ${whereClauses.join(' AND ')}
             GROUP BY 
                 campaign_name, 
+                campaign_id,
+                ad_group_name,
+                ad_group_id,
                 customer_search_term, 
                 asin,
                 targeting, 
@@ -108,6 +114,9 @@ router.get('/sp-search-terms', async (req, res) => {
 
             return {
                 campaignName: row.campaign_name,
+                campaignId: row.campaign_id,
+                adGroupName: row.ad_group_name,
+                adGroupId: row.ad_group_id,
                 customerSearchTerm: row.customer_search_term,
                 impressions: parseInt(row.impressions || 0),
                 clicks: clicks,

@@ -271,12 +271,28 @@ export function SPSearchTermsView() {
     // the heavy transformation only runs when the underlying data or view level
     // changes, which prevents UI freezes when switching tabs.
     const [viewLevel, setViewLevel] = useState<ViewLevel>('campaigns');
+    // Pre-calculate hierarchies for each view level only when the raw data
+    // changes. Switching between tabs then becomes an inexpensive lookup
+    // rather than repeatedly rebuilding large trees which previously caused
+    // the UI to freeze after visiting the "Keywords" tab.
+    const campaignsTree = useMemo(() => buildHierarchyByLevel(flatData, 'campaigns'), [flatData]);
+    const adGroupsTree = useMemo(() => buildHierarchyByLevel(flatData, 'adGroups'), [flatData]);
+    const keywordsTree = useMemo(() => buildHierarchyByLevel(flatData, 'keywords'), [flatData]);
     const aggregatedSearchTerms = useMemo(() => aggregateSearchTerms(flatData), [flatData]);
+
     const treeData = useMemo<TreeNode[]>(() => {
-        return viewLevel === 'searchTerms'
-            ? aggregatedSearchTerms
-            : buildHierarchyByLevel(flatData, viewLevel);
-    }, [flatData, viewLevel, aggregatedSearchTerms]);
+        switch (viewLevel) {
+            case 'adGroups':
+                return adGroupsTree;
+            case 'keywords':
+                return keywordsTree;
+            case 'searchTerms':
+                return aggregatedSearchTerms;
+            case 'campaigns':
+            default:
+                return campaignsTree;
+        }
+    }, [viewLevel, campaignsTree, adGroupsTree, keywordsTree, aggregatedSearchTerms]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());

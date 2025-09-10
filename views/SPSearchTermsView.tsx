@@ -447,7 +447,6 @@ export function SPSearchTermsView() {
                     </div>
                  </div>
                  <div style={styles.headerTabs}>
-                     <button style={styles.tabButton} disabled>Portfolios</button>
                      {tabs.map(tab => (
                         <button key={tab.id} style={viewLevel === tab.id ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setViewLevel(tab.id)}>
                             {tab.label}

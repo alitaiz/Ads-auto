@@ -24,3 +24,9 @@ CREATE TABLE IF NOT EXISTS automation_logs (
     details JSONB
 );
 
+-- =============================================================================
+-- Grant Permissions to Application User
+-- =============================================================================
+-- IMPORTANT: Replace 'yourdbuser' with the actual DB_USER from your .env file.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE automation_rules, automation_logs TO yourdbuser;
+GRANT USAGE, SELECT ON SEQUENCE automation_rules_id_seq, automation_logs_id_seq TO yourdbuser;

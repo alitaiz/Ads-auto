@@ -71,6 +71,9 @@ export function Layout() {
                     <NavLink to="/database" style={getNavLinkStyle}>
                         Database Viewer
                     </NavLink>
+                    <NavLink to="/automation" style={getNavLinkStyle}>
+                        Automation
+                    </NavLink>
                 </nav>
             </header>
             <main style={styles.mainContent}>

@@ -13,6 +13,7 @@ interface Metrics {
     orders: number;
     units: number;
     asin?: string | null;
+    asins?: string[];
     productCount?: number;
 }
 
@@ -63,7 +64,7 @@ const styles: { [key: string]: React.CSSProperties } = {
 // --- Column Definitions ---
 const columns = [
     { id: 'name', label: 'Name', width: '350px' },
-    { id: 'products', label: 'Products', width: '200px' },
+    { id: 'asin', label: 'ASIN', width: '200px' },
     { id: 'status', label: 'Status', width: '120px' },
     { id: 'costPerOrder', label: 'Cost per order', width: '120px' },
     { id: 'spend', label: 'Ad spend', width: '100px' },
@@ -94,6 +95,10 @@ const addMetrics = (target: Metrics, source: Metrics) => {
     target.sales += source.sales;
     target.orders += source.orders;
     target.units += source.units;
+    if (source.asin) {
+        target.asins = target.asins || [];
+        if (!target.asins.includes(source.asin)) target.asins.push(source.asin);
+    }
 };
 const createMetrics = (row: SPSearchTermReportData): Metrics => ({
     impressions: row.impressions,
@@ -104,7 +109,7 @@ const createMetrics = (row: SPSearchTermReportData): Metrics => ({
     units: row.sevenDayTotalUnits,
     asin: row.asin,
 });
-const emptyMetrics = (): Metrics => ({ impressions: 0, clicks: 0, spend: 0, sales: 0, orders: 0, units: 0, productCount: 0 });
+const emptyMetrics = (): Metrics => ({ impressions: 0, clicks: 0, spend: 0, sales: 0, orders: 0, units: 0, productCount: 0, asins: [] });
 
 const aggregateSearchTerms = (flatData: SPSearchTermReportData[]): TreeNode[] => {
     const terms = new Map<string, Metrics>();
@@ -269,7 +274,7 @@ const TreeNodeRow: React.FC<{
     const isExpanded = expandedIds.has(node.id);
     const hasChildren = node.children && node.children.length > 0;
     
-    const { impressions, clicks, spend, sales, orders, units, asin, productCount } = node.metrics;
+    const { impressions, clicks, spend, sales, orders, units, asins, productCount } = node.metrics;
     const cpc = clicks > 0 ? spend / clicks : 0;
     const acos = sales > 0 ? spend / sales : 0;
     const conversion = clicks > 0 ? orders / clicks : 0;
@@ -297,9 +302,23 @@ const TreeNodeRow: React.FC<{
                     <span title={node.name}>{node.name}{nameSuffix}</span>
                 </div>
             );
-            case 'products': 
-                if (node.type === 'adGroup') return `Products: ${productCount || 1}`;
-                if (node.type === 'campaign' && node.metrics.asin) return <img src={`https://m.media-amazon.com/images/I/${node.metrics.asin}.jpg`} alt={node.metrics.asin} height="30" onError={(e) => e.currentTarget.style.display='none'} />;
+            case 'asin':
+                if (node.type === 'adGroup') return `ASINs: ${productCount || 1}`;
+                if (node.type === 'campaign') {
+                    const asinList = asins || [];
+                    if (asinList.length === 1) {
+                        const single = asinList[0];
+                        return <img src={`https://m.media-amazon.com/images/I/${single}.jpg`} alt={single} height="30" onError={(e) => (e.currentTarget.style.display='none')} />;
+                    }
+                    if (asinList.length > 1) {
+                        return (
+                            <span style={{ color: 'var(--primary-color)', cursor: 'pointer', textDecoration: 'underline' }}
+                                onClick={() => alert(asinList.join('\n'))}>
+                                ASINS
+                            </span>
+                        );
+                    }
+                }
                 return '—';
             case 'status': return node.type !== 'searchTerm' ? <div style={styles.statusCell}>Active <span style={styles.statusDropdownIcon}>▼</span></div> : '—';
             case 'costPerOrder': return formatPrice(costPerOrder);

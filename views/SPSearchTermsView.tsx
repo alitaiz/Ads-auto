@@ -143,22 +143,52 @@ const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLe
     }
 
     if (level === 'keywords') {
-        const keywordMap = new Map<string, TreeNode>();
+        interface KeywordEntry {
+            node: TreeNode;
+            termMap: Map<string, TreeNode>;
+        }
+        const keywordMap = new Map<string, KeywordEntry>();
+
         flatData.forEach(row => {
             const key = `${row.campaignId}-${row.adGroupId}-${row.targeting}`;
             if (!keywordMap.has(key)) {
                 keywordMap.set(key, {
-                    id: `k-${key}`,
-                    name: row.targeting,
-                    type: 'keyword',
-                    keywordType: 'keyword',
-                    matchType: row.matchType,
+                    node: {
+                        id: `k-${key}`,
+                        name: row.targeting,
+                        type: 'keyword',
+                        keywordType: 'keyword',
+                        matchType: row.matchType,
+                        metrics: emptyMetrics(),
+                        children: [],
+                    },
+                    termMap: new Map<string, TreeNode>(),
+                });
+            }
+
+            const keywordEntry = keywordMap.get(key)!;
+            const keywordNode = keywordEntry.node;
+            const termMap = keywordEntry.termMap;
+
+            addMetrics(keywordNode.metrics, createMetrics(row));
+
+            if (!termMap.has(row.customerSearchTerm)) {
+                termMap.set(row.customerSearchTerm, {
+                    id: `st-${row.customerSearchTerm}-${key}`,
+                    name: row.customerSearchTerm,
+                    type: 'searchTerm',
+                    keywordType: 'search term',
                     metrics: emptyMetrics(),
                 });
             }
-            addMetrics(keywordMap.get(key)!.metrics, createMetrics(row));
+            const termNode = termMap.get(row.customerSearchTerm)!;
+            addMetrics(termNode.metrics, createMetrics(row));
         });
-        return Array.from(keywordMap.values());
+
+        return Array.from(keywordMap.values()).map(({ node, termMap }) => {
+            node.children = Array.from(termMap.values());
+            return node;
+        });
     }
 
     const campaignMap = new Map<number, TreeNode>();

@@ -106,6 +106,22 @@ const createMetrics = (row: SPSearchTermReportData): Metrics => ({
 });
 const emptyMetrics = (): Metrics => ({ impressions: 0, clicks: 0, spend: 0, sales: 0, orders: 0, units: 0, productCount: 0 });
 
+const aggregateSearchTerms = (flatData: SPSearchTermReportData[]): TreeNode[] => {
+    const terms = new Map<string, Metrics>();
+    flatData.forEach(row => {
+        const term = row.customerSearchTerm;
+        if (!terms.has(term)) terms.set(term, emptyMetrics());
+        addMetrics(terms.get(term)!, createMetrics(row));
+    });
+    return Array.from(terms.entries()).map(([name, metrics]) => ({
+        id: `st-${name}`,
+        name,
+        type: 'searchTerm',
+        keywordType: 'search term',
+        metrics,
+    }));
+};
+
 const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLevel): TreeNode[] => {
     // For the search term tab we only need aggregated terms, so avoid building the full hierarchy
     if (level === 'searchTerms') {
@@ -256,15 +272,21 @@ export function SPSearchTermsView() {
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [viewLevel, setViewLevel] = useState<ViewLevel>('campaigns');
-    
+
     const [dateRange, setDateRange] = useState(cache.spSearchTerms.filters ? { start: new Date(cache.spSearchTerms.filters.startDate), end: new Date(cache.spSearchTerms.filters.endDate)} : { start: new Date(), end: new Date() });
     const [isDatePickerOpen, setDatePickerOpen] = useState(false);
-    
+
+    const aggregatedSearchTerms = useMemo(() => aggregateSearchTerms(flatData), [flatData]);
+
     useEffect(() => {
-        setTreeData(buildHierarchyByLevel(flatData, viewLevel));
+        if (viewLevel === 'searchTerms') {
+            setTreeData(aggregatedSearchTerms);
+        } else {
+            setTreeData(buildHierarchyByLevel(flatData, viewLevel));
+        }
         setExpandedIds(new Set());
         setSelectedIds(new Set());
-    }, [flatData, viewLevel]);
+    }, [flatData, viewLevel, aggregatedSearchTerms]);
     
     const handleToggle = (id: string) => setExpandedIds(prev => { const s = new Set(prev); if(s.has(id)) s.delete(id); else s.add(id); return s; });
     const handleSelect = (id: string, checked: boolean) => setSelectedIds(prev => { const s = new Set(prev); if(checked) s.add(id); else s.delete(id); return s; });

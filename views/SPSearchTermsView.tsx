@@ -416,14 +416,21 @@ export function SPSearchTermsView() {
         }
     }, [setCache]);
     
-     useEffect(() => {
-        if(cache.spSearchTerms.data.length === 0) {
+    useEffect(() => {
+        // Only load the default 7-day range on initial mount when no filters
+        // have been applied. Previously this effect depended solely on the
+        // cached data length which caused it to re-fetch the default range
+        // whenever a user selected a date range that returned no results. That
+        // behaviour overwrote the empty state with aggregated data from all
+        // days. By also checking for the absence of cached filters we ensure the
+        // default fetch happens only once on first load.
+        if (cache.spSearchTerms.data.length === 0 && !cache.spSearchTerms.filters) {
             const end = new Date();
             const start = new Date();
             start.setDate(end.getDate() - 7);
-            handleApply({start, end});
+            handleApply({ start, end });
         }
-    }, [handleApply, cache.spSearchTerms.data.length]);
+    }, [handleApply, cache.spSearchTerms.data.length, cache.spSearchTerms.filters]);
     
     const handleApplyDateRange = (newRange: { start: Date; end: Date }) => {
         setDateRange(newRange);

@@ -64,7 +64,7 @@ const styles: { [key: string]: React.CSSProperties } = {
 // --- Column Definitions ---
 const columns = [
     { id: 'name', label: 'Name', width: '350px' },
-    { id: 'products', label: 'Products', width: '200px' },
+    { id: 'asin', label: 'ASIN', width: '200px' },
     { id: 'status', label: 'Status', width: '120px' },
     { id: 'costPerOrder', label: 'Cost per order', width: '120px' },
     { id: 'spend', label: 'Ad spend', width: '100px' },
@@ -302,8 +302,10 @@ const TreeNodeRow: React.FC<{
                     <span title={node.name}>{node.name}{nameSuffix}</span>
                 </div>
             );
-            case 'products':
-                if (node.type === 'adGroup') return `Products: ${productCount || 1}`;
+
+            case 'asin':
+                if (node.type === 'adGroup') return `ASINs: ${productCount || 1}`;
+
                 if (node.type === 'campaign') {
                     const asinList = asins || [];
                     if (asinList.length === 1) {

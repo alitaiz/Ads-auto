@@ -287,6 +287,7 @@ export function SPSearchTermsView() {
         setExpandedIds(new Set());
         setSelectedIds(new Set());
     }, [flatData, viewLevel, aggregatedSearchTerms]);
+
     
     const handleToggle = (id: string) => setExpandedIds(prev => { const s = new Set(prev); if(s.has(id)) s.delete(id); else s.add(id); return s; });
     const handleSelect = (id: string, checked: boolean) => setSelectedIds(prev => { const s = new Set(prev); if(checked) s.add(id); else s.delete(id); return s; });

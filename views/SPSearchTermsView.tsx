@@ -386,7 +386,14 @@ export function SPSearchTermsView() {
         setSelectedIds(allIds);
     };
     
-    const formatDateForQuery = (d: Date) => d.toISOString().split('T')[0];
+    // Format a Date object as YYYY-MM-DD using local time to avoid
+    // timezone-related off-by-one errors when converting to ISO strings.
+    const formatDateForQuery = (d: Date) => {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
 
     const handleApply = useCallback(async (range: {start: Date, end: Date}) => {
         setLoading(true);
@@ -426,7 +433,9 @@ export function SPSearchTermsView() {
 
     const formatDateRangeDisplay = (start: Date, end: Date) => {
         const options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long', year: 'numeric' };
-        return `${start.toLocaleDateString('en-US', options)}`;
+        const startStr = start.toLocaleDateString('en-US', options);
+        const endStr = end.toLocaleDateString('en-US', options);
+        return startStr === endStr ? startStr : `${startStr} - ${endStr}`;
     };
 
     const tabs: {id: ViewLevel, label: string}[] = [

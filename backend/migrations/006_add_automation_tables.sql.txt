@@ -1,0 +1,25 @@
+CREATE TABLE IF NOT EXISTS automation_rules (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    campaign_id TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    target_acos NUMERIC,
+    min_clicks INTEGER DEFAULT 0,
+    bid_up_pct NUMERIC DEFAULT 10,
+    bid_down_pct NUMERIC DEFAULT 10,
+    lookback_days INTEGER DEFAULT 14,
+    cooldown_hours INTEGER DEFAULT 24,
+    is_active BOOLEAN DEFAULT TRUE,
+    last_run_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS automation_logs (
+    id SERIAL PRIMARY KEY,
+    rule_id INTEGER REFERENCES automation_rules(id) ON DELETE CASCADE,
+    keyword_id TEXT NOT NULL,
+    previous_bid NUMERIC,
+    new_bid NUMERIC,
+    action TEXT,
+    run_at TIMESTAMPTZ DEFAULT NOW(),
+    details JSONB
+);

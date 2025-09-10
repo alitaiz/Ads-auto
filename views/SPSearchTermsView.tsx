@@ -106,16 +106,28 @@ const createMetrics = (row: SPSearchTermReportData): Metrics => ({
 });
 const emptyMetrics = (): Metrics => ({ impressions: 0, clicks: 0, spend: 0, sales: 0, orders: 0, units: 0, productCount: 0 });
 
+const aggregateSearchTerms = (flatData: SPSearchTermReportData[]): TreeNode[] => {
+    const terms = new Map<string, Metrics>();
+    flatData.forEach(row => {
+        const term = row.customerSearchTerm;
+        if (!terms.has(term)) terms.set(term, emptyMetrics());
+        addMetrics(terms.get(term)!, createMetrics(row));
+    });
+    return Array.from(terms.entries()).map(([name, metrics]) => ({
+        id: `st-${name}`,
+        name,
+        type: 'searchTerm',
+        keywordType: 'search term',
+        metrics,
+    }));
+};
+
 const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLevel): TreeNode[] => {
     const campaignMap = new Map<number, TreeNode>();
-    const adGroupMap = new Map<number, TreeNode>();
-    const keywordMap = new Map<string, TreeNode>();
-    const searchTermMap = new Map<string, TreeNode>();
 
     flatData.forEach(row => {
         const rowMetrics = createMetrics(row);
 
-        // Always process up the chain to aggregate totals, even if not displayed
         if (!campaignMap.has(row.campaignId)) {
             campaignMap.set(row.campaignId, { id: `c-${row.campaignId}`, name: row.campaignName, type: 'campaign', metrics: emptyMetrics(), children: [] });
         }
@@ -132,12 +144,28 @@ const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLe
 
         let keywordNode = adGroupNode.children!.find(c => c.id === `k-${row.targeting}`);
         if (!keywordNode) {
-            keywordNode = { id: `k-${row.targeting}`, name: row.targeting, type: 'keyword', keywordType: 'keyword', matchType: row.matchType, metrics: emptyMetrics(), children: [] };
+            keywordNode = {
+                id: `k-${row.targeting}`,
+                name: row.targeting,
+                type: 'keyword',
+                keywordType: 'keyword',
+                matchType: row.matchType,
+                metrics: emptyMetrics(),
+                children: level === 'campaigns' || level === 'adGroups' ? [] : undefined,
+            };
             adGroupNode.children!.push(keywordNode);
         }
         addMetrics(keywordNode.metrics, rowMetrics);
 
-        keywordNode.children!.push({ id: `st-${row.customerSearchTerm}-${row.targeting}`, name: row.customerSearchTerm, type: 'searchTerm', keywordType: 'search term', metrics: rowMetrics });
+        if (level === 'campaigns' || level === 'adGroups') {
+            keywordNode.children!.push({
+                id: `st-${row.customerSearchTerm}-${row.targeting}`,
+                name: row.customerSearchTerm,
+                type: 'searchTerm',
+                keywordType: 'search term',
+                metrics: rowMetrics,
+            });
+        }
     });
 
     switch (level) {
@@ -145,14 +173,6 @@ const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLe
             return Array.from(campaignMap.values()).flatMap(c => c.children!);
         case 'keywords':
             return Array.from(campaignMap.values()).flatMap(c => c.children!).flatMap(ag => ag.children!);
-        case 'searchTerms':
-             const terms = new Map<string, Metrics>();
-             flatData.forEach(row => {
-                 const term = row.customerSearchTerm;
-                 if (!terms.has(term)) terms.set(term, emptyMetrics());
-                 addMetrics(terms.get(term)!, createMetrics(row));
-             });
-             return Array.from(terms.entries()).map(([name, metrics]) => ({ id: `st-${name}`, name, type: 'searchTerm', keywordType: 'search term', metrics }));
         case 'campaigns':
         default:
             return Array.from(campaignMap.values());
@@ -188,8 +208,14 @@ const TreeNodeRow: React.FC<{
                 return (
                 <div style={{ ...styles.nameCell, paddingLeft: `${level * 25}px` }}>
                     <input type="checkbox" checked={selectedIds.has(node.id)} onChange={e => onSelect(node.id, e.target.checked)} />
-                    <span style={{ ...styles.expandIcon, transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', opacity: hasChildren ? 1 : 0 }} onClick={hasChildren ? () => onToggle(node.id) : undefined}>{hasChildren ? '►' : ''}</span>
-                    {node.type !== 'campaign' && <span>⚡</span>}
+                    {hasChildren && (
+                        <span
+                            style={{ ...styles.expandIcon, transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                            onClick={() => onToggle(node.id)}
+                        >
+                            ►
+                        </span>
+                    )}
                     <span title={node.name}>{node.name}{nameSuffix}</span>
                 </div>
             );
@@ -235,15 +261,33 @@ export function SPSearchTermsView() {
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [viewLevel, setViewLevel] = useState<ViewLevel>('campaigns');
-    
+
     const [dateRange, setDateRange] = useState(cache.spSearchTerms.filters ? { start: new Date(cache.spSearchTerms.filters.startDate), end: new Date(cache.spSearchTerms.filters.endDate)} : { start: new Date(), end: new Date() });
     const [isDatePickerOpen, setDatePickerOpen] = useState(false);
-    
+
+    const aggregatedSearchTerms = useMemo(() => aggregateSearchTerms(flatData), [flatData]);
+    const campaignsTree = useMemo(() => buildHierarchyByLevel(flatData, 'campaigns'), [flatData]);
+    const adGroupsTree = useMemo(() => buildHierarchyByLevel(flatData, 'adGroups'), [flatData]);
+    const keywordsTree = useMemo(() => buildHierarchyByLevel(flatData, 'keywords'), [flatData]);
+
     useEffect(() => {
-        setTreeData(buildHierarchyByLevel(flatData, viewLevel));
+        switch (viewLevel) {
+            case 'campaigns':
+                setTreeData(campaignsTree);
+                break;
+            case 'adGroups':
+                setTreeData(adGroupsTree);
+                break;
+            case 'keywords':
+                setTreeData(keywordsTree);
+                break;
+            case 'searchTerms':
+                setTreeData(aggregatedSearchTerms);
+                break;
+        }
         setExpandedIds(new Set());
         setSelectedIds(new Set());
-    }, [flatData, viewLevel]);
+    }, [viewLevel, campaignsTree, adGroupsTree, keywordsTree, aggregatedSearchTerms]);
     
     const handleToggle = (id: string) => setExpandedIds(prev => { const s = new Set(prev); if(s.has(id)) s.delete(id); else s.add(id); return s; });
     const handleSelect = (id: string, checked: boolean) => setSelectedIds(prev => { const s = new Set(prev); if(checked) s.add(id); else s.delete(id); return s; });

@@ -123,7 +123,9 @@ const aggregateSearchTerms = (flatData: SPSearchTermReportData[]): TreeNode[] =>
 };
 
 const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLevel): TreeNode[] => {
-    // For the search term tab we only need aggregated terms, so avoid building the full hierarchy
+    // For the search term and keyword tabs we only need aggregated data,
+    // so avoid building the full campaign → ad group hierarchy which is
+    // expensive for large datasets and previously caused the UI to freeze.
     if (level === 'searchTerms') {
         const terms = new Map<string, Metrics>();
         flatData.forEach(row => {
@@ -131,7 +133,32 @@ const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLe
             if (!terms.has(term)) terms.set(term, emptyMetrics());
             addMetrics(terms.get(term)!, createMetrics(row));
         });
-        return Array.from(terms.entries()).map(([name, metrics]) => ({ id: `st-${name}`, name, type: 'searchTerm', keywordType: 'search term', metrics }));
+        return Array.from(terms.entries()).map(([name, metrics]) => ({
+            id: `st-${name}`,
+            name,
+            type: 'searchTerm',
+            keywordType: 'search term',
+            metrics,
+        }));
+    }
+
+    if (level === 'keywords') {
+        const keywordMap = new Map<string, TreeNode>();
+        flatData.forEach(row => {
+            const key = `${row.campaignId}-${row.adGroupId}-${row.targeting}`;
+            if (!keywordMap.has(key)) {
+                keywordMap.set(key, {
+                    id: `k-${key}`,
+                    name: row.targeting,
+                    type: 'keyword',
+                    keywordType: 'keyword',
+                    matchType: row.matchType,
+                    metrics: emptyMetrics(),
+                });
+            }
+            addMetrics(keywordMap.get(key)!.metrics, createMetrics(row));
+        });
+        return Array.from(keywordMap.values());
     }
 
     const campaignMap = new Map<number, TreeNode>();
@@ -140,14 +167,26 @@ const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLe
         const rowMetrics = createMetrics(row);
 
         if (!campaignMap.has(row.campaignId)) {
-            campaignMap.set(row.campaignId, { id: `c-${row.campaignId}`, name: row.campaignName, type: 'campaign', metrics: emptyMetrics(), children: [] });
+            campaignMap.set(row.campaignId, {
+                id: `c-${row.campaignId}`,
+                name: row.campaignName,
+                type: 'campaign',
+                metrics: emptyMetrics(),
+                children: [],
+            });
         }
         const campaignNode = campaignMap.get(row.campaignId)!;
         addMetrics(campaignNode.metrics, rowMetrics);
 
         let adGroupNode = campaignNode.children!.find(c => c.id === `ag-${row.adGroupId}`);
         if (!adGroupNode) {
-            adGroupNode = { id: `ag-${row.adGroupId}`, name: row.adGroupName, type: 'adGroup', metrics: emptyMetrics(), children: [] };
+            adGroupNode = {
+                id: `ag-${row.adGroupId}`,
+                name: row.adGroupName,
+                type: 'adGroup',
+                metrics: emptyMetrics(),
+                children: [],
+            };
             campaignNode.children!.push(adGroupNode);
         }
         addMetrics(adGroupNode.metrics, rowMetrics);
@@ -182,8 +221,6 @@ const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLe
     switch (level) {
         case 'adGroups':
             return Array.from(campaignMap.values()).flatMap(c => c.children!);
-        case 'keywords':
-            return Array.from(campaignMap.values()).flatMap(c => c.children!).flatMap(ag => ag.children!);
         case 'campaigns':
         default:
             return Array.from(campaignMap.values());

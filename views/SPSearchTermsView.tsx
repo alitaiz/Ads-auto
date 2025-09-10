@@ -188,8 +188,14 @@ const TreeNodeRow: React.FC<{
                 return (
                 <div style={{ ...styles.nameCell, paddingLeft: `${level * 25}px` }}>
                     <input type="checkbox" checked={selectedIds.has(node.id)} onChange={e => onSelect(node.id, e.target.checked)} />
-                    <span style={{ ...styles.expandIcon, transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', opacity: hasChildren ? 1 : 0 }} onClick={hasChildren ? () => onToggle(node.id) : undefined}>{hasChildren ? '►' : ''}</span>
-                    {node.type !== 'campaign' && <span>⚡</span>}
+                    {hasChildren && (
+                        <span
+                            style={{ ...styles.expandIcon, transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                            onClick={() => onToggle(node.id)}
+                        >
+                            ►
+                        </span>
+                    )}
                     <span title={node.name}>{node.name}{nameSuffix}</span>
                 </div>
             );

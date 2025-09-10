@@ -83,10 +83,10 @@ router.get('/sp-search-terms', async (req, res) => {
                 match_type,
                 SUM(impressions) as impressions,
                 SUM(clicks) as clicks,
-                SUM(spend) as spend,
-                SUM(seven_day_total_sales) as seven_day_total_sales,
-                SUM(seven_day_total_orders) as seven_day_total_orders,
-                SUM(seven_day_total_units) as seven_day_total_units
+                SUM(COALESCE(spend, cost, 0)) as spend,
+                SUM(COALESCE(seven_day_total_sales, sales_7d, 0)) as seven_day_total_sales,
+                SUM(COALESCE(seven_day_total_orders, purchases_7d, 0)) as seven_day_total_orders,
+                SUM(COALESCE(seven_day_total_units, units_sold_clicks_7d, 0)) as seven_day_total_units
             FROM sponsored_products_search_term_report 
             WHERE ${whereClauses.join(' AND ')}
             GROUP BY 

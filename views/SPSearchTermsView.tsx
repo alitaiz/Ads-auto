@@ -123,6 +123,17 @@ const aggregateSearchTerms = (flatData: SPSearchTermReportData[]): TreeNode[] =>
 };
 
 const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLevel): TreeNode[] => {
+    // For the search term tab we only need aggregated terms, so avoid building the full hierarchy
+    if (level === 'searchTerms') {
+        const terms = new Map<string, Metrics>();
+        flatData.forEach(row => {
+            const term = row.customerSearchTerm;
+            if (!terms.has(term)) terms.set(term, emptyMetrics());
+            addMetrics(terms.get(term)!, createMetrics(row));
+        });
+        return Array.from(terms.entries()).map(([name, metrics]) => ({ id: `st-${name}`, name, type: 'searchTerm', keywordType: 'search term', metrics }));
+    }
+
     const campaignMap = new Map<number, TreeNode>();
 
     flatData.forEach(row => {
@@ -266,28 +277,17 @@ export function SPSearchTermsView() {
     const [isDatePickerOpen, setDatePickerOpen] = useState(false);
 
     const aggregatedSearchTerms = useMemo(() => aggregateSearchTerms(flatData), [flatData]);
-    const campaignsTree = useMemo(() => buildHierarchyByLevel(flatData, 'campaigns'), [flatData]);
-    const adGroupsTree = useMemo(() => buildHierarchyByLevel(flatData, 'adGroups'), [flatData]);
-    const keywordsTree = useMemo(() => buildHierarchyByLevel(flatData, 'keywords'), [flatData]);
 
     useEffect(() => {
-        switch (viewLevel) {
-            case 'campaigns':
-                setTreeData(campaignsTree);
-                break;
-            case 'adGroups':
-                setTreeData(adGroupsTree);
-                break;
-            case 'keywords':
-                setTreeData(keywordsTree);
-                break;
-            case 'searchTerms':
-                setTreeData(aggregatedSearchTerms);
-                break;
+        if (viewLevel === 'searchTerms') {
+            setTreeData(aggregatedSearchTerms);
+        } else {
+            setTreeData(buildHierarchyByLevel(flatData, viewLevel));
         }
         setExpandedIds(new Set());
         setSelectedIds(new Set());
-    }, [viewLevel, campaignsTree, adGroupsTree, keywordsTree, aggregatedSearchTerms]);
+    }, [flatData, viewLevel, aggregatedSearchTerms]);
+
     
     const handleToggle = (id: string) => setExpandedIds(prev => { const s = new Set(prev); if(s.has(id)) s.delete(id); else s.add(id); return s; });
     const handleSelect = (id: string, checked: boolean) => setSelectedIds(prev => { const s = new Set(prev); if(checked) s.add(id); else s.delete(id); return s; });

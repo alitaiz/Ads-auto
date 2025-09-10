@@ -302,8 +302,10 @@ const TreeNodeRow: React.FC<{
                     <span title={node.name}>{node.name}{nameSuffix}</span>
                 </div>
             );
+
             case 'asin':
                 if (node.type === 'adGroup') return `ASINs: ${productCount || 1}`;
+
                 if (node.type === 'campaign') {
                     const asinList = asins || [];
                     if (asinList.length === 1) {

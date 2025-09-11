@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { CampaignWithMetrics, CampaignState, AdGroup } from '../../types';
+import { CampaignWithMetrics, CampaignState, AdGroup, AutomationRule } from '../../types';
 import { formatPrice, formatNumber } from '../../utils';
 
 const styles: { [key: string]: React.CSSProperties } = {
@@ -13,7 +13,6 @@ const styles: { [key: string]: React.CSSProperties } = {
     table: {
         width: '100%',
         borderCollapse: 'collapse',
-        tableLayout: 'fixed',
     },
     th: {
         padding: '12px 15px',
@@ -101,6 +100,8 @@ interface CampaignTableProps {
     loadingAdGroups: number | null;
     adGroupError: string | null;
     campaignName: string;
+    automationRules: AutomationRule[];
+    onUpdateRuleAssignment: (campaignId: number, ruleType: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION', newRuleId: string) => void;
 }
 
 const SortableHeader = ({
@@ -121,10 +122,14 @@ const SortableHeader = ({
 
 export function CampaignTable({
     campaigns, onUpdateCampaign, sortConfig, onRequestSort,
-    expandedCampaignId, onToggleExpand, adGroups, loadingAdGroups, adGroupError, campaignName
+    expandedCampaignId, onToggleExpand, adGroups, loadingAdGroups, adGroupError, campaignName,
+    automationRules, onUpdateRuleAssignment
 }: CampaignTableProps) {
     const [editingCell, setEditingCell] = useState<{ id: number; field: 'state' | 'budget' } | null>(null);
     const [tempValue, setTempValue] = useState<string | number>('');
+
+    const bidAdjustmentRules = useMemo(() => automationRules.filter(r => r.rule_type === 'BID_ADJUSTMENT'), [automationRules]);
+    const searchTermRules = useMemo(() => automationRules.filter(r => r.rule_type === 'SEARCH_TERM_AUTOMATION'), [automationRules]);
 
     const handleCellClick = (campaign: CampaignWithMetrics, field: 'state' | 'budget') => {
         setEditingCell({ id: campaign.campaignId, field });
@@ -193,17 +198,24 @@ export function CampaignTable({
         );
     };
     
-    const totalColumns = 10;
+    const totalColumns = 12;
     
     return (
         <div style={styles.tableContainer}>
             <table style={styles.table}>
                  <colgroup>
-                    <col style={{ width: '25%' }} /> <col style={{ width: '10%' }} />
-                    <col style={{ width: '10%' }} /> <col style={{ width: '9%' }} />
-                    <col style={{ width: '9%' }} /> <col style={{ width: '9%' }} />
-                    <col style={{ width: '9%' }} /> <col style={{ width: '9%' }} />
-                    <col style={{ width: '5%' }} /> <col style={{ width: '5%' }} />
+                    <col style={{ width: '20%' }} />
+                    <col style={{ width: '7%' }} />
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '7%' }} />
+                    <col style={{ width: '7%' }} />
+                    <col style={{ width: '7%' }} />
+                    <col style={{ width: '7%' }} />
+                    <col style={{ width: '7%' }} />
+                    <col style={{ width: '7%' }} />
+                    <col style={{ width: '7%' }} />
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '8%' }} />
                 </colgroup>
                 <thead>
                     <tr>
@@ -217,10 +229,16 @@ export function CampaignTable({
                         <SortableHeader label="Clicks" sortKey="clicks" sortConfig={sortConfig} onRequestSort={onRequestSort} />
                         <SortableHeader label="ACoS" sortKey="acos" sortConfig={sortConfig} onRequestSort={onRequestSort} />
                         <SortableHeader label="RoAS" sortKey="roas" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        <th style={styles.th}>Bid Adjustment Rule</th>
+                        <th style={styles.th}>Search Term Rule</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {campaigns.map(campaign => (
+                    {campaigns.map(campaign => {
+                        const currentBidRule = bidAdjustmentRules.find(r => r.scope.campaignIds?.includes(campaign.campaignId));
+                        const currentSearchTermRule = searchTermRules.find(r => r.scope.campaignIds?.includes(campaign.campaignId));
+
+                        return (
                         <React.Fragment key={campaign.campaignId}>
                             <tr>
                                 <td style={styles.td} title={campaign.name}>
@@ -248,6 +266,32 @@ export function CampaignTable({
                                 <td style={styles.td}>{formatNumber(campaign.clicks)}</td>
                                 <td style={styles.td}>{formatPercent(campaign.acos)}</td>
                                 <td style={styles.td}>{formatRoAS(campaign.roas)}</td>
+                                <td style={styles.td}>
+                                    <select
+                                        value={currentBidRule?.id || 'none'}
+                                        onChange={(e) => onUpdateRuleAssignment(campaign.campaignId, 'BID_ADJUSTMENT', e.target.value)}
+                                        style={{...styles.select, width: '100%'}}
+                                        title={currentBidRule?.name}
+                                    >
+                                        <option value="none">-- No Rule --</option>
+                                        {bidAdjustmentRules.map(rule => (
+                                            <option key={rule.id} value={rule.id}>{rule.name}</option>
+                                        ))}
+                                    </select>
+                                </td>
+                                 <td style={styles.td}>
+                                     <select
+                                        value={currentSearchTermRule?.id || 'none'}
+                                        onChange={(e) => onUpdateRuleAssignment(campaign.campaignId, 'SEARCH_TERM_AUTOMATION', e.target.value)}
+                                        style={{...styles.select, width: '100%'}}
+                                        title={currentSearchTermRule?.name}
+                                    >
+                                        <option value="none">-- No Rule --</option>
+                                        {searchTermRules.map(rule => (
+                                            <option key={rule.id} value={rule.id}>{rule.name}</option>
+                                        ))}
+                                    </select>
+                                </td>
                             </tr>
                             {expandedCampaignId === campaign.campaignId && (
                                 <tr>
@@ -257,7 +301,7 @@ export function CampaignTable({
                                 </tr>
                             )}
                         </React.Fragment>
-                    ))}
+                    )})}
                 </tbody>
             </table>
         </div>

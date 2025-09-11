@@ -181,10 +181,6 @@ const RulesList = ({ rules, onEdit, onDelete }) => (
                     </label>
                 </div>
                 <div style={styles.ruleDetails}>
-                    <span style={styles.ruleLabel}>Campaigns</span>
-                    <span style={styles.ruleValue} title={(rule.scope.campaignIds || []).join(', ')}>
-                        {(rule.scope.campaignIds || []).length} selected
-                    </span>
                     <span style={styles.ruleLabel}>Last Run</span>
                     <span style={styles.ruleValue}>{rule.last_run_at ? new Date(rule.last_run_at).toLocaleString() : 'Never'}</span>
                 </div>
@@ -244,11 +240,6 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }) => {
             return { ...prev, config: newConfig };
         });
     };
-    
-    const handleScopeChange = (value) => {
-        const campaignIds = value.split(',').map(s => s.trim()).filter(Boolean);
-        setFormData(prev => ({...prev, scope: { campaignIds }}));
-    };
 
     return (
         <div style={styles.modalBackdrop}>
@@ -259,11 +250,7 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }) => {
                         <label style={styles.label}>Rule Name</label>
                         <input style={styles.input} value={formData.name} onChange={e => setFormData(p => ({...p, name: e.target.value}))} required />
                     </div>
-                     <div style={styles.formGroup}>
-                        <label style={styles.label}>Campaign IDs (comma-separated)</label>
-                        <input style={styles.input} value={(formData.scope.campaignIds || []).join(', ')} onChange={e => handleScopeChange(e.target.value)} placeholder="e.g. 12345, 67890" required />
-                    </div>
-
+                    
                     {ruleType === 'bidAdjustment' && <BidAdjustmentForm config={formData.config} onChange={handleConfigChange} />}
                     {ruleType === 'searchTerm' && <SearchTermForm config={formData.config} onChange={handleConfigChange} />}
                     

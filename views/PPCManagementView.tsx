@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useContext } from 'react';
-import { Profile, Campaign, CampaignWithMetrics, CampaignStreamMetrics, SummaryMetricsData, CampaignState, AdGroup } from '../types';
+import { Profile, Campaign, CampaignWithMetrics, CampaignStreamMetrics, SummaryMetricsData, CampaignState, AdGroup, AutomationRule } from '../types';
 import { DateRangePicker } from './components/DateRangePicker';
 import { SummaryMetrics } from './components/SummaryMetrics';
 import { CampaignTable } from './components/CampaignTable';
@@ -10,7 +10,7 @@ import { areDateRangesEqual } from '../utils';
 const styles: { [key: string]: React.CSSProperties } = {
     container: {
         padding: '20px',
-        maxWidth: '1400px',
+        maxWidth: '100%',
         margin: '0 auto',
     },
     header: {
@@ -105,7 +105,8 @@ export function PPCManagementView() {
     );
     const [campaigns, setCampaigns] = useState<Campaign[]>(cache.ppcManagement.campaigns || []);
     const [performanceMetrics, setPerformanceMetrics] = useState<Record<number, CampaignStreamMetrics>>(cache.ppcManagement.performanceMetrics || {});
-    const [loading, setLoading] = useState({ profiles: true, data: true });
+    const [automationRules, setAutomationRules] = useState<AutomationRule[]>([]);
+    const [loading, setLoading] = useState({ profiles: true, data: true, rules: true });
     const [error, setError] = useState<string | null>(null);
     
     const [dateRange, setDateRange] = useState(cache.ppcManagement.dateRange || getInitialDateRange);
@@ -149,6 +150,24 @@ export function PPCManagementView() {
         };
         fetchProfiles();
     }, []);
+    
+    const fetchRules = useCallback(async () => {
+        setLoading(prev => ({ ...prev, rules: true }));
+        try {
+            const res = await fetch('/api/automation/rules');
+            if (!res.ok) throw new Error('Failed to fetch automation rules.');
+            const data = await res.json();
+            setAutomationRules(data);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'An unknown error occurred while fetching rules.');
+        } finally {
+            setLoading(prev => ({ ...prev, rules: false }));
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchRules();
+    }, [fetchRules]);
 
     const fetchData = useCallback(async () => {
         if (!selectedProfileId) return;
@@ -202,7 +221,6 @@ export function PPCManagementView() {
                 }
             }
             
-            // De-duplicate the combined campaign list to handle potential overlaps or API duplicates.
             const uniqueCampaignsMap = new Map<number, Campaign>();
             for (const campaign of allCampaigns) {
                 if (campaign?.campaignId) {
@@ -218,7 +236,6 @@ export function PPCManagementView() {
 
             setCampaigns(uniqueCampaigns);
             setPerformanceMetrics(metricsMap);
-            // Update the global cache
             setCache(prev => ({
                 ...prev,
                 ppcManagement: {
@@ -245,7 +262,6 @@ export function PPCManagementView() {
              return;
         }
 
-        // Check if data for the current filters is already in the cache
         if (
             cache.ppcManagement.profileId === selectedProfileId &&
             areDateRangesEqual(cache.ppcManagement.dateRange, dateRange) &&
@@ -254,7 +270,7 @@ export function PPCManagementView() {
             setCampaigns(cache.ppcManagement.campaigns);
             setPerformanceMetrics(cache.ppcManagement.performanceMetrics);
             setLoading(prev => ({ ...prev, data: false }));
-            return; // Skip fetch
+            return;
         }
 
         fetchData();
@@ -317,14 +333,52 @@ export function PPCManagementView() {
                 body: JSON.stringify({ profileId: selectedProfileId, updates: [{ campaignId, ...update }] }),
             });
             if (!response.ok) throw new Error('Failed to update campaign.');
-             // On success, invalidate the cache so fresh data is pulled next time
             setCache(prev => ({...prev, ppcManagement: { ...prev.ppcManagement, campaigns: [] }}));
         } catch (err)
         {
             setError(err instanceof Error ? err.message : 'Update failed.');
-            setCampaigns(originalCampaigns); // Revert on failure
+            setCampaigns(originalCampaigns);
         }
     };
+
+    const handleRuleAssignmentChange = useCallback(async (campaignId: number, ruleType: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION', newRuleIdStr: string) => {
+        const newRuleId = newRuleIdStr === 'none' ? null : parseInt(newRuleIdStr, 10);
+        
+        const rulesOfType = automationRules.filter(r => r.rule_type === ruleType);
+        const oldRule = rulesOfType.find(r => r.scope.campaignIds?.includes(campaignId));
+        const newRule = newRuleId ? rulesOfType.find(r => r.id === newRuleId) : null;
+        
+        if (oldRule?.id === newRule?.id) return;
+
+        const updates: Promise<any>[] = [];
+
+        if (oldRule) {
+            const updatedScope = { campaignIds: (oldRule.scope.campaignIds || []).filter(id => id !== campaignId) };
+            updates.push(fetch(`/api/automation/rules/${oldRule.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...oldRule, scope: updatedScope }),
+            }));
+        }
+
+        if (newRule) {
+            const updatedScope = { campaignIds: [...(newRule.scope.campaignIds || []), campaignId] };
+            updates.push(fetch(`/api/automation/rules/${newRule.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...newRule, scope: updatedScope }),
+            }));
+        }
+
+        try {
+            await Promise.all(updates);
+            await fetchRules(); // Refresh rules state from the source of truth
+        } catch (err) {
+            setError('Failed to update rule assignment.');
+            fetchRules(); // Re-fetch to revert optimistic UI
+        }
+    }, [automationRules, fetchRules]);
+
 
     const combinedCampaignData: CampaignWithMetrics[] = useMemo(() => {
         const enrichedCampaigns = campaigns.map(campaign => {
@@ -493,7 +547,7 @@ export function PPCManagementView() {
 
             <SummaryMetrics metrics={summaryMetrics} loading={loading.data} />
             
-            {loading.data ? (
+            {(loading.data || loading.rules) ? (
                 <div style={styles.loader}>Loading campaign data...</div>
             ) : finalDisplayData.length > 0 || searchTerm ? (
                 <>
@@ -508,6 +562,8 @@ export function PPCManagementView() {
                         loadingAdGroups={loadingAdGroups}
                         adGroupError={adGroupError}
                         campaignName={campaigns.find(c => c.campaignId === expandedCampaignId)?.name || ''}
+                        automationRules={automationRules}
+                        onUpdateRuleAssignment={handleRuleAssignmentChange}
                     />
                     <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
                 </>

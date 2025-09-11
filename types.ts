@@ -73,6 +73,19 @@ export interface SummaryMetricsData {
     impressions: number;
 }
 
+export interface AutomationRule {
+    id: number;
+    name: string;
+    rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION';
+    config: any;
+    scope: {
+        campaignIds?: (number | string)[];
+    };
+    is_active: boolean;
+    last_run_at?: string | null;
+    profile_id: string;
+}
+
 
 // --- New Types for Report Views ---
 

@@ -235,4 +235,36 @@ router.put('/keywords', async (req, res) => {
     }
 });
 
+/**
+ * POST /api/amazon/negativeKeywords
+ * Creates one or more negative keywords.
+ */
+router.post('/negativeKeywords', async (req, res) => {
+    const { profileId, negativeKeywords } = req.body;
+    if (!profileId || !Array.isArray(negativeKeywords) || negativeKeywords.length === 0) {
+        return res.status(400).json({ message: 'profileId and a non-empty negativeKeywords array are required.' });
+    }
+
+    try {
+        // Amazon API expects matchType to be like 'negativeExact', not 'NEGATIVE_EXACT'.
+        const transformedKeywords = negativeKeywords.map(kw => ({
+            ...kw,
+            state: 'ENABLED',
+            matchType: kw.matchType === 'NEGATIVE_EXACT' ? 'negativeExact' : 'negativePhrase'
+        }));
+
+        const data = await amazonAdsApiRequest({
+            method: 'post',
+            url: '/sp/negativeKeywords',
+            profileId,
+            data: { negativeKeywords: transformedKeywords },
+            headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json', 'Accept': 'application/vnd.spNegativeKeyword.v3+json' },
+        });
+        res.status(207).json(data); // 207 Multi-Status is common for bulk operations
+    } catch (error) {
+        res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred while creating negative keywords' });
+    }
+});
+
+
 export default router;

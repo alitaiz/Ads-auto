@@ -77,7 +77,10 @@ export interface AutomationRule {
     id: number;
     name: string;
     rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION';
-    config: any;
+    config: {
+        strategyId?: string; // e.g., 'BID_RULE_1'
+        [key: string]: any; // Keep it flexible for existing custom rules
+    };
     scope: {
         campaignIds?: (number | string)[];
     };

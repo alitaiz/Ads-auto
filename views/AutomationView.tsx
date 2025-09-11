@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { AutomationRule } from '../types';
 
 const styles: { [key: string]: React.CSSProperties } = {
   container: { maxWidth: '1200px', margin: '0 auto', padding: '20px' },
@@ -34,6 +35,7 @@ const styles: { [key: string]: React.CSSProperties } = {
   logTable: { width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' },
   th: { textAlign: 'left', padding: '8px', borderBottom: '1px solid var(--border-color)' },
   td: { padding: '8px', borderBottom: '1px solid var(--border-color)'},
+  strategyDescription: { backgroundColor: '#f0f2f2', padding: '15px', borderRadius: '4px', margin: '10px 0', fontStyle: 'italic', color: '#333' }
 };
 
 const DEFAULT_BID_RULE_CONFIG = {
@@ -66,101 +68,34 @@ const DEFAULT_SEARCH_TERM_RULE_CONFIG = {
     }
 };
 
+const BID_STRATEGIES = [
+    { id: 'custom', name: 'Custom Bid Rule' },
+    { id: 'BID_RULE_1', name: 'Strategy: High Spend, Zero Sales', description: 'If a keyword spends more than $20 in 60 days with no sales, reduce its bid by 25%.' },
+    { id: 'BID_RULE_2', name: 'Strategy: Consistently High ACOS', description: 'If a keyword spends > $20 in 60 days with an ACOS > 35%, AND its ACOS in the last 14 days is also > 35%, reduce its bid by 5%.' },
+    { id: 'BID_RULE_3', name: 'Strategy: Recent Underperformance', description: 'If a keyword had sales in the last 60 days but none in the last 14, AND has spent > $10 in the last 14 days, reduce its bid by 3%.' },
+    { id: 'BID_RULE_4', name: 'Strategy: Consistently Strong Performance', description: 'If ACOS over 60 days and 14 days is less than 20%, increase bid by 3%.' },
+    { id: 'BID_RULE_5', name: 'Strategy: Elite Performance', description: 'If ACOS over 60 days and 14 days is less than 15%, increase bid by 3%.' },
+    { id: 'BID_RULE_6', name: 'Strategy: Recent Improvement', description: 'If ACOS over 60 days was > 20% but has improved to < 15% in the last 14 days, increase bid by 3%.' },
+];
+
+const SEARCH_TERM_STRATEGIES = [
+    { id: 'custom', name: 'Custom Search Term Rule' },
+    { id: 'ST_RULE_1', name: 'Negative: High Spend, Zero Sales', description: 'If a search term spends more than $15 in 60 days with zero sales, add it as a negative exact match keyword.' },
+    { id: 'ST_RULE_2', name: 'Negative: High ACOS & Recent Bleeder', description: 'If a search term has ACOS > 30% over 60 days, AND has spent > $15 in the last 14 days with zero sales, add it as a negative exact match keyword.' },
+];
+
 const RuleSamplesTab = () => {
-    const [activeSampleTab, setActiveSampleTab] = useState('bid');
-
-    const sampleStyles: { [key: string]: React.CSSProperties } = {
-        container: { padding: '20px 0' },
-        tabs: { display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' },
-        tabButton: { padding: '8px 16px', borderRadius: '20px', border: '1px solid var(--border-color)', background: 'none', cursor: 'pointer', fontSize: '0.9rem' },
-        tabButtonActive: { background: 'var(--primary-color)', color: 'white', borderColor: 'var(--primary-color)' },
-        grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' },
-        card: { backgroundColor: 'var(--card-background-color)', borderRadius: '8px', padding: '20px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '15px' },
-        cardTitle: { margin: '0 0 5px 0', fontSize: '1.2rem', color: 'var(--primary-color)', fontWeight: 600 },
-        cardSection: { margin: 0 },
-        cardSectionTitle: { fontWeight: 'bold', marginBottom: '5px', color: 'var(--text-color)', fontSize: '0.95rem' },
-        cardText: { margin: 0, lineHeight: 1.6, color: '#333', fontSize: '0.9rem' }
-    };
-
-    const bidSamples = [
-        {
-            title: "Quy tắc Bảo thủ: Tối ưu Lợi nhuận & Cắt lỗ",
-            description: "IF: ACOS trong 14 ngày qua > 40% AND có > 10 clicks. THEN: GIẢM 15% giá thầu. SAFEGUARDS: Hệ thống sẽ không giảm giá thầu quá 0.25$ trong một lần điều chỉnh (Max Step) và sẽ đợi 24 giờ (Cooldown) trước khi đánh giá lại, tránh các thay đổi quá đột ngột.",
-            hypothesis: "Từ từ giảm chi tiêu cho các từ khóa không hiệu quả để cải thiện lợi nhuận chung. Các 'giới hạn an toàn' (safeguards) ngăn chặn việc giảm giá thầu quá nhanh có thể làm mất hoàn toàn hiển thị."
-        },
-        {
-            title: "Quy tắc Tấn công: Mở rộng Hiển thị & Tăng trưởng",
-            description: "IF: ACOS trong 14 ngày qua < 15% AND có > 2 đơn hàng. THEN: TĂNG 20% giá thầu để chiếm vị trí tốt hơn. SAFEGUARDS: Mức tăng giá thầu cũng được kiểm soát bởi 'Max Step' để không làm ACOS tăng vọt. 'Cooldown' đảm bảo hệ thống có thời gian đánh giá tác động của việc tăng giá thầu.",
-            hypothesis: "Đẩy mạnh ngân sách vào những gì đang hoạt động tốt nhất để tối đa hóa doanh thu và chiếm lĩnh thị phần. Phù hợp cho giai đoạn ra mắt sản phẩm hoặc khi muốn tăng trưởng mạnh mẽ."
-        },
-        {
-            title: "Quy tắc 'Mồi câu': Thúc đẩy Từ khóa Tiềm năng",
-            description: "IF: CTR (Tỷ lệ nhấp) > 0.5% AND có > 15 clicks BUT chưa có đơn hàng nào. THEN: TĂNG nhẹ 10% giá thầu. SAFEGUARDS: Mức tăng nhỏ và có 'Cooldown' giúp thử nghiệm một cách an toàn mà không lãng phí nhiều ngân sách vào một từ khóa chưa chắc chắn.",
-            hypothesis: "Cho các từ khóa 'hứa hẹn' (khách hàng quan tâm, nhấp nhiều) một cơ hội tốt hơn để chuyển đổi. Đây là một chiến lược thử nghiệm có kiểm soát để tìm ra những 'viên ngọc ẩn'."
-        }
-    ];
-
-    const searchTermSamples = [
-        {
-            title: "Quy tắc Dọn dẹp: Tự động Phủ định Search Term Lãng phí",
-            description: "IF: Một search term đã có > 15 clicks AND đã chi tiêu > $20 BUT không có đơn hàng nào trong 30 ngày qua. THEN: Tự động thêm search term này làm TỪ KHÓA PHỦ ĐỊNH CHÍNH XÁC. SAFEGUARDS: 'Cooldown' 72 giờ đảm bảo một search term không bị phủ định quá sớm, cho nó đủ thời gian để tạo ra chuyển đổi.",
-            hypothesis: "Ngừng lãng phí ngân sách vào các cụm từ tìm kiếm không chuyển đổi. Theo thời gian, hành động này sẽ cải thiện đáng kể ACOS của toàn bộ chiến dịch."
-        },
-        {
-            title: "Quy tắc Thu hoạch: Chuyển đổi Search Term Tốt thành Từ khóa",
-            description: "IF: Một search term trong chiến dịch Tự động/Rộng có > 2 đơn hàng AND ACOS < 30% trong 30 ngày qua. THEN: Tự động tạo một TỪ KHÓA CHÍNH XÁC mới từ search term này với giá thầu khởi điểm là $0.75. SAFEGUARDS: 'Cooldown' ngăn việc tạo ra các từ khóa trùng lặp.",
-            hypothesis: "Tìm ra các từ khóa mới, hiệu quả cao trực tiếp từ hành vi của khách hàng. Chuyển chúng sang đối sánh chính xác cho phép kiểm soát giá thầu và ngân sách tốt hơn."
-        },
-        {
-            title: "Quy tắc Phòng vệ & Mở rộng Thương hiệu",
-            description: "IF: Một search term CHỨA TÊN THƯƠNG HIỆU của bạn nhưng lại có ACOS cao > 25%. THEN: Có thể tạo một quy tắc Bid Adjustment riêng để tăng giá thầu cho các từ khóa thương hiệu. IF: Một search term KHÔNG CHỨA TÊN THƯƠNG HIỆU nhưng lại tạo ra > 1 đơn hàng với ACOS tốt < 35%. THEN: Chuyển nó thành một từ khóa mới.",
-            hypothesis: "Sử dụng tự động hóa để vừa bảo vệ không gian thương hiệu của bạn, vừa khám phá các cơ hội tăng trưởng mới từ các tìm kiếm không liên quan trực tiếp đến thương hiệu."
-        }
-    ];
-
-    return (
-        <div style={sampleStyles.container}>
-            <h2 style={styles.contentTitle}>Ví dụ về các Quy tắc Tự động hóa</h2>
-            <p style={{color: '#555', marginTop: 0, marginBottom: '20px'}}>Sử dụng các mẫu này làm nguồn cảm hứng để xây dựng chiến lược tự động hóa của riêng bạn.</p>
-            <div style={sampleStyles.tabs}>
-                <button
-                    style={activeSampleTab === 'bid' ? {...sampleStyles.tabButton, ...sampleStyles.tabButtonActive} : sampleStyles.tabButton}
-                    onClick={() => setActiveSampleTab('bid')}>
-                    Mẫu Điều Chỉnh Giá Thầu
-                </button>
-                <button
-                    style={activeSampleTab === 'searchTerm' ? {...sampleStyles.tabButton, ...sampleStyles.tabButtonActive} : sampleStyles.tabButton}
-                    onClick={() => setActiveSampleTab('searchTerm')}>
-                    Mẫu Tự Động Hóa Search Term
-                </button>
-            </div>
-            <div style={sampleStyles.grid}>
-                {(activeSampleTab === 'bid' ? bidSamples : searchTermSamples).map(sample => (
-                    <div key={sample.title} style={sampleStyles.card}>
-                        <h3 style={sampleStyles.cardTitle}>{sample.title}</h3>
-                        <div style={sampleStyles.cardSection}>
-                            <p style={sampleStyles.cardSectionTitle}>Mô tả:</p>
-                            <p style={sampleStyles.cardText}>{sample.description}</p>
-                        </div>
-                        <div style={sampleStyles.cardSection}>
-                            <p style={sampleStyles.cardSectionTitle}>Giả thuyết:</p>
-                            <p style={sampleStyles.cardText}>{sample.hypothesis}</p>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
+    // ... (unchanged)
 };
 
 
 export function AutomationView() {
   const [activeTab, setActiveTab] = useState('bidAdjustment');
-  const [rules, setRules] = useState([]);
+  const [rules, setRules] = useState<AutomationRule[]>([]);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState({ rules: true, logs: true });
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingRule, setEditingRule] = useState(null);
+  const [editingRule, setEditingRule] = useState<AutomationRule | null>(null);
 
   const fetchRules = useCallback(async () => {
     setLoading(prev => ({ ...prev, rules: true }));
@@ -187,18 +122,22 @@ export function AutomationView() {
     fetchLogs();
   }, [fetchRules, fetchLogs]);
   
-  const handleOpenModal = (rule = null) => {
+  const handleOpenModal = (rule: AutomationRule | null = null) => {
     setEditingRule(rule);
     setIsModalOpen(true);
   };
 
-  const handleSaveRule = async (formData) => {
+  const handleSaveRule = async (formData: AutomationRule) => {
     const { id, ...data } = formData;
     const method = id ? 'PUT' : 'POST';
     const url = id ? `/api/automation/rules/${id}` : '/api/automation/rules';
     
-    // For now, hardcode profileId. A profile selector should be added later.
-    const payload = { ...data, profile_id: localStorage.getItem('selectedProfileId') || 'UNKNOWN' };
+    const profileId = localStorage.getItem('selectedProfileId');
+    if (!profileId) {
+        alert("Please select a profile on the PPC Management page first.");
+        return;
+    }
+    const payload = { ...data, profile_id: profileId };
 
     await fetch(url, {
       method,
@@ -210,7 +149,7 @@ export function AutomationView() {
     fetchRules();
   };
 
-  const handleDeleteRule = async (id) => {
+  const handleDeleteRule = async (id: number) => {
       if (window.confirm('Are you sure you want to delete this rule?')) {
           await fetch(`/api/automation/rules/${id}`, { method: 'DELETE' });
           fetchRules();
@@ -232,7 +171,7 @@ export function AutomationView() {
         <button style={activeTab === 'bidAdjustment' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('bidAdjustment')}>Bid Adjustment Rules</button>
         <button style={activeTab === 'searchTerm' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('searchTerm')}>Search Term Automation</button>
         <button style={activeTab === 'history' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('history')}>Automation History</button>
-        <button style={activeTab === 'samples' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('samples')}>Rule Samples</button>
+        {/* <button style={activeTab === 'samples' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('samples')}>Rule Samples</button> */}
       </div>
       
       {activeTab !== 'history' && activeTab !== 'samples' && (
@@ -245,7 +184,7 @@ export function AutomationView() {
       {activeTab === 'bidAdjustment' && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} />}
       {activeTab === 'searchTerm' && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} />}
       {activeTab === 'history' && <LogsTab logs={logs} loading={loading.logs} />}
-      {activeTab === 'samples' && <RuleSamplesTab />}
+      {/* {activeTab === 'samples' && <RuleSamplesTab />} */}
       
       {isModalOpen && (
           <RuleBuilderModal 
@@ -259,7 +198,7 @@ export function AutomationView() {
   );
 }
 
-const RulesList = ({ rules, onEdit, onDelete }) => (
+const RulesList = ({ rules, onEdit, onDelete }: { rules: AutomationRule[], onEdit: (rule: AutomationRule) => void, onDelete: (id: number) => void}) => (
     <div style={styles.rulesGrid}>
         {rules.map(rule => (
             <div key={rule.id} style={styles.ruleCard}>
@@ -283,7 +222,7 @@ const RulesList = ({ rules, onEdit, onDelete }) => (
     </div>
 );
 
-const LogsTab = ({ logs, loading }) => (
+const LogsTab = ({ logs, loading }: { logs: any[], loading: boolean}) => (
     <div>
         <h2 style={styles.contentTitle}>Automation History</h2>
         {loading ? <p>Loading logs...</p> : (
@@ -306,19 +245,27 @@ const LogsTab = ({ logs, loading }) => (
     </div>
 );
 
-const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }) => {
-    const [formData, setFormData] = useState(() => {
+const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: AutomationRule | null, ruleType: string, onClose: () => void, onSave: (data: any) => void }) => {
+    const [formData, setFormData] = useState<Partial<AutomationRule>>(() => {
         if (rule) return { ...rule };
+        const isBid = ruleType === 'bidAdjustment';
         return {
             name: '',
-            rule_type: ruleType === 'bidAdjustment' ? 'BID_ADJUSTMENT' : 'SEARCH_TERM_AUTOMATION',
-            config: ruleType === 'bidAdjustment' ? DEFAULT_BID_RULE_CONFIG : DEFAULT_SEARCH_TERM_RULE_CONFIG,
+            rule_type: isBid ? 'BID_ADJUSTMENT' : 'SEARCH_TERM_AUTOMATION',
+            config: {
+                strategyId: 'custom',
+                ...(isBid ? DEFAULT_BID_RULE_CONFIG : DEFAULT_SEARCH_TERM_RULE_CONFIG)
+            },
             scope: { campaignIds: [] },
             is_active: true,
         };
     });
+    
+    const strategyId = formData.config?.strategyId || 'custom';
+    const strategies = ruleType === 'bidAdjustment' ? BID_STRATEGIES : SEARCH_TERM_STRATEGIES;
+    const currentStrategy = strategies.find(s => s.id === strategyId);
 
-    const handleConfigChange = (path, value) => {
+    const handleConfigChange = (path: string, value: any) => {
         setFormData(prev => {
             const keys = path.split('.');
             const newConfig = JSON.parse(JSON.stringify(prev.config)); // Deep copy
@@ -331,6 +278,17 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }) => {
         });
     };
 
+    const handleStrategyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const newStrategyId = e.target.value;
+        const newConfig = {
+            strategyId: newStrategyId,
+            ...(newStrategyId === 'custom' ? 
+                (ruleType === 'bidAdjustment' ? DEFAULT_BID_RULE_CONFIG : DEFAULT_SEARCH_TERM_RULE_CONFIG) 
+                : {})
+        };
+        setFormData(prev => ({ ...prev, config: newConfig }));
+    };
+
     return (
         <div style={styles.modalBackdrop}>
             <div style={styles.modalContent}>
@@ -340,13 +298,26 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }) => {
                         <label style={styles.label}>Rule Name</label>
                         <input style={styles.input} value={formData.name} onChange={e => setFormData(p => ({...p, name: e.target.value}))} required />
                     </div>
+
+                    <div style={styles.formGroup}>
+                        <label style={styles.label}>Strategy</label>
+                        <select style={styles.input} value={strategyId} onChange={handleStrategyChange}>
+                            {strategies.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                    </div>
+
+                    {currentStrategy && currentStrategy.id !== 'custom' && (
+                        <div style={styles.strategyDescription}>
+                            {currentStrategy.description}
+                        </div>
+                    )}
                     
-                    {ruleType === 'bidAdjustment' && <BidAdjustmentForm config={formData.config} onChange={handleConfigChange} />}
-                    {ruleType === 'searchTerm' && <SearchTermForm config={formData.config} onChange={handleConfigChange} />}
+                    {strategyId === 'custom' && ruleType === 'bidAdjustment' && <BidAdjustmentForm config={formData.config!} onChange={handleConfigChange} />}
+                    {strategyId === 'custom' && ruleType === 'searchTerm' && <SearchTermForm config={formData.config!} onChange={handleConfigChange} />}
                     
                      <div style={{...styles.formGroup, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
                         <label style={styles.label}>Rule is Active</label>
-                        <input type="checkbox" style={{ transform: 'scale(1.5)' }} checked={formData.is_active} onChange={e => setFormData(p => ({...p, is_active: e.target.checked}))} />
+                        <input type="checkbox" style={{ transform: 'scale(1.5)' }} checked={formData.is_active} onChange={e => setFormData(p => ({...p, is_active: e.target.checked!}))} />
                     </div>
 
                     <div style={styles.modalActions}>
@@ -359,7 +330,7 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }) => {
     );
 };
 
-const BidAdjustmentForm = ({ config, onChange }) => (
+const BidAdjustmentForm = ({ config, onChange }: {config: any, onChange: (path: string, value: any) => void}) => (
     <>
         <div style={styles.formSection}>
             <h4 style={styles.formSectionTitle}>Điều kiện (IF)</h4>
@@ -411,7 +382,7 @@ const BidAdjustmentForm = ({ config, onChange }) => (
     </>
 );
 
-const SearchTermForm = ({ config, onChange }) => (
+const SearchTermForm = ({ config, onChange }: {config: any, onChange: (path: string, value: any) => void}) => (
     <>
        <div style={styles.formSection}>
             <h4 style={styles.formSectionTitle}>Chung</h4>

@@ -21,26 +21,29 @@ const logAction = async (rule, status, summary, details = {}) => {
 
 // --- Data Fetching ---
 const getPerformanceData = async (rule) => {
+    // Determine the maximum lookback window needed for this rule evaluation
     const allTimeWindows = rule.config.conditionGroups.flatMap(g => g.conditions.map(c => c.timeWindow));
     const maxLookbackDays = Math.max(...allTimeWindows, 1);
     
+    // Define date ranges
     const today = new Date();
     const startDate = new Date();
     startDate.setDate(today.getDate() - maxLookbackDays);
-    const streamDataStartDate = new Date();
-    streamDataStartDate.setDate(today.getDate() - 3);
+    
+    // The cutoff point: data older than this comes from historical reports, newer data from the stream.
+    const streamCutoffDate = new Date();
+    streamCutoffDate.setDate(today.getDate() - 3);
 
     const startDateStr = startDate.toISOString().split('T')[0];
-    const streamStartDateStr = streamDataStartDate.toISOString().split('T')[0];
+    const streamCutoffDateStr = streamCutoffDate.toISOString().split('T')[0];
 
-    // Determine the entity to group by based on the rule type
     const isSearchTermRule = rule.rule_type === 'SEARCH_TERM_AUTOMATION';
     const entityIdColumn = isSearchTermRule ? 'customer_search_term' : 'keyword_id';
-    const groupByColumns = isSearchTermRule
-        ? 'customer_search_term'
+    const entityTextField = isSearchTermRule ? 'customer_search_term' : 'keyword_text'; // Use keyword_text for display
+    const groupByColumns = isSearchTermRule 
+        ? 'customer_search_term' 
         : 'keyword_id, keyword_text, match_type';
-    
-    // Build the query dynamically
+
     const query = `
         WITH combined_data AS (
             -- Fetch historical data from the report table (older than 3 days)
@@ -60,14 +63,15 @@ const getPerformanceData = async (rule) => {
             SELECT
                 (event_data->>'campaignId')::bigint,
                 (event_data->>'adGroupId')::bigint,
-                ${isSearchTermRule ? "(event_data->>'searchTerm')" : "(event_data->>'keywordId')::bigint, (event_data->>'keywordText'), (event_data->>'matchType')"},
+                ${isSearchTermRule ? "(event_data->>'searchTerm')," : "(event_data->>'keywordId')::bigint, (event_data->>'keywordText'), (event_data->>'matchType'),"}
                 SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END),
                 SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributedSales1d')::numeric ELSE 0 END),
                 SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END),
                 SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'conversions')::bigint ELSE 0 END)
             FROM raw_stream_events
-            WHERE (event_data->>'timeWindowStart')::timestamptz >= $2 AND (event_data->>'${isSearchTermRule ? 'searchTerm' : 'keywordId'}') IS NOT NULL
-            GROUP BY 1, 2, ${isSearchTermRule ? "3" : "3, 4, 5"}
+            WHERE (event_data->>'timeWindowStart')::timestamptz >= $2 
+              AND (event_data->>'${isSearchTermRule ? 'searchTerm' : 'keywordId'}') IS NOT NULL
+            GROUP BY 1, 2, 3${isSearchTermRule ? "" : ", 4, 5"}
         )
         SELECT
             campaign_id, ad_group_id, ${groupByColumns},
@@ -77,7 +81,12 @@ const getPerformanceData = async (rule) => {
         GROUP BY campaign_id, ad_group_id, ${groupByColumns};
     `;
 
-    const { rows } = await pool.query(query, [startDateStr, streamStartDateStr]);
+    // Only query historical data if the lookback period extends beyond the stream cutoff
+    const queryParams = maxLookbackDays > 3 
+        ? [startDateStr, streamCutoffDateStr]
+        : [streamCutoffDateStr, streamCutoffDateStr]; // If lookback is short, we only need stream data, but need to satisfy query params
+
+    const { rows } = await pool.query(query, queryParams);
     
     const performanceMap = new Map();
     for (const row of rows) {
@@ -89,7 +98,7 @@ const getPerformanceData = async (rule) => {
                 campaignId: row.campaign_id,
                 adGroupId: row.ad_group_id,
                 keywordId: row.keyword_id,
-                keywordText: row.keyword_text,
+                keywordText: row[entityTextField],
                 matchType: row.match_type,
                 metrics: { spend: 0, sales: 0, clicks: 0, orders: 0, acos: 0 }
             });
@@ -101,7 +110,6 @@ const getPerformanceData = async (rule) => {
         entry.metrics.orders += parseInt(row.total_orders || 0, 10);
     }
     
-    // Calculate ACOS after summing everything up
     performanceMap.forEach(entry => {
         entry.metrics.acos = entry.metrics.sales > 0 ? entry.metrics.spend / entry.metrics.sales : 0;
     });

@@ -249,21 +249,69 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     const keywordsToUpdate = [];
     const targetsToUpdate = [];
 
+    // --- Step 1: Initial Classification ---
     const keywordsWithId = new Map();
     const targetsWithId = new Map();
-    let unactionableTargetsCount = 0;
+    const unactionableTargets = []; 
 
     performanceData.forEach((data) => {
         if (data.entityType === 'keyword' && data.entityId) {
             keywordsWithId.set(data.entityId.toString(), data);
         } else if (data.entityType === 'target' && data.entityId) {
             targetsWithId.set(data.entityId.toString(), data);
-        } else if (data.entityType === 'target' && !data.entityId) {
-            unactionableTargetsCount++;
+        } else if (data.entityType === 'target' && !data.entityId && data.adGroupId && data.entityText) {
+            unactionableTargets.push(data);
         }
     });
 
-    console.log(`[RulesEngine DBG] Entity Breakdown: ${keywordsWithId.size} keywords with IDs, ${targetsWithId.size} targets with IDs, ${unactionableTargetsCount} unactionable targets (no ID).`);
+    console.log(`[RulesEngine DBG] Initial Entity Breakdown: ${keywordsWithId.size} keywords, ${targetsWithId.size} targets with IDs, ${unactionableTargets.length} potentially actionable targets.`);
+
+    // --- Step 2: Enrich Unactionable Targets ---
+    if (unactionableTargets.length > 0) {
+        console.log(`[RulesEngine DBG] Attempting to enrich ${unactionableTargets.length} targets by fetching live Target IDs...`);
+        const adGroupIdsToFetch = [...new Set(unactionableTargets.map(t => t.adGroupId))];
+        
+        const adGroupExpressionToTargetId = new Map();
+        for (const adGroupId of adGroupIdsToFetch) {
+            try {
+                const { targetingClauses } = await amazonAdsApiRequest({
+                    method: 'post',
+                    url: '/sp/targets/list',
+                    profileId: rule.profile_id,
+                    data: { adGroupIdFilter: { include: [adGroupId] } }
+                });
+
+                if (targetingClauses && targetingClauses.length > 0) {
+                    const expressionMap = new Map();
+                    for (const target of targetingClauses) {
+                        if (target.expression && Array.isArray(target.expression) && target.expression[0]?.type) {
+                            const reportFriendlyExpression = target.expression[0].type.toLowerCase().replace('_', '-');
+                            expressionMap.set(reportFriendlyExpression, target.targetId);
+                        }
+                    }
+                    adGroupExpressionToTargetId.set(adGroupId, expressionMap);
+                }
+            } catch (e) {
+                console.warn(`[RulesEngine DBG] Could not fetch targets for ad group ${adGroupId}.`, e);
+            }
+        }
+        
+        let enrichedCount = 0;
+        for (const target of unactionableTargets) {
+            const expressionMap = adGroupExpressionToTargetId.get(target.adGroupId);
+            const targetId = expressionMap?.get(target.entityText);
+            
+            if (targetId) {
+                target.entityId = targetId;
+                targetsWithId.set(targetId.toString(), target);
+                enrichedCount++;
+            }
+        }
+        console.log(`[RulesEngine DBG] Successfully enriched ${enrichedCount} of ${unactionableTargets.length} targets.`);
+    }
+
+    const finalUnactionableCount = unactionableTargets.filter(t => !t.entityId).length;
+    console.log(`[RulesEngine DBG] Final Entity Breakdown: ${keywordsWithId.size} keywords with IDs, ${targetsWithId.size} targets with IDs, ${finalUnactionableCount} unactionable targets (no ID).`);
 
     // --- Process Keywords with IDs ---
     if (keywordsWithId.size > 0) {
@@ -279,7 +327,9 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
             for (const group of rule.config.conditionGroups) {
                 const conditionsMet = group.conditions.every(c => {
                     const metrics = calculateMetricsForWindow(data.dailyData, c.timeWindow);
-                    return checkCondition(metrics[c.metric], c.operator, c.value);
+                    const isMet = checkCondition(metrics[c.metric], c.operator, c.value);
+                    console.log(`[RulesEngine DBG] Evaluating entity ${data.entityText} for condition [${c.metric} ${c.operator} ${c.value} in ${c.timeWindow}d]. Calculated metrics: ${JSON.stringify(metrics)}. Result: ${isMet}`);
+                    return isMet;
                 });
                 if (conditionsMet) {
                     const { value, minBid, maxBid } = group.action;
@@ -310,7 +360,9 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
              for (const group of rule.config.conditionGroups) {
                 const conditionsMet = group.conditions.every(c => {
                     const metrics = calculateMetricsForWindow(data.dailyData, c.timeWindow);
-                    return checkCondition(metrics[c.metric], c.operator, c.value);
+                    const isMet = checkCondition(metrics[c.metric], c.operator, c.value);
+                    console.log(`[RulesEngine DBG] Evaluating entity ${data.entityText} for condition [${c.metric} ${c.operator} ${c.value} in ${c.timeWindow}d]. Calculated metrics: ${JSON.stringify(metrics)}. Result: ${isMet}`);
+                    return isMet;
                 });
                 if (conditionsMet) {
                     const { value, minBid, maxBid } = group.action;
@@ -335,8 +387,8 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     if (changeLog.length > 0) {
         return { changes: changeLog, summary: `Rule executed successfully with ${changeLog.length} change(s).` };
     }
-    if (unactionableTargetsCount > 0 && keywordsWithId.size === 0 && targetsWithId.size === 0) {
-        return { changes: [], summary: `Found ${unactionableTargetsCount} entities, but none could be acted upon for bid adjustments. This is common for historical auto-campaign targets which lack a specific ID in reports.` };
+    if (finalUnactionableCount > 0 && keywordsWithId.size === 0 && targetsWithId.size === 0) {
+         return { changes: [], summary: `Found ${finalUnactionableCount} entities, but none could be acted upon for bid adjustments. This is common for historical auto-campaign targets which lack a specific ID in reports.` };
     }
     return { changes: [], summary: 'Conditions were not met for any actionable entity.' };
 };

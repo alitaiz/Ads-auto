@@ -134,7 +134,7 @@ const getPerformanceData = async (rule, campaignIds) => {
 
                 SELECT
                     report_date AS performance_date,
-                    NULL AS entity_id, -- No stable target_id in this report
+                    NULL::bigint AS entity_id, -- No stable target_id in this report, cast to match other UNION parts
                     'target' AS entity_type,
                     targeting AS entity_text,
                     match_type,
@@ -148,7 +148,7 @@ const getPerformanceData = async (rule, campaignIds) => {
                 WHERE report_date >= $1 AND report_date < $2
                   AND keyword_id IS NULL AND targeting IS NOT NULL -- For targets (auto/pat)
                   ${campaignFilterClauseHistorical}
-                GROUP BY 1, 2, 3, 4, 5, 6, 7
+                GROUP BY 1, 3, 4, 5, 6, 7 -- Group by all non-aggregated, non-constant columns
 
                 UNION ALL
 

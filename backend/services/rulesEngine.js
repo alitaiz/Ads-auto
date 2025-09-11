@@ -20,17 +20,49 @@ const logAction = async (rule, status, summary, details = {}) => {
   }
 };
 
+
+/**
+ * Calculates aggregated metrics from a list of daily data points for a specific lookback period.
+ * @param {Array<object>} dailyData - Array of { date, spend, sales, clicks, orders }.
+ * @param {number} lookbackDays - The number of days to look back (e.g., 7 for "last 7 days").
+ * @returns {object} An object with aggregated metrics { spend, sales, clicks, orders, acos }.
+ */
+const calculateMetricsForWindow = (dailyData, lookbackDays) => {
+    // Get today's date in the reporting timezone to establish a consistent "now".
+    const today = new Date(new Date().toLocaleString('en-US', { timeZone: REPORTING_TIMEZONE }));
+    today.setHours(0, 0, 0, 0);
+
+    const startDate = new Date(today);
+    // "in last 7 days" includes today, so we go back 6 days from today.
+    startDate.setDate(today.getDate() - (lookbackDays - 1));
+
+    const filteredData = dailyData.filter(d => {
+        // The date from DB is already a Date object representing the correct day.
+        // We just need to zero out its time part for a clean comparison.
+        const recordDate = new Date(d.date);
+        recordDate.setHours(0, 0, 0, 0);
+        return recordDate >= startDate && recordDate <= today;
+    });
+
+    const totals = filteredData.reduce((acc, day) => {
+        acc.spend += day.spend;
+        acc.sales += day.sales;
+        acc.clicks += day.clicks;
+        acc.orders += day.orders;
+        return acc;
+    }, { spend: 0, sales: 0, clicks: 0, orders: 0 });
+
+    totals.acos = totals.sales > 0 ? totals.spend / totals.sales : 0;
+    return totals;
+};
+
+
 // --- Data Fetching ---
 const getPerformanceData = async (rule, campaignIds) => {
     const allTimeWindows = rule.config.conditionGroups.flatMap(g => g.conditions.map(c => c.timeWindow));
     const maxLookbackDays = Math.max(...allTimeWindows, 1);
     
-    // Use a function to get "today" in the specific reporting timezone
-    const getTodayInReportingTimezone = () => {
-        const now = new Date();
-        const zonedDate = new Date(now.toLocaleString('en-US', { timeZone: REPORTING_TIMEZONE }));
-        return zonedDate;
-    };
+    const getTodayInReportingTimezone = () => new Date(new Date().toLocaleString('en-US', { timeZone: REPORTING_TIMEZONE }));
 
     const today = getTodayInReportingTimezone();
     today.setHours(0, 0, 0, 0);
@@ -44,13 +76,8 @@ const getPerformanceData = async (rule, campaignIds) => {
     const startDateStr = startDate.toISOString().split('T')[0];
     const streamCutoffDateStr = streamCutoffDate.toISOString().split('T')[0];
 
-    // --- Enhanced Diagnostic Logging ---
-    console.log(`[RulesEngine DBG] Preparing to query performance data with parameters:`, {
-        ruleName: rule.name,
-        lookbackDays: maxLookbackDays,
-        startDate: startDateStr,
-        streamCutoffDate: streamCutoffDateStr,
-        campaignIds: campaignIds || 'ALL',
+    console.log(`[RulesEngine DBG] Preparing to query daily performance data with parameters:`, {
+        ruleName: rule.name, maxLookbackDays, startDate: startDateStr, streamCutoffDate: streamCutoffDateStr, campaignIds: campaignIds || 'ALL',
     });
 
     let query;
@@ -67,32 +94,31 @@ const getPerformanceData = async (rule, campaignIds) => {
 
     if (rule.rule_type === 'BID_ADJUSTMENT') {
         query = `
-            WITH combined_performance AS (
-                -- Historical data for BOTH keywords and targets
+            SELECT
+                performance_date, entity_id, entity_type, entity_text, match_type,
+                campaign_id, ad_group_id, spend, sales, clicks, orders
+            FROM (
+                -- Historical data (already daily)
                 SELECT
-                    'historical' as source,
-                    keyword_id AS entity_id, -- This will be NULL for targets
+                    report_date AS performance_date,
+                    keyword_id AS entity_id,
                     CASE WHEN keyword_id IS NOT NULL THEN 'keyword' ELSE 'target' END AS entity_type,
                     COALESCE(keyword_text, targeting) AS entity_text,
-                    match_type,
-                    campaign_id,
-                    ad_group_id,
-                    SUM(COALESCE(spend, cost, 0))::numeric AS spend,
-                    SUM(COALESCE(sales_7d, 0))::numeric AS sales,
-                    SUM(COALESCE(clicks, 0))::bigint AS clicks,
-                    SUM(COALESCE(purchases_7d, 0))::bigint AS orders
+                    match_type, campaign_id, ad_group_id,
+                    COALESCE(spend, cost, 0)::numeric AS spend,
+                    COALESCE(sales_7d, 0)::numeric AS sales,
+                    COALESCE(clicks, 0)::bigint AS clicks,
+                    COALESCE(purchases_7d, 0)::bigint AS orders
                 FROM sponsored_products_search_term_report
                 WHERE report_date >= $1 AND report_date < $2
-                  AND (keyword_id IS NOT NULL OR targeting IS NOT NULL) -- FIX: Include targets
+                  AND (keyword_id IS NOT NULL OR targeting IS NOT NULL)
                   ${campaignFilterClauseHistorical}
-                -- Group by all non-aggregate columns to get one row per historical entity
-                GROUP BY source, entity_id, entity_type, entity_text, match_type, campaign_id, ad_group_id
 
                 UNION ALL
 
-                -- Stream data
+                -- Stream data, aggregated to daily
                 SELECT
-                    'stream' as source,
+                    ((event_data->>'timeWindowStart')::timestamptz AT TIME ZONE '${REPORTING_TIMEZONE}')::date AS performance_date,
                     COALESCE((event_data->>'keywordId')::bigint, (event_data->>'targetId')::bigint) AS entity_id,
                     CASE WHEN event_data->>'keywordId' IS NOT NULL THEN 'keyword' ELSE 'target' END AS entity_type,
                     COALESCE(event_data->>'keywordText', event_data->>'targetingExpression') AS entity_text,
@@ -107,37 +133,17 @@ const getPerformanceData = async (rule, campaignIds) => {
                 WHERE (event_data->>'timeWindowStart')::timestamptz >= (($2)::timestamp AT TIME ZONE '${REPORTING_TIMEZONE}')
                   AND (event_data->>'keywordId' IS NOT NULL OR event_data->>'targetId' IS NOT NULL)
                   ${campaignFilterClauseStream}
-                GROUP BY source, entity_id, entity_type, entity_text, match_type, campaign_id, ad_group_id
-            )
-            SELECT
-                entity_id,
-                entity_type,
-                entity_text,
-                match_type,
-                campaign_id,
-                ad_group_id,
-                SUM(spend) AS total_spend,
-                SUM(sales) AS total_sales,
-                SUM(clicks) AS total_clicks,
-                SUM(orders) AS total_orders,
-                ARRAY_AGG(source) as sources
-            FROM combined_performance
-            GROUP BY
-                -- FIX: Group by a unique key for each entity type to prevent incorrect merging
-                entity_id, -- Groups keywords and stream targets correctly
-                entity_type,
-                entity_text,
-                match_type,
-                campaign_id,
-                ad_group_id;
+                GROUP BY 1, 2, 3, 4, 5, 6, 7
+            ) AS daily_data
+            WHERE entity_id IS NOT NULL;
         `;
     } else { // SEARCH_TERM_AUTOMATION
          query = `
-            SELECT customer_search_term, campaign_id, ad_group_id,
-                SUM(spend) AS total_spend, SUM(sales) AS total_sales, SUM(clicks) AS total_clicks, SUM(orders) AS total_orders,
-                ARRAY_AGG(source) as sources
+             SELECT
+                performance_date, customer_search_term, campaign_id, ad_group_id,
+                spend, sales, clicks, orders
             FROM (
-                SELECT 'historical' as source, customer_search_term, campaign_id, ad_group_id,
+                SELECT report_date AS performance_date, customer_search_term, campaign_id, ad_group_id,
                     COALESCE(SUM(COALESCE(spend, cost)), 0)::numeric AS spend, COALESCE(SUM(COALESCE(sales_7d, 0)), 0)::numeric AS sales,
                     COALESCE(SUM(clicks), 0)::bigint AS clicks, COALESCE(SUM(purchases_7d), 0)::bigint AS orders
                 FROM sponsored_products_search_term_report
@@ -146,27 +152,24 @@ const getPerformanceData = async (rule, campaignIds) => {
 
                 UNION ALL
 
-                SELECT 'stream' as source, (event_data->>'searchTerm') as customer_search_term, (event_data->>'campaignId')::bigint as campaign_id,
+                SELECT ((event_data->>'timeWindowStart')::timestamptz AT TIME ZONE '${REPORTING_TIMEZONE}')::date AS performance_date,
+                    (event_data->>'searchTerm') as customer_search_term, (event_data->>'campaignId')::bigint as campaign_id,
                     (event_data->>'adGroupId')::bigint as ad_group_id,
-                    SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END),
-                    SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributedSales1d')::numeric ELSE 0 END),
-                    SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END),
-                    SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'conversions')::bigint ELSE 0 END)
+                    SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END) as spend,
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributedSales1d')::numeric ELSE 0 END) as sales,
+                    SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END) as clicks,
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'conversions')::bigint ELSE 0 END) as orders
                 FROM raw_stream_events
                 WHERE (event_data->>'timeWindowStart')::timestamptz >= (($2)::timestamp AT TIME ZONE '${REPORTING_TIMEZONE}')
                   AND (event_data->>'searchTerm') IS NOT NULL ${campaignFilterClauseStream}
                 GROUP BY 1, 2, 3, 4
             ) AS combined_data
-            WHERE customer_search_term IS NOT NULL GROUP BY 1, 2, 3;
+            WHERE customer_search_term IS NOT NULL;
          `;
     }
 
     const { rows } = await pool.query(query, params);
-    
-    // --- Enhanced Diagnostic Logging ---
-    const historicalRowsCount = rows.filter(r => r.sources.includes('historical')).length;
-    const streamRowsCount = rows.filter(r => r.sources.includes('stream')).length;
-    console.log(`[RulesEngine DBG] Query returned ${historicalRowsCount} historical rows and ${streamRowsCount} stream rows.`);
+    console.log(`[RulesEngine DBG] Query returned ${rows.length} daily performance rows.`);
 
     const performanceMap = new Map();
     for (const row of rows) {
@@ -178,22 +181,20 @@ const getPerformanceData = async (rule, campaignIds) => {
                 campaignId: row.campaign_id, adGroupId: row.ad_group_id,
                 entityId: row.entity_id, entityType: row.entity_type,
                 entityText: row.entity_text || row.customer_search_term, matchType: row.match_type,
-                metrics: { spend: 0, sales: 0, clicks: 0, orders: 0, acos: 0 }
+                dailyData: []
             });
         }
         
-        const entry = performanceMap.get(key);
-        entry.metrics.spend += parseFloat(row.total_spend || 0);
-        entry.metrics.sales += parseFloat(row.total_sales || 0);
-        entry.metrics.clicks += parseInt(row.total_clicks || 0, 10);
-        entry.metrics.orders += parseInt(row.total_orders || 0, 10);
+        performanceMap.get(key).dailyData.push({
+            date: new Date(row.performance_date),
+            spend: parseFloat(row.spend || 0),
+            sales: parseFloat(row.sales || 0),
+            clicks: parseInt(row.clicks || 0, 10),
+            orders: parseInt(row.orders || 0, 10),
+        });
     }
     
-    performanceMap.forEach(entry => {
-        entry.metrics.acos = entry.metrics.sales > 0 ? entry.metrics.spend / entry.metrics.sales : 0;
-    });
-    
-    console.log(`[RulesEngine DBG] Aggregated performance data into a map of ${performanceMap.size} unique entities.`);
+    console.log(`[RulesEngine DBG] Aggregated daily data for ${performanceMap.size} unique entities.`);
     return performanceMap;
 };
 
@@ -217,13 +218,9 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     const targetData = new Map();
 
     performanceData.forEach((data) => {
-        // Only consider actionable entities that have an ID
         if (data.entityId) {
-            if (data.entityType === 'keyword') {
-                keywordData.set(data.entityId.toString(), data);
-            } else {
-                targetData.set(data.entityId.toString(), data);
-            }
+            if (data.entityType === 'keyword') keywordData.set(data.entityId.toString(), data);
+            else targetData.set(data.entityId.toString(), data);
         }
     });
 
@@ -236,7 +233,13 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
             const currentBid = currentBids.get(id);
             if (typeof currentBid !== 'number') continue;
             for (const group of rule.config.conditionGroups) {
-                if (group.conditions.every(c => checkCondition(data.metrics[c.metric], c.operator, c.value))) {
+                const conditionsMet = group.conditions.every(c => {
+                    const metricsForWindow = calculateMetricsForWindow(data.dailyData, c.timeWindow);
+                    const metricValue = metricsForWindow[c.metric];
+                    return checkCondition(metricValue, c.operator, c.value);
+                });
+
+                if (conditionsMet) {
                     const { value, minBid, maxBid } = group.action;
                     let newBid = parseFloat((currentBid * (1 + (value / 100))).toFixed(2));
                     if (minBid !== undefined && minBid !== null) newBid = Math.max(minBid, newBid);
@@ -259,7 +262,13 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
             const currentBid = currentBids.get(id);
             if (typeof currentBid !== 'number') continue;
             for (const group of rule.config.conditionGroups) {
-                if (group.conditions.every(c => checkCondition(data.metrics[c.metric], c.operator, c.value))) {
+                 const conditionsMet = group.conditions.every(c => {
+                    const metricsForWindow = calculateMetricsForWindow(data.dailyData, c.timeWindow);
+                    const metricValue = metricsForWindow[c.metric];
+                    return checkCondition(metricValue, c.operator, c.value);
+                });
+
+                if (conditionsMet) {
                     const { value, minBid, maxBid } = group.action;
                     let newBid = parseFloat((currentBid * (1 + (value / 100))).toFixed(2));
                     if (minBid !== undefined && minBid !== null) newBid = Math.max(minBid, newBid);
@@ -286,7 +295,11 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
 
     for (const [searchTerm, data] of performanceData.entries()) {
         for (const group of rule.config.conditionGroups) {
-            const conditionsMet = group.conditions.every(cond => checkCondition(data.metrics[cond.metric], cond.operator, cond.value));
+            const conditionsMet = group.conditions.every(cond => {
+                const metricsForWindow = calculateMetricsForWindow(data.dailyData, cond.timeWindow);
+                const metricValue = metricsForWindow[cond.metric];
+                return checkCondition(metricValue, cond.operator, cond.value);
+            });
             if (conditionsMet) {
                 if (group.action.type === 'negateSearchTerm') {
                     negativeKeywordsToAdd.push({

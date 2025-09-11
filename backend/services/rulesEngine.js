@@ -256,7 +256,6 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         if (data.entityType === 'keyword' && data.entityId) {
              keywordData.set(data.entityId.toString(), data);
         } else if (data.entityType === 'target') {
-            // Use the map key for targets, as entityId might be null for historical ones
             targetData.set(key, data);
         }
     });
@@ -264,8 +263,11 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     // --- Process Keywords ---
     if (keywordData.size > 0) {
         const keywordIds = Array.from(keywordData.keys());
+        console.log(`[RulesEngine DBG] Fetching current bids for ${keywordData.size} keywords from Amazon API...`);
         const { keywords: amazonKeywords } = await amazonAdsApiRequest({ method: 'post', url: '/sp/keywords/list', profileId: rule.profile_id, data: { keywordIdFilter: { include: keywordIds } } });
+        console.log(`[RulesEngine DBG] Amazon API returned ${amazonKeywords.length} keyword records.`);
         const currentBids = new Map(amazonKeywords.map(kw => [kw.keywordId.toString(), kw.bid]));
+        console.log(`[RulesEngine DBG] Successfully mapped ${currentBids.size} current bids.`);
         
         for (const [id, data] of keywordData.entries()) {
             console.log(`\n[RulesEngine DBG] --- Evaluating Keyword: "${data.entityText}" (ID: ${id}) ---`);
@@ -316,8 +318,11 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     const streamTargetsWithIds = new Map(Array.from(targetData.entries()).filter(([k,v]) => v.entityId));
     if (streamTargetsWithIds.size > 0) {
         const targetIds = Array.from(streamTargetsWithIds.values()).map(t => t.entityId);
+        console.log(`[RulesEngine DBG] Fetching current bids for ${streamTargetsWithIds.size} targets from Amazon API...`);
         const { targetingClauses: amazonTargets } = await amazonAdsApiRequest({ method: 'post', url: '/sp/targets/list', profileId: rule.profile_id, data: { targetIdFilter: { include: targetIds } } });
+        console.log(`[RulesEngine DBG] Amazon API returned ${amazonTargets.length} target records.`);
         const currentBids = new Map(amazonTargets.map(t => [t.targetId.toString(), t.bid]));
+        console.log(`[RulesEngine DBG] Successfully mapped ${currentBids.size} current bids for targets.`);
 
         for (const [key, data] of streamTargetsWithIds.entries()) {
             const id = data.entityId.toString();

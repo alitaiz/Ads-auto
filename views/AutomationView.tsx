@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { AutomationRule, AutomationRuleCondition } from '../types';
+import { AutomationRule, AutomationRuleCondition, AutomationConditionGroup, AutomationRuleAction } from '../types';
 
 const styles: { [key: string]: React.CSSProperties } = {
   container: { maxWidth: '1200px', margin: '0 auto', padding: '20px' },
@@ -28,7 +28,7 @@ const styles: { [key: string]: React.CSSProperties } = {
   formSection: { border: '1px solid var(--border-color)', borderRadius: '4px', padding: '15px' },
   formSectionTitle: { fontWeight: 600, margin: '-15px 0 15px', padding: '0 5px', background: 'white', width: 'fit-content' },
   formGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
-  formGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' },
+  formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '15px' },
   label: { fontWeight: 500, fontSize: '0.9rem' },
   input: { padding: '10px', border: '1px solid var(--border-color)', borderRadius: '4px', fontSize: '1rem' },
   modalActions: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '30px' },
@@ -39,7 +39,7 @@ const styles: { [key: string]: React.CSSProperties } = {
   conditionGroup: { border: '1px dashed #ccc', padding: '15px', borderRadius: '4px', marginBottom: '15px', position: 'relative' },
   orDivider: { textAlign: 'center', fontWeight: 'bold', margin: '10px 0' },
   andDivider: { fontSize: '0.8rem', fontWeight: 'bold', margin: '5px 0 5px 20px' },
-  removeGroupButton: { position: 'absolute', top: '-10px', right: '-10px', background: 'white', borderRadius: '50%' }
+  thenBlock: { marginTop: '15px', paddingTop: '15px', borderTop: '1px solid #ddd' }
 };
 
 const getDefaultCondition = (): AutomationRuleCondition => ({
@@ -49,18 +49,35 @@ const getDefaultCondition = (): AutomationRuleCondition => ({
     value: 20
 });
 
+const getDefaultBidAdjustmentAction = (): AutomationRuleAction => ({ 
+    type: 'adjustBidPercent', 
+    value: -25,
+    minBid: undefined,
+    maxBid: undefined,
+});
+
+const getDefaultSearchTermAction = (): AutomationRuleAction => ({ 
+    type: 'negateSearchTerm', 
+    matchType: 'NEGATIVE_EXACT' 
+});
+
+const getDefaultBidAdjustmentGroup = (): AutomationConditionGroup => ({
+    conditions: [getDefaultCondition()],
+    action: getDefaultBidAdjustmentAction()
+});
+
+const getDefaultSearchTermGroup = (): AutomationConditionGroup => ({
+    conditions: [
+        { metric: 'spend', timeWindow: 60, operator: '>', value: 15 },
+        { metric: 'sales', timeWindow: 60, operator: '=', value: 0 },
+    ],
+    action: getDefaultSearchTermAction()
+});
+
 const getDefaultBidAdjustmentRule = (): Partial<AutomationRule> => ({
     name: '',
     rule_type: 'BID_ADJUSTMENT',
-    config: {
-        conditionGroups: [[getDefaultCondition()]],
-        action: { 
-            type: 'adjustBidPercent', 
-            value: -25,
-            minBid: undefined,
-            maxBid: undefined,
-        }
-    },
+    config: { conditionGroups: [getDefaultBidAdjustmentGroup()] },
     scope: { campaignIds: [] },
     is_active: true,
 });
@@ -68,13 +85,7 @@ const getDefaultBidAdjustmentRule = (): Partial<AutomationRule> => ({
 const getDefaultSearchTermRule = (): Partial<AutomationRule> => ({
     name: '',
     rule_type: 'SEARCH_TERM_AUTOMATION',
-    config: {
-        conditionGroups: [[
-            { metric: 'spend', timeWindow: 60, operator: '>', value: 15 },
-            { metric: 'sales', timeWindow: 60, operator: '=', value: 0 },
-        ]],
-        action: { type: 'negateSearchTerm', matchType: 'NEGATIVE_EXACT' }
-    },
+    config: { conditionGroups: [getDefaultSearchTermGroup()] },
     scope: { campaignIds: [] },
     is_active: true,
 });
@@ -243,7 +254,7 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
     const handleConditionChange = (groupIndex: number, condIndex: number, field: keyof AutomationRuleCondition, value: any) => {
         setFormData(prev => {
             const newGroups = JSON.parse(JSON.stringify(prev.config!.conditionGroups));
-            newGroups[groupIndex][condIndex][field] = value;
+            newGroups[groupIndex].conditions[condIndex][field] = value;
             return { ...prev, config: { ...prev.config!, conditionGroups: newGroups } };
         });
     };
@@ -251,7 +262,7 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
     const addConditionToGroup = (groupIndex: number) => {
         setFormData(prev => {
             const newGroups = JSON.parse(JSON.stringify(prev.config!.conditionGroups));
-            newGroups[groupIndex].push(getDefaultCondition());
+            newGroups[groupIndex].conditions.push(getDefaultCondition());
             return { ...prev, config: { ...prev.config!, conditionGroups: newGroups } };
         });
     };
@@ -259,9 +270,8 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
     const removeCondition = (groupIndex: number, condIndex: number) => {
          setFormData(prev => {
             const newGroups = JSON.parse(JSON.stringify(prev.config!.conditionGroups));
-            newGroups[groupIndex].splice(condIndex, 1);
-            // If the group is now empty, remove the group itself
-            if (newGroups[groupIndex].length === 0) {
+            newGroups[groupIndex].conditions.splice(condIndex, 1);
+            if (newGroups[groupIndex].conditions.length === 0) {
                 newGroups.splice(groupIndex, 1);
             }
             return { ...prev, config: { ...prev.config!, conditionGroups: newGroups } };
@@ -270,20 +280,18 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
     
     const addConditionGroup = () => {
         setFormData(prev => {
-            const newGroups = [...prev.config!.conditionGroups, [getDefaultCondition()]];
+            const newGroup = ruleType === 'bidAdjustment' ? getDefaultBidAdjustmentGroup() : getDefaultSearchTermGroup();
+            const newGroups = [...prev.config!.conditionGroups, newGroup];
             return { ...prev, config: { ...prev.config!, conditionGroups: newGroups } };
         });
     };
     
-    const removeGroup = (groupIndex: number) => {
+    const handleActionChange = (groupIndex: number, field: string, value: any) => {
         setFormData(prev => {
-            const newGroups = prev.config!.conditionGroups.filter((_, i) => i !== groupIndex);
-             return { ...prev, config: { ...prev.config!, conditionGroups: newGroups } };
+            const newGroups = JSON.parse(JSON.stringify(prev.config!.conditionGroups));
+            newGroups[groupIndex].action[field] = value;
+            return { ...prev, config: { ...prev.config!, conditionGroups: newGroups }};
         });
-    };
-    
-    const handleActionChange = (field: string, value: any) => {
-        setFormData(prev => ({ ...prev, config: { ...prev.config!, action: { ...prev.config!.action, [field]: value } } }));
     };
 
     return (
@@ -297,11 +305,14 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                     </div>
 
                     <div style={styles.formSection}>
-                        <h4 style={styles.formSectionTitle}>IF</h4>
+                         <h4 style={styles.formSectionTitle}>Rule Logic (First Match Wins)</h4>
+                         <p style={{fontSize: '0.8rem', color: '#666', marginTop: '-10px', marginBottom: '15px'}}>Rules are checked from top to bottom. The first group whose conditions are met will trigger its action, and the engine will stop.</p>
+
                         {formData.config?.conditionGroups.map((group, groupIndex) => (
                            <React.Fragment key={groupIndex}>
                                 <div style={styles.conditionGroup}>
-                                    {group.map((cond, condIndex) => (
+                                    <h4 style={{margin: '0 0 10px 0', fontSize: '1rem'}}>IF</h4>
+                                    {group.conditions.map((cond, condIndex) => (
                                         <React.Fragment key={condIndex}>
                                             <div style={styles.conditionRow}>
                                                <select style={styles.input} value={cond.metric} onChange={e => handleConditionChange(groupIndex, condIndex, 'metric', e.target.value)}>
@@ -319,71 +330,71 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                                                 <input type="number" step="0.01" style={styles.input} value={cond.value} onChange={e => handleConditionChange(groupIndex, condIndex, 'value', Number(e.target.value))} required />
                                                 <button type="button" onClick={() => removeCondition(groupIndex, condIndex)} style={{...styles.button, ...styles.dangerButton}}>✕</button>
                                             </div>
-                                            {condIndex < group.length - 1 && <div style={styles.andDivider}>AND</div>}
+                                            {condIndex < group.conditions.length - 1 && <div style={styles.andDivider}>AND</div>}
                                         </React.Fragment>
                                     ))}
                                      <button type="button" onClick={() => addConditionToGroup(groupIndex)} style={{...styles.button, marginTop: '10px'}}>+ Add Condition (AND)</button>
+                                
+                                     <div style={styles.thenBlock}>
+                                        <h4 style={{margin: '0 0 10px 0', fontSize: '1rem'}}>THEN</h4>
+                                        {ruleType === 'bidAdjustment' && (
+                                            <div style={styles.formGrid}>
+                                                <div style={styles.formGroup}>
+                                                    <label style={styles.label}>Action</label>
+                                                    <select style={styles.input} value={(group.action.value || 0) >= 0 ? 'increase' : 'decrease'} 
+                                                        onChange={e => {
+                                                            const sign = e.target.value === 'increase' ? 1 : -1;
+                                                            handleActionChange(groupIndex, 'value', sign * Math.abs(group.action.value || 0))
+                                                        }}
+                                                    >
+                                                        <option value="decrease">Decrease Bid By</option>
+                                                        <option value="increase">Increase Bid By</option>
+                                                    </select>
+                                                </div>
+                                                <div style={styles.formGroup}>
+                                                    <label style={styles.label}>Value (%)</label>
+                                                    <input type="number" style={styles.input} value={Math.abs(group.action.value || 0)} 
+                                                        onChange={e => {
+                                                            const sign = (group.action.value || -1) >= 0 ? 1 : -1;
+                                                            handleActionChange(groupIndex, 'value', sign * Math.abs(Number(e.target.value)))
+                                                        }}
+                                                    />
+                                                </div>
+                                                <div style={styles.formGroup}>
+                                                    <label style={styles.label}>Min Bid ($)</label>
+                                                    <input type="number" step="0.01" style={styles.input} placeholder="e.g., 0.10"
+                                                           value={group.action.minBid ?? ''} 
+                                                           onChange={e => handleActionChange(groupIndex, 'minBid', e.target.value ? Number(e.target.value) : undefined)} />
+                                                </div>
+                                                <div style={styles.formGroup}>
+                                                    <label style={styles.label}>Max Bid ($)</label>
+                                                    <input type="number" step="0.01" style={styles.input} placeholder="e.g., 2.50"
+                                                           value={group.action.maxBid ?? ''} 
+                                                           onChange={e => handleActionChange(groupIndex, 'maxBid', e.target.value ? Number(e.target.value) : undefined)} />
+                                                </div>
+                                            </div>
+                                        )}
+                                         {ruleType === 'searchTerm' && (
+                                            <div style={styles.formGrid}>
+                                                 <div style={styles.formGroup}>
+                                                    <label style={styles.label}>Action</label>
+                                                    <input style={styles.input} value="Create Negative Keyword" disabled />
+                                                </div>
+                                                <div style={styles.formGroup}>
+                                                    <label style={styles.label}>Match Type</label>
+                                                    <select style={styles.input} value={group.action.matchType} onChange={e => handleActionChange(groupIndex, 'matchType', e.target.value)}>
+                                                        <option value="NEGATIVE_EXACT">Negative Exact</option>
+                                                        <option value="NEGATIVE_PHRASE">Negative Phrase</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                                {groupIndex < formData.config!.conditionGroups.length - 1 && <div style={styles.orDivider}>OR</div>}
                            </React.Fragment>
                         ))}
                         <button type="button" onClick={addConditionGroup} style={{...styles.button, marginTop: '15px'}}>+ Add Condition Group (OR)</button>
-                    </div>
-
-                    <div style={styles.formSection}>
-                        <h4 style={styles.formSectionTitle}>THEN</h4>
-                        {ruleType === 'bidAdjustment' && (
-                            <div style={{...styles.formGrid, gridTemplateColumns: 'repeat(4, 1fr)'}}>
-                                <div style={styles.formGroup}>
-                                    <label style={styles.label}>Action</label>
-                                    <select style={styles.input} value={formData.config?.action.value! > 0 ? 'increase' : 'decrease'} 
-                                        onChange={e => {
-                                            const sign = e.target.value === 'increase' ? 1 : -1;
-                                            handleActionChange('value', sign * Math.abs(formData.config?.action.value || 0))
-                                        }}
-                                    >
-                                        <option value="decrease">Decrease Bid By</option>
-                                        <option value="increase">Increase Bid By</option>
-                                    </select>
-                                </div>
-                                <div style={styles.formGroup}>
-                                    <label style={styles.label}>Value (%)</label>
-                                    <input type="number" style={styles.input} value={Math.abs(formData.config?.action.value || 0)} 
-                                        onChange={e => {
-                                            const sign = (formData.config?.action.value || -1) > 0 ? 1 : -1;
-                                            handleActionChange('value', sign * Math.abs(Number(e.target.value)))
-                                        }}
-                                    />
-                                </div>
-                                <div style={styles.formGroup}>
-                                    <label style={styles.label}>Min Bid ($)</label>
-                                    <input type="number" step="0.01" style={styles.input} placeholder="e.g., 0.10"
-                                           value={formData.config?.action.minBid ?? ''} 
-                                           onChange={e => handleActionChange('minBid', e.target.value ? Number(e.target.value) : undefined)} />
-                                </div>
-                                <div style={styles.formGroup}>
-                                    <label style={styles.label}>Max Bid ($)</label>
-                                    <input type="number" step="0.01" style={styles.input} placeholder="e.g., 2.50"
-                                           value={formData.config?.action.maxBid ?? ''} 
-                                           onChange={e => handleActionChange('maxBid', e.target.value ? Number(e.target.value) : undefined)} />
-                                </div>
-                            </div>
-                        )}
-                         {ruleType === 'searchTerm' && (
-                            <div style={{...styles.formGrid, gridTemplateColumns: '1fr 1fr'}}>
-                                 <div style={styles.formGroup}>
-                                    <label style={styles.label}>Action</label>
-                                    <input style={styles.input} value="Create Negative Keyword" disabled />
-                                </div>
-                                <div style={styles.formGroup}>
-                                    <label style={styles.label}>Match Type</label>
-                                    <select style={styles.input} value={formData.config?.action.matchType} onChange={e => handleActionChange('matchType', e.target.value)}>
-                                        <option value="NEGATIVE_EXACT">Negative Exact</option>
-                                        <option value="NEGATIVE_PHRASE">Negative Phrase</option>
-                                    </select>
-                                </div>
-                            </div>
-                        )}
                     </div>
                     
                      <div style={{...styles.formGroup, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>

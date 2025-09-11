@@ -75,17 +75,23 @@ export interface SummaryMetricsData {
 
 export interface AutomationRuleCondition {
     metric: 'spend' | 'sales' | 'acos' | 'orders' | 'clicks';
-    timeWindow: number; // Changed from 14 | 30 | 60 to number
+    timeWindow: number;
     operator: '>' | '<' | '=';
     value: number;
 }
 
 export interface AutomationRuleAction {
     type: 'adjustBidPercent' | 'negateSearchTerm';
-    value?: number; // For bid adjustment percentage (can be positive or negative)
-    matchType?: 'NEGATIVE_EXACT' | 'NEGATIVE_PHRASE'; // For search term negation
-    minBid?: number; // Min bid constraint
-    maxBid?: number; // Max bid constraint
+    value?: number;
+    matchType?: 'NEGATIVE_EXACT' | 'NEGATIVE_PHRASE';
+    minBid?: number;
+    maxBid?: number;
+}
+
+// The structure of a single IF/THEN block within a rule.
+export interface AutomationConditionGroup {
+    conditions: AutomationRuleCondition[];
+    action: AutomationRuleAction;
 }
 
 export interface AutomationRule {
@@ -93,8 +99,9 @@ export interface AutomationRule {
     name: string;
     rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION';
     config: {
-        conditionGroups: AutomationRuleCondition[][]; // Replaced 'conditions' with 'conditionGroups' for AND/OR logic
-        action: AutomationRuleAction;
+        // A rule is composed of one or more condition groups.
+        // They are evaluated in order ("first match wins").
+        conditionGroups: AutomationConditionGroup[];
     };
     scope: {
         campaignIds?: (number | string)[];

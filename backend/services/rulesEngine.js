@@ -10,7 +10,7 @@ async function evaluateBidAdjustmentRule(rule) {
     return { status: 'NO_ACTION', summary: 'Rule has no campaigns in scope.' };
   }
   
-  const allConditions = config.conditionGroups.flat();
+  const allConditions = config.conditionGroups.flatMap(g => g.conditions);
   const timeWindows = [...new Set(allConditions.map(c => c.timeWindow))];
   let metricsQuery = `
     SELECT
@@ -55,15 +55,14 @@ async function evaluateBidAdjustmentRule(rule) {
   const updates = [];
 
   for (const kw of keywordMetrics) {
-    let isRuleTriggered = false;
+    // "First Match Wins" logic: iterate through groups in order
     for (const group of config.conditionGroups) {
       let allConditionsInGroupMet = true;
-      for (const condition of group) {
+      for (const condition of group.conditions) {
         const spend = kw[`spend_${condition.timeWindow}d`];
         const sales = kw[`sales_${condition.timeWindow}d`];
         const orders = kw[`orders_${condition.timeWindow}d`];
         const clicks = kw[`clicks_${condition.timeWindow}d`];
-        // Handle ACOS: if sales are zero, ACOS is effectively infinite for ">" checks, and 0 for "<" checks
         const acos = sales > 0 ? spend / sales : (condition.operator === '>' ? Infinity : 0);
 
         let metricValue;
@@ -84,35 +83,26 @@ async function evaluateBidAdjustmentRule(rule) {
 
         if (!conditionMet) {
             allConditionsInGroupMet = false;
-            break; // This AND group fails
+            break; 
         }
       }
+
       if (allConditionsInGroupMet) {
-        isRuleTriggered = true;
-        break; // This OR group is met, no need to check others
-      }
-    }
+        // First group that matches triggers its action
+        const { action } = group;
+        const { value: adjustmentPct = 0, minBid, maxBid } = action;
+        let newBid = Number(kw.current_bid) * (1 + adjustmentPct / 100);
 
-    if (isRuleTriggered) {
-      const { value: adjustmentPct = 0, minBid, maxBid } = config.action;
-      let newBid = Number(kw.current_bid) * (1 + adjustmentPct / 100);
-
-      // Round to 2 decimal places before applying constraints
-      newBid = Number(newBid.toFixed(2));
-
-      // Apply constraints
-      if (minBid !== null && typeof minBid !== 'undefined') {
-          newBid = Math.max(newBid, minBid);
-      }
-      if (maxBid !== null && typeof maxBid !== 'undefined') {
-          newBid = Math.min(newBid, maxBid);
-      }
-      
-      // Final Amazon minimum bid constraint and rounding
-      newBid = Math.max(0.02, Number(newBid.toFixed(2)));
-      
-      if (newBid !== Number(kw.current_bid)) {
-        updates.push({ keywordId: kw.keyword_id, bid: newBid });
+        newBid = Number(newBid.toFixed(2));
+        if (minBid !== null && typeof minBid !== 'undefined') newBid = Math.max(newBid, minBid);
+        if (maxBid !== null && typeof maxBid !== 'undefined') newBid = Math.min(newBid, maxBid);
+        newBid = Math.max(0.02, Number(newBid.toFixed(2)));
+        
+        if (newBid !== Number(kw.current_bid)) {
+          updates.push({ keywordId: kw.keyword_id, bid: newBid });
+        }
+        // Break from the group loop for this keyword since we found a match
+        break; 
       }
     }
   }
@@ -124,7 +114,7 @@ async function evaluateBidAdjustmentRule(rule) {
     });
     return { status: 'SUCCESS', summary: `Adjusted ${updates.length} keyword bids.` };
   } else {
-    return { status: 'NO_ACTION', summary: 'No keywords met all conditions.' };
+    return { status: 'NO_ACTION', summary: 'No keywords met conditions in any group.' };
   }
 }
 
@@ -134,7 +124,7 @@ async function evaluateSearchTermRule(rule) {
     const campaignIds = scope.campaignIds || [];
     if (campaignIds.length === 0) return { status: 'NO_ACTION', summary: 'Rule has no campaigns in scope.' };
     
-    const allConditions = config.conditionGroups.flat();
+    const allConditions = config.conditionGroups.flatMap(g => g.conditions);
     const timeWindows = [...new Set(allConditions.map(c => c.timeWindow))];
     let metricsQuery = `
         SELECT
@@ -176,12 +166,15 @@ async function evaluateSearchTermRule(rule) {
 
     const { rows: termMetrics } = await pool.query(metricsQuery, [campaignIds]);
     const negativesToAdd = [];
+    const processedTerms = new Set();
     
     for (const term of termMetrics) {
-        let isRuleTriggered = false;
+        const termIdentifier = `${term.campaign_id}-${term.ad_group_id}-${term.customer_search_term}`;
+        if (processedTerms.has(termIdentifier)) continue;
+
         for (const group of config.conditionGroups) {
             let allConditionsInGroupMet = true;
-            for (const condition of group) {
+            for (const condition of group.conditions) {
                 const spend = term[`spend_${condition.timeWindow}d`];
                 const sales = term[`sales_${condition.timeWindow}d`];
                 const orders = term[`orders_${condition.timeWindow}d`];
@@ -209,18 +202,15 @@ async function evaluateSearchTermRule(rule) {
                 }
             }
              if (allConditionsInGroupMet) {
-                isRuleTriggered = true;
-                break;
+                negativesToAdd.push({
+                    campaignId: term.campaign_id,
+                    adGroupId: term.ad_group_id,
+                    keywordText: term.customer_search_term,
+                    matchType: group.action.matchType || 'NEGATIVE_EXACT',
+                });
+                processedTerms.add(termIdentifier);
+                break; // First match wins
             }
-        }
-
-        if (isRuleTriggered) {
-            negativesToAdd.push({
-                campaignId: term.campaign_id,
-                adGroupId: term.ad_group_id,
-                keywordText: term.customer_search_term,
-                matchType: config.action.matchType || 'NEGATIVE_EXACT',
-            });
         }
     }
     

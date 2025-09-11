@@ -84,6 +84,8 @@ export interface AutomationRuleAction {
     type: 'adjustBidPercent' | 'negateSearchTerm';
     value?: number; // For bid adjustment percentage (can be positive or negative)
     matchType?: 'NEGATIVE_EXACT' | 'NEGATIVE_PHRASE'; // For search term negation
+    minBid?: number; // Min bid constraint
+    maxBid?: number; // Max bid constraint
 }
 
 export interface AutomationRule {

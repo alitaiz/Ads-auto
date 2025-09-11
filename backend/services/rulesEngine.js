@@ -94,9 +94,23 @@ async function evaluateBidAdjustmentRule(rule) {
     }
 
     if (isRuleTriggered) {
-      const adjustmentPct = config.action.value || 0;
+      const { value: adjustmentPct = 0, minBid, maxBid } = config.action;
       let newBid = Number(kw.current_bid) * (1 + adjustmentPct / 100);
+
+      // Round to 2 decimal places before applying constraints
+      newBid = Number(newBid.toFixed(2));
+
+      // Apply constraints
+      if (minBid !== null && typeof minBid !== 'undefined') {
+          newBid = Math.max(newBid, minBid);
+      }
+      if (maxBid !== null && typeof maxBid !== 'undefined') {
+          newBid = Math.min(newBid, maxBid);
+      }
+      
+      // Final Amazon minimum bid constraint and rounding
       newBid = Math.max(0.02, Number(newBid.toFixed(2)));
+      
       if (newBid !== Number(kw.current_bid)) {
         updates.push({ keywordId: kw.keyword_id, bid: newBid });
       }

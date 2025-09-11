@@ -54,7 +54,12 @@ const getDefaultBidAdjustmentRule = (): Partial<AutomationRule> => ({
     rule_type: 'BID_ADJUSTMENT',
     config: {
         conditionGroups: [[getDefaultCondition()]],
-        action: { type: 'adjustBidPercent', value: -25 }
+        action: { 
+            type: 'adjustBidPercent', 
+            value: -25,
+            minBid: undefined,
+            maxBid: undefined,
+        }
     },
     scope: { campaignIds: [] },
     is_active: true,
@@ -328,7 +333,7 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                     <div style={styles.formSection}>
                         <h4 style={styles.formSectionTitle}>THEN</h4>
                         {ruleType === 'bidAdjustment' && (
-                            <div style={{...styles.formGrid, gridTemplateColumns: '1fr 1fr'}}>
+                            <div style={{...styles.formGrid, gridTemplateColumns: 'repeat(4, 1fr)'}}>
                                 <div style={styles.formGroup}>
                                     <label style={styles.label}>Action</label>
                                     <select style={styles.input} value={formData.config?.action.value! > 0 ? 'increase' : 'decrease'} 
@@ -349,6 +354,18 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                                             handleActionChange('value', sign * Math.abs(Number(e.target.value)))
                                         }}
                                     />
+                                </div>
+                                <div style={styles.formGroup}>
+                                    <label style={styles.label}>Min Bid ($)</label>
+                                    <input type="number" step="0.01" style={styles.input} placeholder="e.g., 0.10"
+                                           value={formData.config?.action.minBid ?? ''} 
+                                           onChange={e => handleActionChange('minBid', e.target.value ? Number(e.target.value) : undefined)} />
+                                </div>
+                                <div style={styles.formGroup}>
+                                    <label style={styles.label}>Max Bid ($)</label>
+                                    <input type="number" step="0.01" style={styles.input} placeholder="e.g., 2.50"
+                                           value={formData.config?.action.maxBid ?? ''} 
+                                           onChange={e => handleActionChange('maxBid', e.target.value ? Number(e.target.value) : undefined)} />
                                 </div>
                             </div>
                         )}

@@ -91,37 +91,39 @@ const getPerformanceData = async (rule, campaignIds) => {
         campaignFilterClauseHistorical = `AND campaign_id = ANY(${campaignParamIndex})`;
         campaignFilterClauseStream = `AND (event_data->>'campaignId')::bigint = ANY(${campaignParamIndex})`;
     }
-
+    
     if (rule.rule_type === 'BID_ADJUSTMENT') {
         query = `
             SELECT
                 performance_date, entity_id, entity_type, entity_text, match_type,
                 campaign_id, ad_group_id, spend, sales, clicks, orders
             FROM (
-                -- Historical data (already daily)
+                -- Historical data: KEYWORDS ONLY, as it's the only type with a stable biddable ID.
                 SELECT
                     report_date AS performance_date,
                     keyword_id AS entity_id,
-                    CASE WHEN keyword_id IS NOT NULL THEN 'keyword' ELSE 'target' END AS entity_type,
-                    COALESCE(keyword_text, targeting) AS entity_text,
-                    match_type, campaign_id, ad_group_id,
+                    'keyword' AS entity_type,
+                    keyword_text AS entity_text,
+                    match_type,
+                    campaign_id,
+                    ad_group_id,
                     COALESCE(spend, cost, 0)::numeric AS spend,
                     COALESCE(sales_7d, 0)::numeric AS sales,
                     COALESCE(clicks, 0)::bigint AS clicks,
                     COALESCE(purchases_7d, 0)::bigint AS orders
                 FROM sponsored_products_search_term_report
                 WHERE report_date >= $1 AND report_date < $2
-                  AND (keyword_id IS NOT NULL OR targeting IS NOT NULL)
+                  AND keyword_id IS NOT NULL
                   ${campaignFilterClauseHistorical}
 
                 UNION ALL
 
-                -- Stream data, aggregated to daily
+                -- Stream data: KEYWORDS and TARGETS, aggregated daily.
                 SELECT
                     ((event_data->>'timeWindowStart')::timestamptz AT TIME ZONE '${REPORTING_TIMEZONE}')::date AS performance_date,
                     COALESCE((event_data->>'keywordId')::bigint, (event_data->>'targetId')::bigint) AS entity_id,
                     CASE WHEN event_data->>'keywordId' IS NOT NULL THEN 'keyword' ELSE 'target' END AS entity_type,
-                    COALESCE(event_data->>'keywordText', event_data->>'targetingExpression') AS entity_text,
+                    COALESCE(event_data->>'keywordText', event_data->>'targetingExpression', event_data->>'targetingText') AS entity_text,
                     event_data->>'matchType' AS match_type,
                     (event_data->>'campaignId')::bigint AS campaign_id,
                     (event_data->>'adGroupId')::bigint AS ad_group_id,

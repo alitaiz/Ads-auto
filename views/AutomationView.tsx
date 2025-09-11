@@ -84,37 +84,37 @@ const RuleSamplesTab = () => {
 
     const bidSamples = [
         {
-            title: "Quy tắc Bảo thủ: Cắt lỗ từ khóa ACOS cao",
-            description: "NẾU một từ khóa có ACOS > 40% VÀ có hơn 10 lượt nhấp trong 14 ngày qua, THÌ hệ thống sẽ GIẢM 15% giá thầu.",
-            hypothesis: "Từ từ giảm chi tiêu lãng phí cho các từ khóa không sinh lời mà không gây rủi ro sụt giảm doanh số đột ngột. Phù hợp cho các chiến dịch đã ổn định cần tối ưu lợi nhuận."
+            title: "Quy tắc Bảo thủ: Tối ưu Lợi nhuận & Cắt lỗ",
+            description: "IF: ACOS trong 14 ngày qua > 40% AND có > 10 clicks. THEN: GIẢM 15% giá thầu. SAFEGUARDS: Hệ thống sẽ không giảm giá thầu quá 0.25$ trong một lần điều chỉnh (Max Step) và sẽ đợi 24 giờ (Cooldown) trước khi đánh giá lại, tránh các thay đổi quá đột ngột.",
+            hypothesis: "Từ từ giảm chi tiêu cho các từ khóa không hiệu quả để cải thiện lợi nhuận chung. Các 'giới hạn an toàn' (safeguards) ngăn chặn việc giảm giá thầu quá nhanh có thể làm mất hoàn toàn hiển thị."
         },
         {
-            title: "Quy tắc Tấn công: Tăng tốc từ khóa hiệu quả",
-            description: "NẾU một từ khóa có ACOS < 15% VÀ có ít nhất 2 đơn hàng trong 14 ngày qua, THÌ hệ thống sẽ TĂNG 20% giá thầu để chiếm vị trí tốt hơn.",
-            hypothesis: "Nhanh chóng mở rộng phạm vi tiếp cận của các từ khóa đang hoạt động tốt để chiếm lĩnh thị phần và tối đa hóa doanh thu. Phù hợp cho giai đoạn ra mắt sản phẩm hoặc tăng trưởng mạnh."
+            title: "Quy tắc Tấn công: Mở rộng Hiển thị & Tăng trưởng",
+            description: "IF: ACOS trong 14 ngày qua < 15% AND có > 2 đơn hàng. THEN: TĂNG 20% giá thầu để chiếm vị trí tốt hơn. SAFEGUARDS: Mức tăng giá thầu cũng được kiểm soát bởi 'Max Step' để không làm ACOS tăng vọt. 'Cooldown' đảm bảo hệ thống có thời gian đánh giá tác động của việc tăng giá thầu.",
+            hypothesis: "Đẩy mạnh ngân sách vào những gì đang hoạt động tốt nhất để tối đa hóa doanh thu và chiếm lĩnh thị phần. Phù hợp cho giai đoạn ra mắt sản phẩm hoặc khi muốn tăng trưởng mạnh mẽ."
         },
         {
-            title: "Quy tắc 'Mồi câu': Thúc đẩy từ khóa tiềm năng",
-            description: "NẾU một từ khóa có CTR (Tỷ lệ nhấp) > 0.5% VÀ có hơn 15 lượt nhấp nhưng CHƯA có đơn hàng, THÌ hệ thống sẽ TĂNG nhẹ giá thầu 10%.",
-            hypothesis: "Cho các từ khóa hứa hẹn (khách hàng quan tâm, nhấp nhiều) một cơ hội tốt hơn để chuyển đổi bằng cách cải thiện vị trí quảng cáo. Có thể giúp phát hiện những 'viên ngọc ẩn'."
+            title: "Quy tắc 'Mồi câu': Thúc đẩy Từ khóa Tiềm năng",
+            description: "IF: CTR (Tỷ lệ nhấp) > 0.5% AND có > 15 clicks BUT chưa có đơn hàng nào. THEN: TĂNG nhẹ 10% giá thầu. SAFEGUARDS: Mức tăng nhỏ và có 'Cooldown' giúp thử nghiệm một cách an toàn mà không lãng phí nhiều ngân sách vào một từ khóa chưa chắc chắn.",
+            hypothesis: "Cho các từ khóa 'hứa hẹn' (khách hàng quan tâm, nhấp nhiều) một cơ hội tốt hơn để chuyển đổi. Đây là một chiến lược thử nghiệm có kiểm soát để tìm ra những 'viên ngọc ẩn'."
         }
     ];
 
     const searchTermSamples = [
         {
-            title: "Quy tắc Dọn dẹp: Phủ định search term rác",
-            description: "NẾU một cụm từ tìm kiếm (search term) đã chi tiêu > $20 VÀ có > 15 lượt nhấp MÀ KHÔNG có đơn hàng nào trong 30 ngày qua, THÌ hệ thống sẽ tự động thêm nó làm từ khóa PHỦ ĐỊNH (chính xác).",
-            hypothesis: "Ngừng lãng phí ngân sách vào các cụm từ tìm kiếm rõ ràng không liên quan hoặc không có khả năng chuyển đổi, giúp ACOS chung của chiến dịch giảm xuống."
+            title: "Quy tắc Dọn dẹp: Tự động Phủ định Search Term Lãng phí",
+            description: "IF: Một search term đã có > 15 clicks AND đã chi tiêu > $20 BUT không có đơn hàng nào trong 30 ngày qua. THEN: Tự động thêm search term này làm TỪ KHÓA PHỦ ĐỊNH CHÍNH XÁC. SAFEGUARDS: 'Cooldown' 72 giờ đảm bảo một search term không bị phủ định quá sớm, cho nó đủ thời gian để tạo ra chuyển đổi.",
+            hypothesis: "Ngừng lãng phí ngân sách vào các cụm từ tìm kiếm không chuyển đổi. Theo thời gian, hành động này sẽ cải thiện đáng kể ACOS của toàn bộ chiến dịch."
         },
         {
-            title: "Quy tắc Thu hoạch: Chuyển đổi search term thành từ khóa",
-            description: "NẾU một search term trong chiến dịch Tự động hoặc Rộng có > 2 đơn hàng VÀ ACOS < 30% trong 30 ngày qua, THÌ hệ thống sẽ tự động tạo một TỪ KHÓA mới (chính xác) từ search term đó.",
-            hypothesis: "Tìm ra các từ khóa mới, lợi nhuận cao trực tiếp từ hành vi tìm kiếm của khách hàng. Việc chuyển chúng thành từ khóa chính xác giúp kiểm soát giá thầu và ngân sách tốt hơn."
+            title: "Quy tắc Thu hoạch: Chuyển đổi Search Term Tốt thành Từ khóa",
+            description: "IF: Một search term trong chiến dịch Tự động/Rộng có > 2 đơn hàng AND ACOS < 30% trong 30 ngày qua. THEN: Tự động tạo một TỪ KHÓA CHÍNH XÁC mới từ search term này với giá thầu khởi điểm là $0.75. SAFEGUARDS: 'Cooldown' ngăn việc tạo ra các từ khóa trùng lặp.",
+            hypothesis: "Tìm ra các từ khóa mới, hiệu quả cao trực tiếp từ hành vi của khách hàng. Chuyển chúng sang đối sánh chính xác cho phép kiểm soát giá thầu và ngân sách tốt hơn."
         },
         {
-            title: "Quy tắc Phòng vệ & Mở rộng",
-            description: "Giám sát các search term chứa tên thương hiệu. NẾU có một search term KHÔNG chứa tên thương hiệu nhưng lại tạo ra đơn hàng cho sản phẩm thương hiệu với ACOS tốt, THÌ chuyển nó thành từ khóa mới.",
-            hypothesis: "Đảm bảo khả năng hiển thị tối đa cho các tìm kiếm liên quan đến thương hiệu và nắm bắt các cơ hội từ khóa mới có liên quan gián tiếp, mở rộng tệp khách hàng."
+            title: "Quy tắc Phòng vệ & Mở rộng Thương hiệu",
+            description: "IF: Một search term CHỨA TÊN THƯƠNG HIỆU của bạn nhưng lại có ACOS cao > 25%. THEN: Có thể tạo một quy tắc Bid Adjustment riêng để tăng giá thầu cho các từ khóa thương hiệu. IF: Một search term KHÔNG CHỨA TÊN THƯƠNG HIỆU nhưng lại tạo ra > 1 đơn hàng với ACOS tốt < 35%. THEN: Chuyển nó thành một từ khóa mới.",
+            hypothesis: "Sử dụng tự động hóa để vừa bảo vệ không gian thương hiệu của bạn, vừa khám phá các cơ hội tăng trưởng mới từ các tìm kiếm không liên quan trực tiếp đến thương hiệu."
         }
     ];
 
@@ -362,48 +362,48 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }) => {
 const BidAdjustmentForm = ({ config, onChange }) => (
     <>
         <div style={styles.formSection}>
-            <h4 style={styles.formSectionTitle}>Conditions (IF)</h4>
+            <h4 style={styles.formSectionTitle}>Điều kiện (IF)</h4>
             <div style={styles.formGrid}>
                 <div style={styles.formGroup}>
-                    <label style={styles.label} title="The desired Advertising Cost of Sales. If a keyword's ACOS is above this target, its bid will be lowered. If it's significantly below, the bid may be raised.">Target ACOS (%)</label>
+                    <label style={styles.label} title="Chi phí quảng cáo trên doanh thu (ACOS) mục tiêu. Nếu ACOS của một từ khóa vượt quá mục tiêu này, giá thầu sẽ được giảm. Nếu thấp hơn đáng kể, giá thầu có thể được tăng lên.">ACOS Mục tiêu (%)</label>
                     <input type="number" style={styles.input} value={config.targetAcos * 100} onChange={e => onChange('targetAcos', Number(e.target.value) / 100)} step="1" />
                 </div>
                 <div style={styles.formGroup}>
-                    <label style={styles.label} title="The number of past days of performance data (e.g., 7, 14, 30) the engine will analyze to make a decision.">Lookback Period (Days)</label>
+                    <label style={styles.label} title="Số ngày dữ liệu hiệu suất trong quá khứ (ví dụ: 7, 14, 30) mà hệ thống sẽ phân tích để đưa ra quyết định.">Khoảng thời gian (Ngày)</label>
                     <input type="number" style={styles.input} value={config.lookbackDays} onChange={e => onChange('lookbackDays', Number(e.target.value))} />
                 </div>
                 <div style={styles.formGroup}>
-                    <label style={styles.label} title="The keyword must have at least this many clicks in the lookback period to be considered for a bid adjustment. This prevents changes based on insufficient data.">Minimum Clicks</label>
+                    <label style={styles.label} title="Từ khóa phải có ít nhất số lượt nhấp này trong khoảng thời gian nhìn lại để được xem xét điều chỉnh giá thầu. Điều này ngăn chặn các thay đổi dựa trên dữ liệu không đủ.">Lượt nhấp Tối thiểu</label>
                     <input type="number" style={styles.input} value={config.minClicks} onChange={e => onChange('minClicks', Number(e.target.value))} />
                 </div>
             </div>
         </div>
         <div style={styles.formSection}>
-            <h4 style={styles.formSectionTitle}>Actions (THEN)</h4>
+            <h4 style={styles.formSectionTitle}>Hành động (THEN)</h4>
              <div style={styles.formGrid}>
                  <div style={styles.formGroup}>
-                    <label style={styles.label} title="The percentage to increase the bid if the keyword is performing well below the Target ACOS.">Increase Bid By (%)</label>
+                    <label style={styles.label} title="Phần trăm tăng giá thầu nếu từ khóa đang hoạt động tốt với ACOS thấp hơn nhiều so với ACOS Mục tiêu.">Tăng giá thầu (%)</label>
                     <input type="number" style={styles.input} value={config.bidUpPct} onChange={e => onChange('bidUpPct', Number(e.target.value))} />
                 </div>
                  <div style={styles.formGroup}>
-                    <label style={styles.label} title="The percentage to decrease the bid if the keyword's ACOS is too high.">Decrease Bid By (%)</label>
+                    <label style={styles.label} title="Phần trăm giảm giá thầu nếu ACOS của từ khóa quá cao.">Giảm giá thầu (%)</label>
                     <input type="number" style={styles.input} value={config.bidDownPct} onChange={e => onChange('bidDownPct', Number(e.target.value))} />
                 </div>
             </div>
         </div>
          <div style={styles.formSection}>
-            <h4 style={styles.formSectionTitle}>Safeguards</h4>
+            <h4 style={styles.formSectionTitle}>Giới hạn An toàn</h4>
              <div style={styles.formGrid}>
                  <div style={styles.formGroup}>
-                    <label style={styles.label} title="The smallest monetary amount a bid can be changed by in a single adjustment. Prevents tiny, insignificant changes (e.g., $0.01).">Min Bid Step ($)</label>
+                    <label style={styles.label} title="Mức thay đổi giá thầu tối thiểu (bằng tiền) trong một lần điều chỉnh. Ngăn chặn các thay đổi nhỏ, không đáng kể (ví dụ: $0.01).">Bước nhảy Tối thiểu ($)</label>
                     <input type="number" style={styles.input} value={config.minStep} onChange={e => onChange('minStep', Number(e.target.value))} step="0.01" />
                 </div>
                  <div style={styles.formGroup}>
-                    <label style={styles.label} title="The largest monetary amount a bid can be changed by in a single adjustment. This prevents drastic, risky changes.">Max Bid Step ($)</label>
+                    <label style={styles.label} title="Mức thay đổi giá thầu tối đa (bằng tiền) trong một lần điều chỉnh. Điều này ngăn chặn các thay đổi đột ngột, rủi ro.">Bước nhảy Tối đa ($)</label>
                     <input type="number" style={styles.input} value={config.maxStep} onChange={e => onChange('maxStep', Number(e.target.value))} step="0.01" />
                 </div>
                  <div style={styles.formGroup}>
-                    <label style={styles.label} title="The number of hours the engine must wait before re-evaluating the same keyword after an adjustment has been made. This allows time to gather new performance data.">Cooldown (Hours)</label>
+                    <label style={styles.label} title="Số giờ mà hệ thống phải chờ trước khi đánh giá lại cùng một từ khóa sau khi đã điều chỉnh. Điều này cho phép có thời gian thu thập dữ liệu hiệu suất mới.">Thời gian chờ (Giờ)</label>
                     <input type="number" style={styles.input} value={config.cooldownHours} onChange={e => onChange('cooldownHours', Number(e.target.value))} />
                 </div>
             </div>
@@ -414,33 +414,33 @@ const BidAdjustmentForm = ({ config, onChange }) => (
 const SearchTermForm = ({ config, onChange }) => (
     <>
        <div style={styles.formSection}>
-            <h4 style={styles.formSectionTitle}>General</h4>
+            <h4 style={styles.formSectionTitle}>Chung</h4>
             <div style={styles.formGrid}>
                  <div style={styles.formGroup}>
-                    <label style={styles.label} title="The number of past days of performance data the engine will analyze to evaluate search terms.">Lookback Period (Days)</label>
+                    <label style={styles.label} title="Số ngày dữ liệu hiệu suất trong quá khứ mà hệ thống sẽ phân tích để đánh giá các cụm từ tìm kiếm (search term).">Khoảng thời gian (Ngày)</label>
                     <input type="number" style={styles.input} value={config.lookbackDays} onChange={e => onChange('lookbackDays', Number(e.target.value))} />
                 </div>
                 <div style={styles.formGroup}>
-                    <label style={styles.label} title="The number of hours the engine must wait before re-evaluating the same search term after an action has been taken.">Cooldown (Hours)</label>
+                    <label style={styles.label} title="Số giờ mà hệ thống phải chờ trước khi đánh giá lại cùng một cụm từ tìm kiếm sau khi đã thực hiện một hành động.">Thời gian chờ (Giờ)</label>
                     <input type="number" style={styles.input} value={config.cooldownHours} onChange={e => onChange('cooldownHours', Number(e.target.value))} />
                 </div>
             </div>
        </div>
        <div style={styles.formSection}>
-            <h4 style={styles.formSectionTitle}>Negative Keyword Action</h4>
+            <h4 style={styles.formSectionTitle}>Hành động Phủ định</h4>
             <div style={styles.formGrid}>
-                <div style={styles.formGroup}><label style={styles.label} title="The search term must have at least this many clicks with zero orders to be considered for negation.">Min Clicks</label><input type="number" style={styles.input} value={config.negative.minClicks} onChange={e => onChange('negative.minClicks', Number(e.target.value))} /></div>
-                <div style={styles.formGroup}><label style={styles.label} title="The search term must have spent more than this amount with zero orders to be considered for negation.">Max Spend ($)</label><input type="number" step="0.01" style={styles.input} value={config.negative.maxSpend} onChange={e => onChange('negative.maxSpend', Number(e.target.value))} /></div>
-                <div style={styles.formGroup}><label style={styles.label} title="This must be 0. The rule only negates terms that have produced no orders.">Min Orders (must be 0)</label><input type="number" style={styles.input} value={0} disabled /></div>
-                <div style={styles.formGroup}><label style={styles.label} title="The match type (Negative Exact or Negative Phrase) to use when creating the negative keyword.">Match Type</label><select style={styles.input} value={config.negative.matchType} onChange={e => onChange('negative.matchType', e.target.value)}><option value="NEGATIVE_EXACT">Negative Exact</option><option value="NEGATIVE_PHRASE">Negative Phrase</option></select></div>
+                <div style={styles.formGroup}><label style={styles.label} title="Cụm từ tìm kiếm phải có ít nhất số lượt nhấp này và không có đơn hàng nào để được xem xét phủ định.">Lượt nhấp Tối thiểu</label><input type="number" style={styles.input} value={config.negative.minClicks} onChange={e => onChange('negative.minClicks', Number(e.target.value))} /></div>
+                <div style={styles.formGroup}><label style={styles.label} title="Cụm từ tìm kiếm phải chi tiêu nhiều hơn số tiền này và không có đơn hàng nào để được xem xét phủ định.">Chi tiêu Tối đa ($)</label><input type="number" step="0.01" style={styles.input} value={config.negative.maxSpend} onChange={e => onChange('negative.maxSpend', Number(e.target.value))} /></div>
+                <div style={styles.formGroup}><label style={styles.label} title="Giá trị này phải là 0. Quy tắc chỉ phủ định các cụm từ không tạo ra đơn hàng nào.">Đơn hàng Tối thiểu (phải là 0)</label><input type="number" style={styles.input} value={0} disabled /></div>
+                <div style={styles.formGroup}><label style={styles.label} title="Loại đối sánh (Phủ định chính xác hoặc Phủ định cụm từ) sẽ được sử dụng khi tạo từ khóa phủ định.">Loại Đối sánh</label><select style={styles.input} value={config.negative.matchType} onChange={e => onChange('negative.matchType', e.target.value)}><option value="NEGATIVE_EXACT">Phủ định Chính xác</option><option value="NEGATIVE_PHRASE">Phủ định Cụm từ</option></select></div>
             </div>
        </div>
         <div style={styles.formSection}>
-            <h4 style={styles.formSectionTitle}>Promote to Keyword Action</h4>
+            <h4 style={styles.formSectionTitle}>Hành động Chuyển đổi thành Từ khóa</h4>
             <div style={styles.formGrid}>
-                <div style={styles.formGroup}><label style={styles.label} title="The search term must have at least this many orders to be considered for promotion to a new keyword.">Min Orders</label><input type="number" style={styles.input} value={config.promote.minOrders} onChange={e => onChange('promote.minOrders', Number(e.target.value))} /></div>
-                <div style={styles.formGroup}><label style={styles.label} title="The search term's ACOS must be below this threshold to be considered for promotion. This ensures only profitable terms are promoted.">Max ACOS (%)</label><input type="number" style={styles.input} value={config.promote.maxAcos * 100} onChange={e => onChange('promote.maxAcos', Number(e.target.value) / 100)} /></div>
-                <div style={styles.formGroup}><label style={styles.label} title="The bid that will be set for the newly created keyword.">Initial Bid ($)</label><input type="number" step="0.01" style={styles.input} value={config.promote.initialBid} onChange={e => onChange('promote.initialBid', Number(e.target.value))} /></div>
+                <div style={styles.formGroup}><label style={styles.label} title="Cụm từ tìm kiếm phải có ít nhất số đơn hàng này để được xem xét chuyển thành một từ khóa mới.">Đơn hàng Tối thiểu</label><input type="number" style={styles.input} value={config.promote.minOrders} onChange={e => onChange('promote.minOrders', Number(e.target.value))} /></div>
+                <div style={styles.formGroup}><label style={styles.label} title="ACOS của cụm từ tìm kiếm phải thấp hơn ngưỡng này để được xem xét chuyển đổi. Điều này đảm bảo chỉ những cụm từ có lợi nhuận mới được chuyển đổi.">ACOS Tối đa (%)</label><input type="number" style={styles.input} value={config.promote.maxAcos * 100} onChange={e => onChange('promote.maxAcos', Number(e.target.value) / 100)} /></div>
+                <div style={styles.formGroup}><label style={styles.label} title="Giá thầu sẽ được đặt cho từ khóa mới được tạo ra.">Giá thầu Ban đầu ($)</label><input type="number" step="0.01" style={styles.input} value={config.promote.initialBid} onChange={e => onChange('promote.initialBid', Number(e.target.value))} /></div>
             </div>
        </div>
     </>

@@ -66,6 +66,94 @@ const DEFAULT_SEARCH_TERM_RULE_CONFIG = {
     }
 };
 
+const RuleSamplesTab = () => {
+    const [activeSampleTab, setActiveSampleTab] = useState('bid');
+
+    const sampleStyles: { [key: string]: React.CSSProperties } = {
+        container: { padding: '20px 0' },
+        tabs: { display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' },
+        tabButton: { padding: '8px 16px', borderRadius: '20px', border: '1px solid var(--border-color)', background: 'none', cursor: 'pointer', fontSize: '0.9rem' },
+        tabButtonActive: { background: 'var(--primary-color)', color: 'white', borderColor: 'var(--primary-color)' },
+        grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' },
+        card: { backgroundColor: 'var(--card-background-color)', borderRadius: '8px', padding: '20px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '15px' },
+        cardTitle: { margin: '0 0 5px 0', fontSize: '1.2rem', color: 'var(--primary-color)', fontWeight: 600 },
+        cardSection: { margin: 0 },
+        cardSectionTitle: { fontWeight: 'bold', marginBottom: '5px', color: 'var(--text-color)', fontSize: '0.95rem' },
+        cardText: { margin: 0, lineHeight: 1.6, color: '#333', fontSize: '0.9rem' }
+    };
+
+    const bidSamples = [
+        {
+            title: "Quy tắc Bảo thủ: Cắt lỗ từ khóa ACOS cao",
+            description: "NẾU một từ khóa có ACOS > 40% VÀ có hơn 10 lượt nhấp trong 14 ngày qua, THÌ hệ thống sẽ GIẢM 15% giá thầu.",
+            hypothesis: "Từ từ giảm chi tiêu lãng phí cho các từ khóa không sinh lời mà không gây rủi ro sụt giảm doanh số đột ngột. Phù hợp cho các chiến dịch đã ổn định cần tối ưu lợi nhuận."
+        },
+        {
+            title: "Quy tắc Tấn công: Tăng tốc từ khóa hiệu quả",
+            description: "NẾU một từ khóa có ACOS < 15% VÀ có ít nhất 2 đơn hàng trong 14 ngày qua, THÌ hệ thống sẽ TĂNG 20% giá thầu để chiếm vị trí tốt hơn.",
+            hypothesis: "Nhanh chóng mở rộng phạm vi tiếp cận của các từ khóa đang hoạt động tốt để chiếm lĩnh thị phần và tối đa hóa doanh thu. Phù hợp cho giai đoạn ra mắt sản phẩm hoặc tăng trưởng mạnh."
+        },
+        {
+            title: "Quy tắc 'Mồi câu': Thúc đẩy từ khóa tiềm năng",
+            description: "NẾU một từ khóa có CTR (Tỷ lệ nhấp) > 0.5% VÀ có hơn 15 lượt nhấp nhưng CHƯA có đơn hàng, THÌ hệ thống sẽ TĂNG nhẹ giá thầu 10%.",
+            hypothesis: "Cho các từ khóa hứa hẹn (khách hàng quan tâm, nhấp nhiều) một cơ hội tốt hơn để chuyển đổi bằng cách cải thiện vị trí quảng cáo. Có thể giúp phát hiện những 'viên ngọc ẩn'."
+        }
+    ];
+
+    const searchTermSamples = [
+        {
+            title: "Quy tắc Dọn dẹp: Phủ định search term rác",
+            description: "NẾU một cụm từ tìm kiếm (search term) đã chi tiêu > $20 VÀ có > 15 lượt nhấp MÀ KHÔNG có đơn hàng nào trong 30 ngày qua, THÌ hệ thống sẽ tự động thêm nó làm từ khóa PHỦ ĐỊNH (chính xác).",
+            hypothesis: "Ngừng lãng phí ngân sách vào các cụm từ tìm kiếm rõ ràng không liên quan hoặc không có khả năng chuyển đổi, giúp ACOS chung của chiến dịch giảm xuống."
+        },
+        {
+            title: "Quy tắc Thu hoạch: Chuyển đổi search term thành từ khóa",
+            description: "NẾU một search term trong chiến dịch Tự động hoặc Rộng có > 2 đơn hàng VÀ ACOS < 30% trong 30 ngày qua, THÌ hệ thống sẽ tự động tạo một TỪ KHÓA mới (chính xác) từ search term đó.",
+            hypothesis: "Tìm ra các từ khóa mới, lợi nhuận cao trực tiếp từ hành vi tìm kiếm của khách hàng. Việc chuyển chúng thành từ khóa chính xác giúp kiểm soát giá thầu và ngân sách tốt hơn."
+        },
+        {
+            title: "Quy tắc Phòng vệ & Mở rộng",
+            description: "Giám sát các search term chứa tên thương hiệu. NẾU có một search term KHÔNG chứa tên thương hiệu nhưng lại tạo ra đơn hàng cho sản phẩm thương hiệu với ACOS tốt, THÌ chuyển nó thành từ khóa mới.",
+            hypothesis: "Đảm bảo khả năng hiển thị tối đa cho các tìm kiếm liên quan đến thương hiệu và nắm bắt các cơ hội từ khóa mới có liên quan gián tiếp, mở rộng tệp khách hàng."
+        }
+    ];
+
+    return (
+        <div style={sampleStyles.container}>
+            <h2 style={styles.contentTitle}>Ví dụ về các Quy tắc Tự động hóa</h2>
+            <p style={{color: '#555', marginTop: 0, marginBottom: '20px'}}>Sử dụng các mẫu này làm nguồn cảm hứng để xây dựng chiến lược tự động hóa của riêng bạn.</p>
+            <div style={sampleStyles.tabs}>
+                <button
+                    style={activeSampleTab === 'bid' ? {...sampleStyles.tabButton, ...sampleStyles.tabButtonActive} : sampleStyles.tabButton}
+                    onClick={() => setActiveSampleTab('bid')}>
+                    Mẫu Điều Chỉnh Giá Thầu
+                </button>
+                <button
+                    style={activeSampleTab === 'searchTerm' ? {...sampleStyles.tabButton, ...sampleStyles.tabButtonActive} : sampleStyles.tabButton}
+                    onClick={() => setActiveSampleTab('searchTerm')}>
+                    Mẫu Tự Động Hóa Search Term
+                </button>
+            </div>
+            <div style={sampleStyles.grid}>
+                {(activeSampleTab === 'bid' ? bidSamples : searchTermSamples).map(sample => (
+                    <div key={sample.title} style={sampleStyles.card}>
+                        <h3 style={sampleStyles.cardTitle}>{sample.title}</h3>
+                        <div style={sampleStyles.cardSection}>
+                            <p style={sampleStyles.cardSectionTitle}>Mô tả:</p>
+                            <p style={sampleStyles.cardText}>{sample.description}</p>
+                        </div>
+                        <div style={sampleStyles.cardSection}>
+                            <p style={sampleStyles.cardSectionTitle}>Giả thuyết:</p>
+                            <p style={sampleStyles.cardText}>{sample.hypothesis}</p>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+
 export function AutomationView() {
   const [activeTab, setActiveTab] = useState('bidAdjustment');
   const [rules, setRules] = useState([]);
@@ -144,9 +232,10 @@ export function AutomationView() {
         <button style={activeTab === 'bidAdjustment' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('bidAdjustment')}>Bid Adjustment Rules</button>
         <button style={activeTab === 'searchTerm' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('searchTerm')}>Search Term Automation</button>
         <button style={activeTab === 'history' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('history')}>Automation History</button>
+        <button style={activeTab === 'samples' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('samples')}>Rule Samples</button>
       </div>
       
-      {activeTab !== 'history' && (
+      {activeTab !== 'history' && activeTab !== 'samples' && (
           <div style={styles.contentHeader}>
               <h2 style={styles.contentTitle}>{activeTab === 'bidAdjustment' ? 'Bid Adjustment Rules' : 'Search Term Automation Rules'}</h2>
               <button style={styles.primaryButton} onClick={() => handleOpenModal()}>+ Create New Rule</button>
@@ -156,6 +245,7 @@ export function AutomationView() {
       {activeTab === 'bidAdjustment' && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} />}
       {activeTab === 'searchTerm' && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} />}
       {activeTab === 'history' && <LogsTab logs={logs} loading={loading.logs} />}
+      {activeTab === 'samples' && <RuleSamplesTab />}
       
       {isModalOpen && (
           <RuleBuilderModal 

@@ -10,7 +10,8 @@ async function evaluateBidAdjustmentRule(rule) {
     return { status: 'NO_ACTION', summary: 'Rule has no campaigns in scope.' };
   }
   
-  const timeWindows = [...new Set(config.conditions.map(c => c.timeWindow))];
+  const allConditions = config.conditionGroups.flat();
+  const timeWindows = [...new Set(allConditions.map(c => c.timeWindow))];
   let metricsQuery = `
     SELECT
         k.keyword_id,
@@ -54,13 +55,16 @@ async function evaluateBidAdjustmentRule(rule) {
   const updates = [];
 
   for (const kw of keywordMetrics) {
-    let allConditionsMet = true;
-    for (const condition of config.conditions) {
+    let isRuleTriggered = false;
+    for (const group of config.conditionGroups) {
+      let allConditionsInGroupMet = true;
+      for (const condition of group) {
         const spend = kw[`spend_${condition.timeWindow}d`];
         const sales = kw[`sales_${condition.timeWindow}d`];
         const orders = kw[`orders_${condition.timeWindow}d`];
         const clicks = kw[`clicks_${condition.timeWindow}d`];
-        const acos = sales > 0 ? spend / sales : Infinity;
+        // Handle ACOS: if sales are zero, ACOS is effectively infinite for ">" checks, and 0 for "<" checks
+        const acos = sales > 0 ? spend / sales : (condition.operator === '>' ? Infinity : 0);
 
         let metricValue;
         switch (condition.metric) {
@@ -79,12 +83,17 @@ async function evaluateBidAdjustmentRule(rule) {
         }
 
         if (!conditionMet) {
-            allConditionsMet = false;
-            break;
+            allConditionsInGroupMet = false;
+            break; // This AND group fails
         }
+      }
+      if (allConditionsInGroupMet) {
+        isRuleTriggered = true;
+        break; // This OR group is met, no need to check others
+      }
     }
 
-    if (allConditionsMet) {
+    if (isRuleTriggered) {
       const adjustmentPct = config.action.value || 0;
       let newBid = Number(kw.current_bid) * (1 + adjustmentPct / 100);
       newBid = Math.max(0.02, Number(newBid.toFixed(2)));
@@ -111,7 +120,8 @@ async function evaluateSearchTermRule(rule) {
     const campaignIds = scope.campaignIds || [];
     if (campaignIds.length === 0) return { status: 'NO_ACTION', summary: 'Rule has no campaigns in scope.' };
     
-    const timeWindows = [...new Set(config.conditions.map(c => c.timeWindow))];
+    const allConditions = config.conditionGroups.flat();
+    const timeWindows = [...new Set(allConditions.map(c => c.timeWindow))];
     let metricsQuery = `
         SELECT
             st.customer_search_term,
@@ -154,36 +164,43 @@ async function evaluateSearchTermRule(rule) {
     const negativesToAdd = [];
     
     for (const term of termMetrics) {
-        let allConditionsMet = true;
-        for (const condition of config.conditions) {
-            const spend = term[`spend_${condition.timeWindow}d`];
-            const sales = term[`sales_${condition.timeWindow}d`];
-            const orders = term[`orders_${condition.timeWindow}d`];
-            const clicks = term[`clicks_${condition.timeWindow}d`];
-            const acos = sales > 0 ? spend / sales : Infinity;
+        let isRuleTriggered = false;
+        for (const group of config.conditionGroups) {
+            let allConditionsInGroupMet = true;
+            for (const condition of group) {
+                const spend = term[`spend_${condition.timeWindow}d`];
+                const sales = term[`sales_${condition.timeWindow}d`];
+                const orders = term[`orders_${condition.timeWindow}d`];
+                const clicks = term[`clicks_${condition.timeWindow}d`];
+                const acos = sales > 0 ? spend / sales : (condition.operator === '>' ? Infinity : 0);
 
-            let metricValue;
-            switch (condition.metric) {
-                case 'spend': metricValue = spend; break;
-                case 'sales': metricValue = sales; break;
-                case 'acos': metricValue = acos; break;
-                case 'orders': metricValue = orders; break;
-                case 'clicks': metricValue = clicks; break;
-            }
+                let metricValue;
+                switch (condition.metric) {
+                    case 'spend': metricValue = spend; break;
+                    case 'sales': metricValue = sales; break;
+                    case 'acos': metricValue = acos; break;
+                    case 'orders': metricValue = orders; break;
+                    case 'clicks': metricValue = clicks; break;
+                }
 
-            let conditionMet = false;
-            switch (condition.operator) {
-                case '>': conditionMet = metricValue > condition.value; break;
-                case '<': conditionMet = metricValue < condition.value; break;
-                case '=': conditionMet = metricValue === condition.value; break;
+                let conditionMet = false;
+                switch (condition.operator) {
+                    case '>': conditionMet = metricValue > condition.value; break;
+                    case '<': conditionMet = metricValue < condition.value; break;
+                    case '=': conditionMet = metricValue === condition.value; break;
+                }
+                if (!conditionMet) {
+                    allConditionsInGroupMet = false;
+                    break;
+                }
             }
-            if (!conditionMet) {
-                allConditionsMet = false;
+             if (allConditionsInGroupMet) {
+                isRuleTriggered = true;
                 break;
             }
         }
 
-        if (allConditionsMet) {
+        if (isRuleTriggered) {
             negativesToAdd.push({
                 campaignId: term.campaign_id,
                 adGroupId: term.ad_group_id,
@@ -196,7 +213,7 @@ async function evaluateSearchTermRule(rule) {
     if (negativesToAdd.length > 0) {
         await amazonAdsApiRequest({
             method: 'post',
-            url: '/negativeKeywords', // Note: Corrected from /api/amazon/negativeKeywords to match the helper function's base URL logic
+            url: '/sp/negativeKeywords',
             profileId: profile_id,
             data: { negativeKeywords: negativesToAdd }
         });

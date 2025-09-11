@@ -75,24 +75,23 @@ export interface SummaryMetricsData {
 
 export interface AutomationRuleCondition {
     metric: 'spend' | 'sales' | 'acos' | 'orders' | 'clicks';
-    timeWindow: 14 | 30 | 60;
+    timeWindow: number; // Changed from 14 | 30 | 60 to number
     operator: '>' | '<' | '=';
     value: number;
 }
 
 export interface AutomationRuleAction {
     type: 'adjustBidPercent' | 'negateSearchTerm';
-    value?: number; // For bid adjustment percentage
+    value?: number; // For bid adjustment percentage (can be positive or negative)
     matchType?: 'NEGATIVE_EXACT' | 'NEGATIVE_PHRASE'; // For search term negation
 }
-
 
 export interface AutomationRule {
     id: number;
     name: string;
     rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION';
     config: {
-        conditions: AutomationRuleCondition[];
+        conditionGroups: AutomationRuleCondition[][]; // Replaced 'conditions' with 'conditionGroups' for AND/OR logic
         action: AutomationRuleAction;
     };
     scope: {

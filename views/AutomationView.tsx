@@ -36,7 +36,10 @@ const styles: { [key: string]: React.CSSProperties } = {
   th: { textAlign: 'left', padding: '8px', borderBottom: '1px solid var(--border-color)' },
   td: { padding: '8px', borderBottom: '1px solid var(--border-color)'},
   conditionRow: { display: 'grid', gridTemplateColumns: '1.5fr 1fr 0.5fr 1fr auto', gap: '10px', alignItems: 'center', marginBottom: '10px' },
-  addConditionButton: { alignSelf: 'flex-start', marginTop: '10px' }
+  conditionGroup: { border: '1px dashed #ccc', padding: '15px', borderRadius: '4px', marginBottom: '15px', position: 'relative' },
+  orDivider: { textAlign: 'center', fontWeight: 'bold', margin: '10px 0' },
+  andDivider: { fontSize: '0.8rem', fontWeight: 'bold', margin: '5px 0 5px 20px' },
+  removeGroupButton: { position: 'absolute', top: '-10px', right: '-10px', background: 'white', borderRadius: '50%' }
 };
 
 const getDefaultCondition = (): AutomationRuleCondition => ({
@@ -50,7 +53,7 @@ const getDefaultBidAdjustmentRule = (): Partial<AutomationRule> => ({
     name: '',
     rule_type: 'BID_ADJUSTMENT',
     config: {
-        conditions: [getDefaultCondition()],
+        conditionGroups: [[getDefaultCondition()]],
         action: { type: 'adjustBidPercent', value: -25 }
     },
     scope: { campaignIds: [] },
@@ -61,10 +64,10 @@ const getDefaultSearchTermRule = (): Partial<AutomationRule> => ({
     name: '',
     rule_type: 'SEARCH_TERM_AUTOMATION',
     config: {
-        conditions: [
+        conditionGroups: [[
             { metric: 'spend', timeWindow: 60, operator: '>', value: 15 },
             { metric: 'sales', timeWindow: 60, operator: '=', value: 0 },
-        ],
+        ]],
         action: { type: 'negateSearchTerm', matchType: 'NEGATIVE_EXACT' }
     },
     scope: { campaignIds: [] },
@@ -228,42 +231,54 @@ const LogsTab = ({ logs, loading }: { logs: any[], loading: boolean}) => (
 
 const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: AutomationRule | null, ruleType: string, onClose: () => void, onSave: (data: any) => void }) => {
     const [formData, setFormData] = useState<Partial<AutomationRule>>(() => {
-        if (rule) return JSON.parse(JSON.stringify(rule)); // Deep copy
+        if (rule) return JSON.parse(JSON.stringify(rule));
         return ruleType === 'bidAdjustment' ? getDefaultBidAdjustmentRule() : getDefaultSearchTermRule();
     });
+
+    const handleConditionChange = (groupIndex: number, condIndex: number, field: keyof AutomationRuleCondition, value: any) => {
+        setFormData(prev => {
+            const newGroups = JSON.parse(JSON.stringify(prev.config!.conditionGroups));
+            newGroups[groupIndex][condIndex][field] = value;
+            return { ...prev, config: { ...prev.config!, conditionGroups: newGroups } };
+        });
+    };
+
+    const addConditionToGroup = (groupIndex: number) => {
+        setFormData(prev => {
+            const newGroups = JSON.parse(JSON.stringify(prev.config!.conditionGroups));
+            newGroups[groupIndex].push(getDefaultCondition());
+            return { ...prev, config: { ...prev.config!, conditionGroups: newGroups } };
+        });
+    };
     
-    const handleConditionChange = (index: number, field: keyof AutomationRuleCondition, value: any) => {
-        setFormData(prev => {
-            const newConfig = { ...prev.config! };
-            const newConditions = [...newConfig.conditions];
-            newConditions[index] = { ...newConditions[index], [field]: value };
-            newConfig.conditions = newConditions;
-            return { ...prev, config: newConfig };
+    const removeCondition = (groupIndex: number, condIndex: number) => {
+         setFormData(prev => {
+            const newGroups = JSON.parse(JSON.stringify(prev.config!.conditionGroups));
+            newGroups[groupIndex].splice(condIndex, 1);
+            // If the group is now empty, remove the group itself
+            if (newGroups[groupIndex].length === 0) {
+                newGroups.splice(groupIndex, 1);
+            }
+            return { ...prev, config: { ...prev.config!, conditionGroups: newGroups } };
         });
     };
-
-    const addCondition = () => {
+    
+    const addConditionGroup = () => {
         setFormData(prev => {
-            const newConfig = { ...prev.config! };
-            newConfig.conditions = [...newConfig.conditions, getDefaultCondition()];
-            return { ...prev, config: newConfig };
+            const newGroups = [...prev.config!.conditionGroups, [getDefaultCondition()]];
+            return { ...prev, config: { ...prev.config!, conditionGroups: newGroups } };
         });
     };
-
-    const removeCondition = (index: number) => {
+    
+    const removeGroup = (groupIndex: number) => {
         setFormData(prev => {
-            const newConfig = { ...prev.config! };
-            const newConditions = newConfig.conditions.filter((_, i) => i !== index);
-            newConfig.conditions = newConditions;
-            return { ...prev, config: newConfig };
+            const newGroups = prev.config!.conditionGroups.filter((_, i) => i !== groupIndex);
+             return { ...prev, config: { ...prev.config!, conditionGroups: newGroups } };
         });
     };
-
+    
     const handleActionChange = (field: string, value: any) => {
-        setFormData(prev => {
-            const newConfig = { ...prev.config!, action: { ...prev.config!.action, [field]: value } };
-            return { ...prev, config: newConfig };
-        });
+        setFormData(prev => ({ ...prev, config: { ...prev.config!, action: { ...prev.config!.action, [field]: value } } }));
     };
 
     return (
@@ -277,31 +292,37 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                     </div>
 
                     <div style={styles.formSection}>
-                        <h4 style={styles.formSectionTitle}>IF (All conditions are met)</h4>
-                        {formData.config?.conditions.map((cond, index) => (
-                            <div key={index} style={styles.conditionRow}>
-                               <select style={styles.input} value={cond.metric} onChange={e => handleConditionChange(index, 'metric', e.target.value)}>
-                                    <option value="spend">Spend</option>
-                                    <option value="sales">Sales</option>
-                                    <option value="acos">ACOS</option>
-                                    <option value="orders">Orders</option>
-                                    <option value="clicks">Clicks</option>
-                                </select>
-                                <select style={styles.input} value={cond.timeWindow} onChange={e => handleConditionChange(index, 'timeWindow', Number(e.target.value))}>
-                                    <option value={14}>Last 14 Days</option>
-                                    <option value={30}>Last 30 Days</option>
-                                    <option value={60}>Last 60 Days</option>
-                                </select>
-                                <select style={styles.input} value={cond.operator} onChange={e => handleConditionChange(index, 'operator', e.target.value)}>
-                                    <option value=">">&gt;</option>
-                                    <option value="<">&lt;</option>
-                                    <option value="=">=</option>
-                                </select>
-                                <input type="number" step="0.01" style={styles.input} value={cond.value} onChange={e => handleConditionChange(index, 'value', Number(e.target.value))} required />
-                                <button type="button" onClick={() => removeCondition(index)} style={{...styles.button, ...styles.dangerButton}}>✕</button>
-                            </div>
+                        <h4 style={styles.formSectionTitle}>IF</h4>
+                        {formData.config?.conditionGroups.map((group, groupIndex) => (
+                           <React.Fragment key={groupIndex}>
+                                <div style={styles.conditionGroup}>
+                                    {group.map((cond, condIndex) => (
+                                        <React.Fragment key={condIndex}>
+                                            <div style={styles.conditionRow}>
+                                               <select style={styles.input} value={cond.metric} onChange={e => handleConditionChange(groupIndex, condIndex, 'metric', e.target.value)}>
+                                                    <option value="spend">Spend</option> <option value="sales">Sales</option> <option value="acos">ACOS</option>
+                                                    <option value="orders">Orders</option> <option value="clicks">Clicks</option>
+                                                </select>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                    <label style={{fontSize: '0.8rem'}}>in last</label>
+                                                    <input type="number" min="1" max="90" style={styles.input} value={cond.timeWindow} onChange={e => handleConditionChange(groupIndex, condIndex, 'timeWindow', Number(e.target.value))} required />
+                                                    <label style={{fontSize: '0.8rem'}}>days</label>
+                                                </div>
+                                                <select style={styles.input} value={cond.operator} onChange={e => handleConditionChange(groupIndex, condIndex, 'operator', e.target.value)}>
+                                                    <option value=">">&gt;</option> <option value="<">&lt;</option> <option value="=">=</option>
+                                                </select>
+                                                <input type="number" step="0.01" style={styles.input} value={cond.value} onChange={e => handleConditionChange(groupIndex, condIndex, 'value', Number(e.target.value))} required />
+                                                <button type="button" onClick={() => removeCondition(groupIndex, condIndex)} style={{...styles.button, ...styles.dangerButton}}>✕</button>
+                                            </div>
+                                            {condIndex < group.length - 1 && <div style={styles.andDivider}>AND</div>}
+                                        </React.Fragment>
+                                    ))}
+                                     <button type="button" onClick={() => addConditionToGroup(groupIndex)} style={{...styles.button, marginTop: '10px'}}>+ Add Condition (AND)</button>
+                                </div>
+                               {groupIndex < formData.config!.conditionGroups.length - 1 && <div style={styles.orDivider}>OR</div>}
+                           </React.Fragment>
                         ))}
-                        <button type="button" onClick={addCondition} style={{...styles.button, ...styles.addConditionButton}}>+ Add Condition</button>
+                        <button type="button" onClick={addConditionGroup} style={{...styles.button, marginTop: '15px'}}>+ Add Condition Group (OR)</button>
                     </div>
 
                     <div style={styles.formSection}>
@@ -310,11 +331,24 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                             <div style={{...styles.formGrid, gridTemplateColumns: '1fr 1fr'}}>
                                 <div style={styles.formGroup}>
                                     <label style={styles.label}>Action</label>
-                                    <input style={styles.input} value="Decrease Bid By" disabled />
+                                    <select style={styles.input} value={formData.config?.action.value! > 0 ? 'increase' : 'decrease'} 
+                                        onChange={e => {
+                                            const sign = e.target.value === 'increase' ? 1 : -1;
+                                            handleActionChange('value', sign * Math.abs(formData.config?.action.value || 0))
+                                        }}
+                                    >
+                                        <option value="decrease">Decrease Bid By</option>
+                                        <option value="increase">Increase Bid By</option>
+                                    </select>
                                 </div>
                                 <div style={styles.formGroup}>
                                     <label style={styles.label}>Value (%)</label>
-                                    <input type="number" style={styles.input} value={Math.abs(formData.config?.action.value || 0)} onChange={e => handleActionChange('value', -Math.abs(Number(e.target.value)))} />
+                                    <input type="number" style={styles.input} value={Math.abs(formData.config?.action.value || 0)} 
+                                        onChange={e => {
+                                            const sign = (formData.config?.action.value || -1) > 0 ? 1 : -1;
+                                            handleActionChange('value', sign * Math.abs(Number(e.target.value)))
+                                        }}
+                                    />
                                 </div>
                             </div>
                         )}

@@ -28,7 +28,7 @@ const styles: { [key: string]: React.CSSProperties } = {
   formSectionTitle: { fontWeight: 600, margin: '-15px 0 15px', padding: '0 5px', background: 'white', width: 'fit-content' },
   formGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
   formGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' },
-  label: { fontWeight: 500, fontSize: '0.9rem' },
+  label: { fontWeight: 500, fontSize: '0.9rem', cursor: 'help' },
   input: { padding: '10px', border: '1px solid var(--border-color)', borderRadius: '4px', fontSize: '1rem' },
   modalActions: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '30px' },
   logTable: { width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' },
@@ -275,15 +275,15 @@ const BidAdjustmentForm = ({ config, onChange }) => (
             <h4 style={styles.formSectionTitle}>Conditions (IF)</h4>
             <div style={styles.formGrid}>
                 <div style={styles.formGroup}>
-                    <label style={styles.label}>Target ACOS (%)</label>
+                    <label style={styles.label} title="The desired Advertising Cost of Sales. If a keyword's ACOS is above this target, its bid will be lowered. If it's significantly below, the bid may be raised.">Target ACOS (%)</label>
                     <input type="number" style={styles.input} value={config.targetAcos * 100} onChange={e => onChange('targetAcos', Number(e.target.value) / 100)} step="1" />
                 </div>
                 <div style={styles.formGroup}>
-                    <label style={styles.label}>Lookback Period (Days)</label>
+                    <label style={styles.label} title="The number of past days of performance data (e.g., 7, 14, 30) the engine will analyze to make a decision.">Lookback Period (Days)</label>
                     <input type="number" style={styles.input} value={config.lookbackDays} onChange={e => onChange('lookbackDays', Number(e.target.value))} />
                 </div>
                 <div style={styles.formGroup}>
-                    <label style={styles.label}>Minimum Clicks</label>
+                    <label style={styles.label} title="The keyword must have at least this many clicks in the lookback period to be considered for a bid adjustment. This prevents changes based on insufficient data.">Minimum Clicks</label>
                     <input type="number" style={styles.input} value={config.minClicks} onChange={e => onChange('minClicks', Number(e.target.value))} />
                 </div>
             </div>
@@ -292,11 +292,11 @@ const BidAdjustmentForm = ({ config, onChange }) => (
             <h4 style={styles.formSectionTitle}>Actions (THEN)</h4>
              <div style={styles.formGrid}>
                  <div style={styles.formGroup}>
-                    <label style={styles.label}>Increase Bid By (%)</label>
+                    <label style={styles.label} title="The percentage to increase the bid if the keyword is performing well below the Target ACOS.">Increase Bid By (%)</label>
                     <input type="number" style={styles.input} value={config.bidUpPct} onChange={e => onChange('bidUpPct', Number(e.target.value))} />
                 </div>
                  <div style={styles.formGroup}>
-                    <label style={styles.label}>Decrease Bid By (%)</label>
+                    <label style={styles.label} title="The percentage to decrease the bid if the keyword's ACOS is too high.">Decrease Bid By (%)</label>
                     <input type="number" style={styles.input} value={config.bidDownPct} onChange={e => onChange('bidDownPct', Number(e.target.value))} />
                 </div>
             </div>
@@ -305,15 +305,15 @@ const BidAdjustmentForm = ({ config, onChange }) => (
             <h4 style={styles.formSectionTitle}>Safeguards</h4>
              <div style={styles.formGrid}>
                  <div style={styles.formGroup}>
-                    <label style={styles.label}>Min Bid Step ($)</label>
+                    <label style={styles.label} title="The smallest monetary amount a bid can be changed by in a single adjustment. Prevents tiny, insignificant changes (e.g., $0.01).">Min Bid Step ($)</label>
                     <input type="number" style={styles.input} value={config.minStep} onChange={e => onChange('minStep', Number(e.target.value))} step="0.01" />
                 </div>
                  <div style={styles.formGroup}>
-                    <label style={styles.label}>Max Bid Step ($)</label>
+                    <label style={styles.label} title="The largest monetary amount a bid can be changed by in a single adjustment. This prevents drastic, risky changes.">Max Bid Step ($)</label>
                     <input type="number" style={styles.input} value={config.maxStep} onChange={e => onChange('maxStep', Number(e.target.value))} step="0.01" />
                 </div>
                  <div style={styles.formGroup}>
-                    <label style={styles.label}>Cooldown (Hours)</label>
+                    <label style={styles.label} title="The number of hours the engine must wait before re-evaluating the same keyword after an adjustment has been made. This allows time to gather new performance data.">Cooldown (Hours)</label>
                     <input type="number" style={styles.input} value={config.cooldownHours} onChange={e => onChange('cooldownHours', Number(e.target.value))} />
                 </div>
             </div>
@@ -327,11 +327,11 @@ const SearchTermForm = ({ config, onChange }) => (
             <h4 style={styles.formSectionTitle}>General</h4>
             <div style={styles.formGrid}>
                  <div style={styles.formGroup}>
-                    <label style={styles.label}>Lookback Period (Days)</label>
+                    <label style={styles.label} title="The number of past days of performance data the engine will analyze to evaluate search terms.">Lookback Period (Days)</label>
                     <input type="number" style={styles.input} value={config.lookbackDays} onChange={e => onChange('lookbackDays', Number(e.target.value))} />
                 </div>
                 <div style={styles.formGroup}>
-                    <label style={styles.label}>Cooldown (Hours)</label>
+                    <label style={styles.label} title="The number of hours the engine must wait before re-evaluating the same search term after an action has been taken.">Cooldown (Hours)</label>
                     <input type="number" style={styles.input} value={config.cooldownHours} onChange={e => onChange('cooldownHours', Number(e.target.value))} />
                 </div>
             </div>
@@ -339,18 +339,18 @@ const SearchTermForm = ({ config, onChange }) => (
        <div style={styles.formSection}>
             <h4 style={styles.formSectionTitle}>Negative Keyword Action</h4>
             <div style={styles.formGrid}>
-                <div style={styles.formGroup}><label style={styles.label}>Min Clicks</label><input type="number" style={styles.input} value={config.negative.minClicks} onChange={e => onChange('negative.minClicks', Number(e.target.value))} /></div>
-                <div style={styles.formGroup}><label style={styles.label}>Max Spend ($)</label><input type="number" step="0.01" style={styles.input} value={config.negative.maxSpend} onChange={e => onChange('negative.maxSpend', Number(e.target.value))} /></div>
-                <div style={styles.formGroup}><label style={styles.label}>Min Orders (must be 0)</label><input type="number" style={styles.input} value={0} disabled /></div>
-                <div style={styles.formGroup}><label style={styles.label}>Match Type</label><select style={styles.input} value={config.negative.matchType} onChange={e => onChange('negative.matchType', e.target.value)}><option value="NEGATIVE_EXACT">Negative Exact</option><option value="NEGATIVE_PHRASE">Negative Phrase</option></select></div>
+                <div style={styles.formGroup}><label style={styles.label} title="The search term must have at least this many clicks with zero orders to be considered for negation.">Min Clicks</label><input type="number" style={styles.input} value={config.negative.minClicks} onChange={e => onChange('negative.minClicks', Number(e.target.value))} /></div>
+                <div style={styles.formGroup}><label style={styles.label} title="The search term must have spent more than this amount with zero orders to be considered for negation.">Max Spend ($)</label><input type="number" step="0.01" style={styles.input} value={config.negative.maxSpend} onChange={e => onChange('negative.maxSpend', Number(e.target.value))} /></div>
+                <div style={styles.formGroup}><label style={styles.label} title="This must be 0. The rule only negates terms that have produced no orders.">Min Orders (must be 0)</label><input type="number" style={styles.input} value={0} disabled /></div>
+                <div style={styles.formGroup}><label style={styles.label} title="The match type (Negative Exact or Negative Phrase) to use when creating the negative keyword.">Match Type</label><select style={styles.input} value={config.negative.matchType} onChange={e => onChange('negative.matchType', e.target.value)}><option value="NEGATIVE_EXACT">Negative Exact</option><option value="NEGATIVE_PHRASE">Negative Phrase</option></select></div>
             </div>
        </div>
         <div style={styles.formSection}>
             <h4 style={styles.formSectionTitle}>Promote to Keyword Action</h4>
             <div style={styles.formGrid}>
-                <div style={styles.formGroup}><label style={styles.label}>Min Orders</label><input type="number" style={styles.input} value={config.promote.minOrders} onChange={e => onChange('promote.minOrders', Number(e.target.value))} /></div>
-                <div style={styles.formGroup}><label style={styles.label}>Max ACOS (%)</label><input type="number" style={styles.input} value={config.promote.maxAcos * 100} onChange={e => onChange('promote.maxAcos', Number(e.target.value) / 100)} /></div>
-                <div style={styles.formGroup}><label style={styles.label}>Initial Bid ($)</label><input type="number" step="0.01" style={styles.input} value={config.promote.initialBid} onChange={e => onChange('promote.initialBid', Number(e.target.value))} /></div>
+                <div style={styles.formGroup}><label style={styles.label} title="The search term must have at least this many orders to be considered for promotion to a new keyword.">Min Orders</label><input type="number" style={styles.input} value={config.promote.minOrders} onChange={e => onChange('promote.minOrders', Number(e.target.value))} /></div>
+                <div style={styles.formGroup}><label style={styles.label} title="The search term's ACOS must be below this threshold to be considered for promotion. This ensures only profitable terms are promoted.">Max ACOS (%)</label><input type="number" style={styles.input} value={config.promote.maxAcos * 100} onChange={e => onChange('promote.maxAcos', Number(e.target.value) / 100)} /></div>
+                <div style={styles.formGroup}><label style={styles.label} title="The bid that will be set for the newly created keyword.">Initial Bid ($)</label><input type="number" step="0.01" style={styles.input} value={config.promote.initialBid} onChange={e => onChange('promote.initialBid', Number(e.target.value))} /></div>
             </div>
        </div>
     </>

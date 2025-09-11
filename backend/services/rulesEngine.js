@@ -3,8 +3,8 @@ import cron from 'node-cron';
 import pool from '../db.js';
 import { amazonAdsApiRequest } from '../helpers/amazon-api.js';
 
-// Global variable to hold our scheduled tasks
-let scheduledTasks = {};
+// Global variable to hold the main ticker task
+let mainTask = null;
 
 // --- Logging Helper ---
 const logAction = async (rule, status, summary, details = {}) => {
@@ -13,6 +13,7 @@ const logAction = async (rule, status, summary, details = {}) => {
       `INSERT INTO automation_logs (rule_id, status, summary, details) VALUES ($1, $2, $3, $4)`,
       [rule.id, status, summary, details]
     );
+    console.log(`[RulesEngine] Logged action for rule "${rule.name}": ${summary}`);
   } catch (e) {
     console.error(`[RulesEngine] FATAL: Could not write to automation_logs table for rule ${rule.id}.`, e);
   }
@@ -20,47 +21,53 @@ const logAction = async (rule, status, summary, details = {}) => {
 
 // --- Data Fetching ---
 const getPerformanceData = async (rule) => {
-    // This function fetches data based on the maximum lookback period required by any condition in the rule.
     const allTimeWindows = rule.config.conditionGroups.flatMap(g => g.conditions.map(c => c.timeWindow));
     const maxLookbackDays = Math.max(...allTimeWindows, 1);
     
     const today = new Date();
     const startDate = new Date();
     startDate.setDate(today.getDate() - maxLookbackDays);
-    const splitDate = new Date();
-    splitDate.setDate(today.getDate() - 3);
+    const streamDataStartDate = new Date();
+    streamDataStartDate.setDate(today.getDate() - 3);
 
     const startDateStr = startDate.toISOString().split('T')[0];
-    const splitDateStr = splitDate.toISOString().split('T')[0];
+    const streamStartDateStr = streamDataStartDate.toISOString().split('T')[0];
 
-    const entityIdColumn = 'keyword_id'; 
-    const groupByColumns = 'keyword_id, keyword_text, customer_search_term, match_type';
-
+    // Determine the entity to group by based on the rule type
+    const isSearchTermRule = rule.rule_type === 'SEARCH_TERM_AUTOMATION';
+    const entityIdColumn = isSearchTermRule ? 'customer_search_term' : 'keyword_id';
+    const groupByColumns = isSearchTermRule
+        ? 'customer_search_term'
+        : 'keyword_id, keyword_text, match_type';
+    
+    // Build the query dynamically
     const query = `
         WITH combined_data AS (
+            -- Fetch historical data from the report table (older than 3 days)
             SELECT
-                campaign_id, ad_group_id, keyword_id, keyword_text, customer_search_term, match_type,
-                COALESCE(SUM(spend), SUM(cost), 0)::numeric AS spend,
-                COALESCE(SUM(sales_7d), 0)::numeric AS sales,
+                campaign_id, ad_group_id, ${groupByColumns},
+                COALESCE(SUM(COALESCE(spend, cost)), 0)::numeric AS spend,
+                COALESCE(SUM(COALESCE(sales_7d, 0)), 0)::numeric AS sales,
                 COALESCE(SUM(clicks), 0)::bigint AS clicks,
                 COALESCE(SUM(purchases_7d), 0)::bigint AS orders
             FROM sponsored_products_search_term_report
-            WHERE report_date >= $1 AND report_date < $2 AND keyword_id IS NOT NULL
-            GROUP BY 1, 2, 3, 4, 5, 6
+            WHERE report_date >= $1 AND report_date < $2 AND ${entityIdColumn} IS NOT NULL
+            GROUP BY campaign_id, ad_group_id, ${groupByColumns}
 
             UNION ALL
 
+            -- Fetch recent data from the stream events table (last 3 days)
             SELECT
-                (event_data->>'campaignId')::bigint, (event_data->>'adGroupId')::bigint,
-                (event_data->>'keywordId')::bigint, (event_data->>'keywordText'),
-                (event_data->>'searchTerm'), (event_data->>'matchType'),
+                (event_data->>'campaignId')::bigint,
+                (event_data->>'adGroupId')::bigint,
+                ${isSearchTermRule ? "(event_data->>'searchTerm')" : "(event_data->>'keywordId')::bigint, (event_data->>'keywordText'), (event_data->>'matchType')"},
                 SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END),
                 SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributedSales1d')::numeric ELSE 0 END),
                 SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END),
                 SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'conversions')::bigint ELSE 0 END)
             FROM raw_stream_events
-            WHERE (event_data->>'timeWindowStart')::timestamptz >= $2 AND (event_data->>'keywordId') IS NOT NULL
-            GROUP BY 1, 2, 3, 4, 5, 6
+            WHERE (event_data->>'timeWindowStart')::timestamptz >= $2 AND (event_data->>'${isSearchTermRule ? 'searchTerm' : 'keywordId'}') IS NOT NULL
+            GROUP BY 1, 2, ${isSearchTermRule ? "3" : "3, 4, 5"}
         )
         SELECT
             campaign_id, ad_group_id, ${groupByColumns},
@@ -69,14 +76,12 @@ const getPerformanceData = async (rule) => {
         FROM combined_data
         GROUP BY campaign_id, ad_group_id, ${groupByColumns};
     `;
-    
-    const { rows } = await pool.query(query, [startDateStr, splitDateStr]);
+
+    const { rows } = await pool.query(query, [startDateStr, streamStartDateStr]);
     
     const performanceMap = new Map();
-    const entityKey = rule.rule_type === 'SEARCH_TERM_AUTOMATION' ? 'customer_search_term' : 'keyword_id';
-
     for (const row of rows) {
-        const key = row[entityKey]?.toString();
+        const key = row[entityIdColumn]?.toString();
         if (!key) continue;
 
         if (!performanceMap.has(key)) {
@@ -86,7 +91,7 @@ const getPerformanceData = async (rule) => {
                 keywordId: row.keyword_id,
                 keywordText: row.keyword_text,
                 matchType: row.match_type,
-                metrics: { spend: 0, sales: 0, clicks: 0, orders: 0 }
+                metrics: { spend: 0, sales: 0, clicks: 0, orders: 0, acos: 0 }
             });
         }
         const entry = performanceMap.get(key);
@@ -94,11 +99,15 @@ const getPerformanceData = async (rule) => {
         entry.metrics.sales += parseFloat(row.total_sales || 0);
         entry.metrics.clicks += parseInt(row.total_clicks || 0, 10);
         entry.metrics.orders += parseInt(row.total_orders || 0, 10);
-        entry.metrics.acos = entry.metrics.sales > 0 ? entry.metrics.spend / entry.metrics.sales : 0;
     }
+    
+    // Calculate ACOS after summing everything up
+    performanceMap.forEach(entry => {
+        entry.metrics.acos = entry.metrics.sales > 0 ? entry.metrics.spend / entry.metrics.sales : 0;
+    });
+
     return performanceMap;
 };
-
 
 // --- Rule Evaluation Logic ---
 const checkCondition = (metricValue, operator, conditionValue) => {
@@ -111,32 +120,39 @@ const checkCondition = (metricValue, operator, conditionValue) => {
 };
 
 const evaluateBidAdjustmentRule = async (rule, performanceData) => {
-    const keywordsToEvaluate = [];
-    const targetsToEvaluate = [];
-    performanceData.forEach((data, id) => {
-        if (['BROAD', 'PHRASE', 'EXACT'].includes(data.matchType)) keywordsToEvaluate.push({ id, data });
-        else if (['TARGETING_EXPRESSION', 'TARGETING_EXPRESSION_PREDEFINED'].includes(data.matchType)) targetsToEvaluate.push({ id, data });
-    });
-
-    const bidUpdates = { keywords: [], targets: [] };
+    const keywordsToUpdate = [];
+    const targetsToUpdate = [];
     const changeLog = [];
 
-    if (keywordsToEvaluate.length > 0) {
-        const keywordIds = keywordsToEvaluate.map(k => k.id);
+    // Separate keywords and targets based on matchType
+    const keywordData = new Map();
+    const targetData = new Map();
+
+    performanceData.forEach((data, id) => {
+        if (['BROAD', 'PHRASE', 'EXACT'].includes(data.matchType?.toUpperCase())) {
+            keywordData.set(id, data);
+        } else {
+            targetData.set(id, data);
+        }
+    });
+
+    // Process Keywords
+    if (keywordData.size > 0) {
+        const keywordIds = Array.from(keywordData.keys());
         const { keywords: amazonKeywords } = await amazonAdsApiRequest({ method: 'post', url: '/sp/keywords/list', profileId: rule.profile_id, data: { keywordIdFilter: { include: keywordIds } } });
         const currentBids = new Map(amazonKeywords.map(kw => [kw.keywordId.toString(), kw.bid]));
         
-        for (const { id, data } of keywordsToEvaluate) {
+        for (const [id, data] of keywordData.entries()) {
             const currentBid = currentBids.get(id);
             if (typeof currentBid !== 'number') continue;
             for (const group of rule.config.conditionGroups) {
                 if (group.conditions.every(c => checkCondition(data.metrics[c.metric], c.operator, c.value))) {
                     const { value, minBid, maxBid } = group.action;
                     let newBid = parseFloat((currentBid * (1 + (value / 100))).toFixed(2));
-                    if (minBid !== undefined) newBid = Math.max(minBid, newBid);
-                    if (maxBid !== undefined) newBid = Math.min(maxBid, newBid);
+                    if (minBid !== undefined && minBid !== null) newBid = Math.max(minBid, newBid);
+                    if (maxBid !== undefined && maxBid !== null) newBid = Math.min(maxBid, newBid);
                     if (newBid !== currentBid) {
-                        bidUpdates.keywords.push({ keywordId: parseInt(id, 10), bid: newBid });
+                        keywordsToUpdate.push({ keywordId: parseInt(id, 10), bid: newBid });
                         changeLog.push({ type: 'Keyword', text: data.keywordText, oldBid: currentBid, newBid });
                     }
                     break;
@@ -145,21 +161,22 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         }
     }
 
-    if (targetsToEvaluate.length > 0) {
-        const targetIds = targetsToEvaluate.map(t => t.id);
+    // Process Targets (Product/Category Targeting)
+    if (targetData.size > 0) {
+        const targetIds = Array.from(targetData.keys());
         const { targets: amazonTargets } = await amazonAdsApiRequest({ method: 'post', url: '/sp/targets/list', profileId: rule.profile_id, data: { targetIdFilter: { include: targetIds } } });
         const currentBids = new Map(amazonTargets.map(t => [t.targetId.toString(), t.bid]));
-        for (const { id, data } of targetsToEvaluate) {
+        for (const [id, data] of targetData.entries()) {
             const currentBid = currentBids.get(id);
             if (typeof currentBid !== 'number') continue;
             for (const group of rule.config.conditionGroups) {
                 if (group.conditions.every(c => checkCondition(data.metrics[c.metric], c.operator, c.value))) {
                     const { value, minBid, maxBid } = group.action;
                     let newBid = parseFloat((currentBid * (1 + (value / 100))).toFixed(2));
-                    if (minBid !== undefined) newBid = Math.max(minBid, newBid);
-                    if (maxBid !== undefined) newBid = Math.min(maxBid, newBid);
+                    if (minBid !== undefined && minBid !== null) newBid = Math.max(minBid, newBid);
+                    if (maxBid !== undefined && maxBid !== null) newBid = Math.min(maxBid, newBid);
                     if (newBid !== currentBid) {
-                        bidUpdates.targets.push({ targetId: parseInt(id, 10), bid: newBid });
+                        targetsToUpdate.push({ targetId: parseInt(id, 10), bid: newBid });
                         changeLog.push({ type: 'Target', text: data.keywordText, oldBid: currentBid, newBid });
                     }
                     break;
@@ -168,8 +185,8 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         }
     }
     
-    if (bidUpdates.keywords.length > 0) await amazonAdsApiRequest({ method: 'put', url: '/sp/keywords', profileId: rule.profile_id, data: { keywords: bidUpdates.keywords } });
-    if (bidUpdates.targets.length > 0) await amazonAdsApiRequest({ method: 'put', url: '/sp/targets', profileId: rule.profile_id, data: { targets: bidUpdates.targets } });
+    if (keywordsToUpdate.length > 0) await amazonAdsApiRequest({ method: 'put', url: '/sp/keywords', profileId: rule.profile_id, data: { keywords: keywordsToUpdate } });
+    if (targetsToUpdate.length > 0) await amazonAdsApiRequest({ method: 'put', url: '/sp/targets', profileId: rule.profile_id, data: { targets: targetsToUpdate } });
     
     return changeLog;
 };
@@ -199,8 +216,38 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
     return changeLog;
 };
 
-// --- Main Engine Orchestrator ---
+// --- Helper to check if a rule is due to run ---
+const isRuleDue = (rule) => {
+    const { last_run_at, config } = rule;
+    const { frequency } = config;
 
+    if (!frequency || !frequency.unit || !frequency.value) {
+        console.warn(`[RulesEngine] Rule "${rule.name}" has invalid frequency config. Skipping.`);
+        return false;
+    }
+
+    if (!last_run_at) {
+        return true; // Never been run, so it's due.
+    }
+
+    const now = new Date();
+    const lastRun = new Date(last_run_at);
+    
+    let valueInMs;
+    const value = parseInt(frequency.value, 10);
+    switch (frequency.unit) {
+        case 'minutes': valueInMs = value * 60 * 1000; break;
+        case 'hours': valueInMs = value * 60 * 60 * 1000; break;
+        case 'days': valueInMs = value * 24 * 60 * 60 * 1000; break;
+        default: return false; // Invalid unit
+    }
+    
+    const nextRunTime = new Date(lastRun.getTime() + valueInMs);
+
+    return now >= nextRunTime;
+};
+
+// --- Core Execution Logic for a Single Rule ---
 const runSingleRule = async (rule) => {
     console.log(`[RulesEngine] ▶️  Running rule: "${rule.name}" (ID: ${rule.id})`);
     let client;
@@ -208,10 +255,11 @@ const runSingleRule = async (rule) => {
         client = await pool.connect();
         await client.query('BEGIN');
 
+        await client.query('UPDATE automation_rules SET last_run_at = NOW() WHERE id = $1', [rule.id]);
+
         const performanceData = await getPerformanceData(rule);
         if (performanceData.size === 0) {
             await logAction(rule, 'NO_ACTION', `No performance data found for the lookback period.`);
-            await client.query('UPDATE automation_rules SET last_run_at = NOW() WHERE id = $1', [rule.id]);
             await client.query('COMMIT');
             return;
         }
@@ -229,7 +277,6 @@ const runSingleRule = async (rule) => {
             await logAction(rule, 'NO_ACTION', 'Conditions were not met for any entity.');
         }
         
-        await client.query('UPDATE automation_rules SET last_run_at = NOW() WHERE id = $1', [rule.id]);
         await client.query('COMMIT');
 
     } catch (ruleError) {
@@ -241,51 +288,39 @@ const runSingleRule = async (rule) => {
     }
 };
 
-const generateCronPattern = ({ unit, value }) => {
-    value = Math.max(1, parseInt(value, 10)); // Ensure value is a positive integer
-    switch (unit) {
-        case 'minutes': return `*/${value} * * * *`;
-        case 'hours': return `0 */${value} * * *`;
-        case 'days': return `0 0 */${value} * *`;
-        default: return `0 * * * *`; // Default to hourly if invalid
+// --- Main ticker function that checks all rules ---
+const checkAndRunDueRules = async () => {
+    console.log(`[RulesEngine Tick] Ticking... checking for due rules.`);
+    try {
+        const { rows: activeRules } = await pool.query('SELECT * FROM automation_rules WHERE is_active = true');
+        
+        const dueRules = activeRules.filter(isRuleDue);
+
+        if (dueRules.length > 0) {
+            console.log(`[RulesEngine Tick] Found ${dueRules.length} due rule(s). Running them now.`);
+            await Promise.all(dueRules.map(runSingleRule));
+        } else {
+            console.log(`[RulesEngine Tick] No rules are due to run at this time.`);
+        }
+    } catch (error) {
+        console.error('[RulesEngine Tick] Error while checking for due rules:', error);
     }
 };
 
-export const startRulesEngine = async () => {
-  console.log('[RulesEngine] Initializing and scheduling all active rules...');
-  
-  // Stop any previously scheduled tasks
-  Object.values(scheduledTasks).forEach(task => task.stop());
-  scheduledTasks = {};
-
-  try {
-    const { rows: activeRules } = await pool.query('SELECT * FROM automation_rules WHERE is_active = true');
-    
-    if (activeRules.length === 0) {
-      console.log('[RulesEngine] No active rules found to schedule.');
-      return;
+// --- Engine Starter ---
+export const startRulesEngine = () => {
+    if (mainTask) {
+        mainTask.stop();
+        console.log('[RulesEngine] Stopped previous ticker.');
     }
-
-    activeRules.forEach(rule => {
-      const frequency = rule.config?.frequency;
-      if (frequency && frequency.unit && frequency.value) {
-        const cronPattern = generateCronPattern(frequency);
-        if (cron.validate(cronPattern)) {
-            const task = cron.schedule(cronPattern, () => runSingleRule(rule), {
-                scheduled: true,
-                timezone: "America/Phoenix"
-            });
-            scheduledTasks[rule.id] = task;
-            console.log(`[RulesEngine] ✔️  Scheduled rule "${rule.name}" (ID: ${rule.id}) with pattern: ${cronPattern}`);
-        } else {
-             console.error(`[RulesEngine] ❌ Invalid cron pattern '${cronPattern}' for rule "${rule.name}". Skipping.`);
-        }
-      } else {
-         console.warn(`[RulesEngine] ⚠️  Rule "${rule.name}" is active but has no valid frequency config. Skipping.`);
-      }
+    
+    console.log('[RulesEngine] Starting the main automation engine ticker (runs every minute).');
+    
+    mainTask = cron.schedule('* * * * *', checkAndRunDueRules, {
+        scheduled: true,
+        timezone: "America/Phoenix"
     });
-    console.log(`[RulesEngine] Initialization complete. ${Object.keys(scheduledTasks).length} rules are now running on their own schedules.`);
-  } catch (error) {
-      console.error('[RulesEngine] FATAL: Could not fetch rules from database to schedule tasks.', error);
-  }
+
+    // Run once on startup to catch any rules missed while the server was down.
+    checkAndRunDueRules();
 };

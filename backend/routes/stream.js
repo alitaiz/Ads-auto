@@ -53,8 +53,19 @@ router.post('/stream-ingest', checkApiKey, async (req, res) => {
         res.status(200).json({ message: `Successfully ingested ${successfulIngests} events.` });
     } catch (error) {
         if (client) await client.query('ROLLBACK');
-        console.error('[Stream Ingest] Error writing to PostgreSQL:', error);
-        res.status(500).json({ error: 'Failed to write data to database.' });
+
+        // Graceful handling for database errors
+        if (error.code === '42P01') { // undefined_table
+            console.error("[Stream Ingest] CRITICAL ERROR: The 'raw_stream_events' table is missing. Please run the database migration from '3.AMAZON_MARKETING_STREAM_GUIDE.md'.");
+        } else if (error.code === '42501') { // permission_denied
+             console.error("[Stream Ingest] CRITICAL ERROR: The application user does not have permission to write to 'raw_stream_events'. Please run the GRANT commands from '3.AMAZON_MARKETING_STREAM_GUIDE.md'.");
+        } else {
+            console.error('[Stream Ingest] Error writing to PostgreSQL:', error);
+        }
+        
+        // Acknowledge the request with a 200 to prevent Firehose from retrying and flooding logs.
+        // The actionable error is logged server-side for the administrator.
+        res.status(200).json({ message: "Acknowledged, but failed to process. Check backend logs for details." });
     } finally {
         if (client) client.release();
     }
@@ -97,8 +108,19 @@ router.get('/stream/metrics', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("[Server] Error fetching stream metrics:", error);
-        res.status(500).json({ error: "Could not fetch real-time data." });
+        const defaultMetrics = {
+            click_count: 0, total_spend: 0, total_orders: 0,
+            total_sales: 0, last_event_timestamp: null
+        };
+        // Graceful handling for missing table or permission errors
+        if (error.code === '42P01') { // undefined_table
+            console.warn("[Server] WARNING: The 'raw_stream_events' table does not exist. Returning zero metrics. Please run the necessary database migrations.");
+        } else if (error.code === '42501') { // permission_denied
+             console.warn("[Server] WARNING: The application user does not have permission to read from 'raw_stream_events'. Returning zero metrics. Please run the GRANT commands.");
+        } else {
+            console.error("[Server] Error fetching stream metrics:", error);
+        }
+        res.json(defaultMetrics);
     }
 });
 
@@ -111,9 +133,6 @@ router.get('/stream/campaign-metrics', async (req, res) => {
         return res.status(400).json({ error: 'startDate and endDate query parameters are required.' });
     }
 
-    // This ensures that the date range selected by the user is interpreted in a
-    // consistent timezone (e.g., US Pacific Time), rather than the server's UTC default.
-    // This resolves discrepancies where late-night events on day X would appear as day X+1.
     const reportingTimezone = 'America/Los_Angeles';
 
     try {
@@ -157,17 +176,12 @@ router.get('/stream/campaign-metrics', async (req, res) => {
         
         const metrics = result.rows
             .map(row => {
-                if (!row.campaignId) {
-                    return null;
-                }
+                if (!row.campaignId) return null;
                 const campaignIdNumber = Number(row.campaignId);
-
                 if (!campaignIdNumber || isNaN(campaignIdNumber)) {
                     console.warn(`[Stream Metrics] Filtering out invalid campaign ID from DB: ${row.campaignId}`);
                     return null;
                 }
-                
-                // Explicitly parse bigint/numeric fields to prevent issues with JS type coercion.
                 return {
                     campaignId: campaignIdNumber,
                     impressions: parseInt(row.impressions || '0', 10),
@@ -177,13 +191,20 @@ router.get('/stream/campaign-metrics', async (req, res) => {
                     sales: parseFloat(row.sales || '0'),
                 };
             })
-            .filter(Boolean); // This effectively removes all the null entries.
+            .filter(Boolean);
 
         res.json(metrics);
 
     } catch (error) {
-        console.error("[Server] Error fetching campaign stream metrics:", error);
-        res.status(500).json({ error: "Could not fetch real-time campaign data." });
+        // Graceful handling for missing table or permission errors
+        if (error.code === '42P01') { // undefined_table
+            console.warn("[Server] WARNING: The 'raw_stream_events' table does not exist. Returning empty metrics array. Please run the necessary database migrations.");
+        } else if (error.code === '42501') { // permission_denied
+             console.warn("[Server] WARNING: The application user does not have permission to read from 'raw_stream_events'. Returning empty metrics array. Please run the GRANT commands.");
+        } else {
+            console.error("[Server] Error fetching campaign stream metrics:", error);
+        }
+        res.json([]); // Return an empty array, which is valid JSON and won't crash the frontend.
     }
 });
 

@@ -22,26 +22,42 @@ const logAction = async (rule, status, summary, details = {}) => {
 
 
 /**
+ * A robust way to get "today's date string" in a specific timezone.
+ * Using 'en-CA' gives the desired YYYY-MM-DD format.
+ * @param {string} timeZone - The IANA timezone string (e.g., 'America/Los_Angeles').
+ * @returns {string} The local date string in YYYY-MM-DD format.
+ */
+const getLocalDateString = (timeZone) => {
+    const today = new Date();
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        timeZone,
+    });
+    return formatter.format(today);
+};
+
+
+/**
  * Calculates aggregated metrics from a list of daily data points for a specific lookback period.
+ * This function is now timezone-aware and robust.
  * @param {Array<object>} dailyData - Array of { date, spend, sales, clicks, orders }.
  * @param {number} lookbackDays - The number of days to look back (e.g., 7 for "last 7 days").
  * @returns {object} An object with aggregated metrics { spend, sales, clicks, orders, acos }.
  */
 const calculateMetricsForWindow = (dailyData, lookbackDays) => {
-    // Get today's date in the reporting timezone to establish a consistent "now".
-    const today = new Date(new Date().toLocaleString('en-US', { timeZone: REPORTING_TIMEZONE }));
-    today.setHours(0, 0, 0, 0);
+    const todayStr = getLocalDateString(REPORTING_TIMEZONE);
+    // Creates a date at UTC midnight, which is consistent with how `d.date` is created.
+    const today = new Date(todayStr);
 
     const startDate = new Date(today);
-    // "in last 7 days" includes today, so we go back 6 days from today.
+    // "in last 7 days" includes today, so go back (N-1) days.
     startDate.setDate(today.getDate() - (lookbackDays - 1));
 
     const filteredData = dailyData.filter(d => {
-        // The date from DB is already a Date object representing the correct day.
-        // We just need to zero out its time part for a clean comparison.
-        const recordDate = new Date(d.date);
-        recordDate.setHours(0, 0, 0, 0);
-        return recordDate >= startDate && recordDate <= today;
+        // d.date is already a Date object at UTC midnight. No need to modify it.
+        return d.date >= startDate && d.date <= today;
     });
 
     const totals = filteredData.reduce((acc, day) => {
@@ -62,13 +78,11 @@ const getPerformanceData = async (rule, campaignIds) => {
     const allTimeWindows = rule.config.conditionGroups.flatMap(g => g.conditions.map(c => c.timeWindow));
     const maxLookbackDays = Math.max(...allTimeWindows, 1);
     
-    const getTodayInReportingTimezone = () => new Date(new Date().toLocaleString('en-US', { timeZone: REPORTING_TIMEZONE }));
-
-    const today = getTodayInReportingTimezone();
-    today.setHours(0, 0, 0, 0);
+    const todayStr = getLocalDateString(REPORTING_TIMEZONE);
+    const today = new Date(todayStr); // UTC midnight
 
     const startDate = new Date(today);
-    startDate.setDate(today.getDate() - maxLookbackDays);
+    startDate.setDate(today.getDate() - (maxLookbackDays -1));
     
     const streamCutoffDate = new Date(today);
     streamCutoffDate.setDate(today.getDate() - 3);
@@ -98,7 +112,7 @@ const getPerformanceData = async (rule, campaignIds) => {
                 performance_date, entity_id, entity_type, entity_text, match_type,
                 campaign_id, ad_group_id, spend, sales, clicks, orders
             FROM (
-                -- Historical data: KEYWORDS ONLY, as it's the only type with a stable biddable ID.
+                -- Historical data: Both Keywords and Targets
                 SELECT
                     report_date AS performance_date,
                     keyword_id AS entity_id,
@@ -113,8 +127,28 @@ const getPerformanceData = async (rule, campaignIds) => {
                     COALESCE(purchases_7d, 0)::bigint AS orders
                 FROM sponsored_products_search_term_report
                 WHERE report_date >= $1 AND report_date < $2
-                  AND keyword_id IS NOT NULL
+                  AND keyword_id IS NOT NULL -- For keywords
                   ${campaignFilterClauseHistorical}
+                
+                UNION ALL
+
+                SELECT
+                    report_date AS performance_date,
+                    NULL AS entity_id, -- No stable target_id in this report
+                    'target' AS entity_type,
+                    targeting AS entity_text,
+                    match_type,
+                    campaign_id,
+                    ad_group_id,
+                    COALESCE(SUM(COALESCE(spend, cost, 0)))::numeric AS spend,
+                    COALESCE(SUM(COALESCE(sales_7d, 0)))::numeric AS sales,
+                    COALESCE(SUM(clicks), 0)::bigint AS clicks,
+                    COALESCE(SUM(purchases_7d), 0)::bigint AS orders
+                FROM sponsored_products_search_term_report
+                WHERE report_date >= $1 AND report_date < $2
+                  AND keyword_id IS NULL AND targeting IS NOT NULL -- For targets (auto/pat)
+                  ${campaignFilterClauseHistorical}
+                GROUP BY 1, 2, 3, 4, 5, 6, 7
 
                 UNION ALL
 
@@ -136,8 +170,7 @@ const getPerformanceData = async (rule, campaignIds) => {
                   AND (event_data->>'keywordId' IS NOT NULL OR event_data->>'targetId' IS NOT NULL)
                   ${campaignFilterClauseStream}
                 GROUP BY 1, 2, 3, 4, 5, 6, 7
-            ) AS daily_data
-            WHERE entity_id IS NOT NULL;
+            ) AS daily_data;
         `;
     } else { // SEARCH_TERM_AUTOMATION
          query = `
@@ -219,63 +252,101 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     const keywordData = new Map();
     const targetData = new Map();
 
-    performanceData.forEach((data) => {
-        if (data.entityId) {
-            if (data.entityType === 'keyword') keywordData.set(data.entityId.toString(), data);
-            else targetData.set(data.entityId.toString(), data);
+    performanceData.forEach((data, key) => {
+        if (data.entityType === 'keyword' && data.entityId) {
+             keywordData.set(data.entityId.toString(), data);
+        } else if (data.entityType === 'target') {
+            // Use the map key for targets, as entityId might be null for historical ones
+            targetData.set(key, data);
         }
     });
 
+    // --- Process Keywords ---
     if (keywordData.size > 0) {
         const keywordIds = Array.from(keywordData.keys());
         const { keywords: amazonKeywords } = await amazonAdsApiRequest({ method: 'post', url: '/sp/keywords/list', profileId: rule.profile_id, data: { keywordIdFilter: { include: keywordIds } } });
         const currentBids = new Map(amazonKeywords.map(kw => [kw.keywordId.toString(), kw.bid]));
         
         for (const [id, data] of keywordData.entries()) {
+            console.log(`\n[RulesEngine DBG] --- Evaluating Keyword: "${data.entityText}" (ID: ${id}) ---`);
             const currentBid = currentBids.get(id);
-            if (typeof currentBid !== 'number') continue;
-            for (const group of rule.config.conditionGroups) {
+            if (typeof currentBid !== 'number') {
+                console.log(`[RulesEngine DBG]   - Skipping: Could not find current bid via API.`);
+                continue;
+            }
+            console.log(`[RulesEngine DBG]   - Current Bid: $${currentBid}`);
+            
+            for (const [groupIndex, group] of rule.config.conditionGroups.entries()) {
+                console.log(`[RulesEngine DBG]   - Checking Condition Group #${groupIndex + 1}`);
                 const conditionsMet = group.conditions.every(c => {
+                    console.log(`[RulesEngine DBG]     - Condition: ${c.metric} ${c.operator} ${c.value} in last ${c.timeWindow} days`);
                     const metricsForWindow = calculateMetricsForWindow(data.dailyData, c.timeWindow);
+                    console.log(`[RulesEngine DBG]       Calculated metrics: spend=${metricsForWindow.spend.toFixed(2)}, sales=${metricsForWindow.sales.toFixed(2)}, orders=${metricsForWindow.orders}`);
                     const metricValue = metricsForWindow[c.metric];
-                    return checkCondition(metricValue, c.operator, c.value);
+                    const checkResult = checkCondition(metricValue, c.operator, c.value);
+                    console.log(`[RulesEngine DBG]       Check (${metricValue.toFixed(2)} ${c.operator} ${c.value}): ${checkResult ? 'MET' : 'NOT MET'}`);
+                    return checkResult;
                 });
 
                 if (conditionsMet) {
+                    console.log(`[RulesEngine DBG]   - SUCCESS: All conditions in Group #${groupIndex + 1} were met.`);
                     const { value, minBid, maxBid } = group.action;
                     let newBid = parseFloat((currentBid * (1 + (value / 100))).toFixed(2));
+                    console.log(`[RulesEngine DBG]     - Action: Change bid by ${value}%. Initial new bid: $${newBid}`);
                     if (minBid !== undefined && minBid !== null) newBid = Math.max(minBid, newBid);
                     if (maxBid !== undefined && maxBid !== null) newBid = Math.min(maxBid, newBid);
+                    console.log(`[RulesEngine DBG]     - Final new bid (after min/max): $${newBid}`);
+                    
                     if (newBid !== currentBid && newBid > 0.01) {
+                        console.log(`[RulesEngine DBG]   - DECISION: Adding keyword to update list.`);
                         keywordsToUpdate.push({ keywordId: parseInt(id, 10), bid: newBid });
                         changeLog.push({ type: 'Keyword', text: data.entityText, oldBid: currentBid, newBid });
+                    } else {
+                        console.log(`[RulesEngine DBG]   - DECISION: No change needed (new bid is same as old, or too low).`);
                     }
-                    break;
+                    break; // "First match wins"
+                } else {
+                     console.log(`[RulesEngine DBG]   - SKIPPED: Not all conditions in Group #${groupIndex + 1} were met.`);
                 }
             }
         }
     }
 
-    if (targetData.size > 0) {
-        const targetIds = Array.from(targetData.keys());
+    // --- Process Targets (from stream data with IDs) ---
+    const streamTargetsWithIds = new Map(Array.from(targetData.entries()).filter(([k,v]) => v.entityId));
+    if (streamTargetsWithIds.size > 0) {
+        const targetIds = Array.from(streamTargetsWithIds.values()).map(t => t.entityId);
         const { targetingClauses: amazonTargets } = await amazonAdsApiRequest({ method: 'post', url: '/sp/targets/list', profileId: rule.profile_id, data: { targetIdFilter: { include: targetIds } } });
         const currentBids = new Map(amazonTargets.map(t => [t.targetId.toString(), t.bid]));
-        for (const [id, data] of targetData.entries()) {
-            const currentBid = currentBids.get(id);
-            if (typeof currentBid !== 'number') continue;
-            for (const group of rule.config.conditionGroups) {
-                 const conditionsMet = group.conditions.every(c => {
-                    const metricsForWindow = calculateMetricsForWindow(data.dailyData, c.timeWindow);
-                    const metricValue = metricsForWindow[c.metric];
-                    return checkCondition(metricValue, c.operator, c.value);
-                });
 
+        for (const [key, data] of streamTargetsWithIds.entries()) {
+            const id = data.entityId.toString();
+            console.log(`\n[RulesEngine DBG] --- Evaluating Target: "${data.entityText}" (ID: ${id}) ---`);
+            const currentBid = currentBids.get(id);
+             if (typeof currentBid !== 'number') {
+                console.log(`[RulesEngine DBG]   - Skipping: Could not find current bid via API.`);
+                continue;
+            }
+            console.log(`[RulesEngine DBG]   - Current Bid: $${currentBid}`);
+             for (const [groupIndex, group] of rule.config.conditionGroups.entries()) {
+                console.log(`[RulesEngine DBG]   - Checking Condition Group #${groupIndex + 1}`);
+                const conditionsMet = group.conditions.every(c => {
+                    console.log(`[RulesEngine DBG]     - Condition: ${c.metric} ${c.operator} ${c.value} in last ${c.timeWindow} days`);
+                    const metricsForWindow = calculateMetricsForWindow(data.dailyData, c.timeWindow);
+                    console.log(`[RulesEngine DBG]       Calculated metrics: spend=${metricsForWindow.spend.toFixed(2)}, sales=${metricsForWindow.sales.toFixed(2)}, orders=${metricsForWindow.orders}`);
+                    const metricValue = metricsForWindow[c.metric];
+                    const checkResult = checkCondition(metricValue, c.operator, c.value);
+                    console.log(`[RulesEngine DBG]       Check (${metricValue.toFixed(2)} ${c.operator} ${c.value}): ${checkResult ? 'MET' : 'NOT MET'}`);
+                    return checkResult;
+                });
                 if (conditionsMet) {
+                    console.log(`[RulesEngine DBG]   - SUCCESS: All conditions in Group #${groupIndex + 1} were met.`);
                     const { value, minBid, maxBid } = group.action;
                     let newBid = parseFloat((currentBid * (1 + (value / 100))).toFixed(2));
                     if (minBid !== undefined && minBid !== null) newBid = Math.max(minBid, newBid);
                     if (maxBid !== undefined && maxBid !== null) newBid = Math.min(maxBid, newBid);
                     if (newBid !== currentBid && newBid > 0.01) {
+                         console.log(`[RulesEngine DBG]   - DECISION: Adding target to update list.`);
                         targetsToUpdate.push({ targetId: parseInt(id, 10), bid: newBid });
                         changeLog.push({ type: 'Target', text: `Target ID ${id}`, oldBid: currentBid, newBid });
                     }
@@ -285,8 +356,14 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         }
     }
     
-    if (keywordsToUpdate.length > 0) await amazonAdsApiRequest({ method: 'put', url: '/sp/keywords', profileId: rule.profile_id, data: { keywords: keywordsToUpdate } });
-    if (targetsToUpdate.length > 0) await amazonAdsApiRequest({ method: 'put', url: '/sp/targets', profileId: rule.profile_id, data: { targets: targetsToUpdate } });
+    if (keywordsToUpdate.length > 0) {
+        console.log(`[RulesEngine API] Sending ${keywordsToUpdate.length} keyword bid updates to Amazon.`);
+        await amazonAdsApiRequest({ method: 'put', url: '/sp/keywords', profileId: rule.profile_id, data: { keywords: keywordsToUpdate } });
+    }
+    if (targetsToUpdate.length > 0) {
+        console.log(`[RulesEngine API] Sending ${targetsToUpdate.length} target bid updates to Amazon.`);
+        await amazonAdsApiRequest({ method: 'put', url: '/sp/targets', profileId: rule.profile_id, data: { targets: targetsToUpdate } });
+    }
     
     return changeLog;
 };
@@ -296,25 +373,36 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
     const changeLog = [];
 
     for (const [searchTerm, data] of performanceData.entries()) {
-        for (const group of rule.config.conditionGroups) {
+        console.log(`\n[RulesEngine DBG] --- Evaluating Search Term: "${searchTerm}" ---`);
+        for (const [groupIndex, group] of rule.config.conditionGroups.entries()) {
+            console.log(`[RulesEngine DBG]   - Checking Condition Group #${groupIndex + 1}`);
             const conditionsMet = group.conditions.every(cond => {
+                console.log(`[RulesEngine DBG]     - Condition: ${cond.metric} ${cond.operator} ${cond.value} in last ${cond.timeWindow} days`);
                 const metricsForWindow = calculateMetricsForWindow(data.dailyData, cond.timeWindow);
+                console.log(`[RulesEngine DBG]       Calculated metrics: spend=${metricsForWindow.spend.toFixed(2)}, sales=${metricsForWindow.sales.toFixed(2)}, orders=${metricsForWindow.orders}`);
                 const metricValue = metricsForWindow[cond.metric];
-                return checkCondition(metricValue, cond.operator, cond.value);
+                const checkResult = checkCondition(metricValue, cond.operator, cond.value);
+                console.log(`[RulesEngine DBG]       Check (${metricValue.toFixed(2)} ${cond.operator} ${cond.value}): ${checkResult ? 'MET' : 'NOT MET'}`);
+                return checkResult;
             });
             if (conditionsMet) {
+                console.log(`[RulesEngine DBG]   - SUCCESS: All conditions met.`);
                 if (group.action.type === 'negateSearchTerm') {
+                    console.log(`[RulesEngine DBG]   - DECISION: Adding negative keyword to list.`);
                     negativeKeywordsToAdd.push({
                         campaignId: data.campaignId, adGroupId: data.adGroupId,
                         keywordText: searchTerm, matchType: group.action.matchType
                     });
                     changeLog.push({ searchTerm, campaignId: data.campaignId, matchType: group.action.matchType });
                 }
-                break;
+                break; // First match wins
+            } else {
+                 console.log(`[RulesEngine DBG]   - SKIPPED: Conditions not met.`);
             }
         }
     }
     if (negativeKeywordsToAdd.length > 0) {
+        console.log(`[RulesEngine API] Sending ${negativeKeywordsToAdd.length} negative keywords to Amazon.`);
         await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeKeywords', profileId: rule.profile_id, data: { negativeKeywords: negativeKeywordsToAdd } });
     }
     return changeLog;

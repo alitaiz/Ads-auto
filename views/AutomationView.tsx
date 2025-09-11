@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { AutomationRule } from '../types';
+import { AutomationRule, AutomationRuleCondition } from '../types';
 
 const styles: { [key: string]: React.CSSProperties } = {
   container: { maxWidth: '1200px', margin: '0 auto', padding: '20px' },
@@ -22,71 +22,54 @@ const styles: { [key: string]: React.CSSProperties } = {
   button: { padding: '8px 12px', border: '1px solid var(--border-color)', borderRadius: '4px', cursor: 'pointer', background: 'none' },
   dangerButton: { borderColor: 'var(--danger-color)', color: 'var(--danger-color)' },
   modalBackdrop: { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
-  modalContent: { backgroundColor: 'white', padding: '30px', borderRadius: 'var(--border-radius)', width: '90%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' },
+  modalContent: { backgroundColor: 'white', padding: '30px', borderRadius: 'var(--border-radius)', width: '90%', maxWidth: '800px', maxHeight: '90vh', overflowY: 'auto' },
   modalHeader: { fontSize: '1.5rem', marginBottom: '20px' },
   form: { display: 'flex', flexDirection: 'column', gap: '20px' },
   formSection: { border: '1px solid var(--border-color)', borderRadius: '4px', padding: '15px' },
   formSectionTitle: { fontWeight: 600, margin: '-15px 0 15px', padding: '0 5px', background: 'white', width: 'fit-content' },
   formGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
   formGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' },
-  label: { fontWeight: 500, fontSize: '0.9rem', cursor: 'help' },
+  label: { fontWeight: 500, fontSize: '0.9rem' },
   input: { padding: '10px', border: '1px solid var(--border-color)', borderRadius: '4px', fontSize: '1rem' },
   modalActions: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '30px' },
   logTable: { width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' },
   th: { textAlign: 'left', padding: '8px', borderBottom: '1px solid var(--border-color)' },
   td: { padding: '8px', borderBottom: '1px solid var(--border-color)'},
-  strategyDescription: { backgroundColor: '#f0f2f2', padding: '15px', borderRadius: '4px', margin: '10px 0', fontStyle: 'italic', color: '#333' }
+  conditionRow: { display: 'grid', gridTemplateColumns: '1.5fr 1fr 0.5fr 1fr auto', gap: '10px', alignItems: 'center', marginBottom: '10px' },
+  addConditionButton: { alignSelf: 'flex-start', marginTop: '10px' }
 };
 
-const DEFAULT_BID_RULE_CONFIG = {
-    targetAcos: 0.40,
-    lookbackDays: 14,
-    minClicks: 10,
-    bidUpPct: 15,
-    increaseThresholdPct: 50,
-    bidDownPct: 15,
-    minStep: 0.05,
-    maxStep: 0.25,
-    cooldownHours: 24,
-};
+const getDefaultCondition = (): AutomationRuleCondition => ({
+    metric: 'spend',
+    timeWindow: 60,
+    operator: '>',
+    value: 20
+});
 
-const DEFAULT_SEARCH_TERM_RULE_CONFIG = {
-    lookbackDays: 30,
-    cooldownHours: 72,
-    negative: {
-        enabled: true,
-        minClicks: 10,
-        maxSpend: 20.00,
-        minOrders: 0,
-        matchType: 'NEGATIVE_EXACT'
+const getDefaultBidAdjustmentRule = (): Partial<AutomationRule> => ({
+    name: '',
+    rule_type: 'BID_ADJUSTMENT',
+    config: {
+        conditions: [getDefaultCondition()],
+        action: { type: 'adjustBidPercent', value: -25 }
     },
-    promote: {
-        enabled: true,
-        minOrders: 2,
-        maxAcos: 0.35,
-        initialBid: 0.75
-    }
-};
+    scope: { campaignIds: [] },
+    is_active: true,
+});
 
-const BID_STRATEGIES = [
-    { id: 'custom', name: 'Custom Bid Rule' },
-    { id: 'BID_RULE_1', name: 'Strategy: High Spend, Zero Sales', description: 'If a keyword spends more than $20 in 60 days with no sales, reduce its bid by 25%.' },
-    { id: 'BID_RULE_2', name: 'Strategy: Consistently High ACOS', description: 'If a keyword spends > $20 in 60 days with an ACOS > 35%, AND its ACOS in the last 14 days is also > 35%, reduce its bid by 5%.' },
-    { id: 'BID_RULE_3', name: 'Strategy: Recent Underperformance', description: 'If a keyword had sales in the last 60 days but none in the last 14, AND has spent > $10 in the last 14 days, reduce its bid by 3%.' },
-    { id: 'BID_RULE_4', name: 'Strategy: Consistently Strong Performance', description: 'If ACOS over 60 days and 14 days is less than 20%, increase bid by 3%.' },
-    { id: 'BID_RULE_5', name: 'Strategy: Elite Performance', description: 'If ACOS over 60 days and 14 days is less than 15%, increase bid by 3%.' },
-    { id: 'BID_RULE_6', name: 'Strategy: Recent Improvement', description: 'If ACOS over 60 days was > 20% but has improved to < 15% in the last 14 days, increase bid by 3%.' },
-];
-
-const SEARCH_TERM_STRATEGIES = [
-    { id: 'custom', name: 'Custom Search Term Rule' },
-    { id: 'ST_RULE_1', name: 'Negative: High Spend, Zero Sales', description: 'If a search term spends more than $15 in 60 days with zero sales, add it as a negative exact match keyword.' },
-    { id: 'ST_RULE_2', name: 'Negative: High ACOS & Recent Bleeder', description: 'If a search term has ACOS > 30% over 60 days, AND has spent > $15 in the last 14 days with zero sales, add it as a negative exact match keyword.' },
-];
-
-const RuleSamplesTab = () => {
-    // ... (unchanged)
-};
+const getDefaultSearchTermRule = (): Partial<AutomationRule> => ({
+    name: '',
+    rule_type: 'SEARCH_TERM_AUTOMATION',
+    config: {
+        conditions: [
+            { metric: 'spend', timeWindow: 60, operator: '>', value: 15 },
+            { metric: 'sales', timeWindow: 60, operator: '=', value: 0 },
+        ],
+        action: { type: 'negateSearchTerm', matchType: 'NEGATIVE_EXACT' }
+    },
+    scope: { campaignIds: [] },
+    is_active: true,
+});
 
 
 export function AutomationView() {
@@ -171,10 +154,9 @@ export function AutomationView() {
         <button style={activeTab === 'bidAdjustment' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('bidAdjustment')}>Bid Adjustment Rules</button>
         <button style={activeTab === 'searchTerm' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('searchTerm')}>Search Term Automation</button>
         <button style={activeTab === 'history' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('history')}>Automation History</button>
-        {/* <button style={activeTab === 'samples' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('samples')}>Rule Samples</button> */}
       </div>
       
-      {activeTab !== 'history' && activeTab !== 'samples' && (
+      {activeTab !== 'history' && (
           <div style={styles.contentHeader}>
               <h2 style={styles.contentTitle}>{activeTab === 'bidAdjustment' ? 'Bid Adjustment Rules' : 'Search Term Automation Rules'}</h2>
               <button style={styles.primaryButton} onClick={() => handleOpenModal()}>+ Create New Rule</button>
@@ -184,7 +166,6 @@ export function AutomationView() {
       {activeTab === 'bidAdjustment' && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} />}
       {activeTab === 'searchTerm' && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} />}
       {activeTab === 'history' && <LogsTab logs={logs} loading={loading.logs} />}
-      {/* {activeTab === 'samples' && <RuleSamplesTab />} */}
       
       {isModalOpen && (
           <RuleBuilderModal 
@@ -247,46 +228,42 @@ const LogsTab = ({ logs, loading }: { logs: any[], loading: boolean}) => (
 
 const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: AutomationRule | null, ruleType: string, onClose: () => void, onSave: (data: any) => void }) => {
     const [formData, setFormData] = useState<Partial<AutomationRule>>(() => {
-        if (rule) return { ...rule };
-        const isBid = ruleType === 'bidAdjustment';
-        return {
-            name: '',
-            rule_type: isBid ? 'BID_ADJUSTMENT' : 'SEARCH_TERM_AUTOMATION',
-            config: {
-                strategyId: 'custom',
-                ...(isBid ? DEFAULT_BID_RULE_CONFIG : DEFAULT_SEARCH_TERM_RULE_CONFIG)
-            },
-            scope: { campaignIds: [] },
-            is_active: true,
-        };
+        if (rule) return JSON.parse(JSON.stringify(rule)); // Deep copy
+        return ruleType === 'bidAdjustment' ? getDefaultBidAdjustmentRule() : getDefaultSearchTermRule();
     });
     
-    const strategyId = formData.config?.strategyId || 'custom';
-    const strategies = ruleType === 'bidAdjustment' ? BID_STRATEGIES : SEARCH_TERM_STRATEGIES;
-    const currentStrategy = strategies.find(s => s.id === strategyId);
-
-    const handleConfigChange = (path: string, value: any) => {
+    const handleConditionChange = (index: number, field: keyof AutomationRuleCondition, value: any) => {
         setFormData(prev => {
-            const keys = path.split('.');
-            const newConfig = JSON.parse(JSON.stringify(prev.config)); // Deep copy
-            let current = newConfig;
-            for (let i = 0; i < keys.length - 1; i++) {
-                current = current[keys[i]];
-            }
-            current[keys[keys.length - 1]] = value;
+            const newConfig = { ...prev.config! };
+            const newConditions = [...newConfig.conditions];
+            newConditions[index] = { ...newConditions[index], [field]: value };
+            newConfig.conditions = newConditions;
             return { ...prev, config: newConfig };
         });
     };
 
-    const handleStrategyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const newStrategyId = e.target.value;
-        const newConfig = {
-            strategyId: newStrategyId,
-            ...(newStrategyId === 'custom' ? 
-                (ruleType === 'bidAdjustment' ? DEFAULT_BID_RULE_CONFIG : DEFAULT_SEARCH_TERM_RULE_CONFIG) 
-                : {})
-        };
-        setFormData(prev => ({ ...prev, config: newConfig }));
+    const addCondition = () => {
+        setFormData(prev => {
+            const newConfig = { ...prev.config! };
+            newConfig.conditions = [...newConfig.conditions, getDefaultCondition()];
+            return { ...prev, config: newConfig };
+        });
+    };
+
+    const removeCondition = (index: number) => {
+        setFormData(prev => {
+            const newConfig = { ...prev.config! };
+            const newConditions = newConfig.conditions.filter((_, i) => i !== index);
+            newConfig.conditions = newConditions;
+            return { ...prev, config: newConfig };
+        });
+    };
+
+    const handleActionChange = (field: string, value: any) => {
+        setFormData(prev => {
+            const newConfig = { ...prev.config!, action: { ...prev.config!.action, [field]: value } };
+            return { ...prev, config: newConfig };
+        });
     };
 
     return (
@@ -299,21 +276,64 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                         <input style={styles.input} value={formData.name} onChange={e => setFormData(p => ({...p, name: e.target.value}))} required />
                     </div>
 
-                    <div style={styles.formGroup}>
-                        <label style={styles.label}>Strategy</label>
-                        <select style={styles.input} value={strategyId} onChange={handleStrategyChange}>
-                            {strategies.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
+                    <div style={styles.formSection}>
+                        <h4 style={styles.formSectionTitle}>IF (All conditions are met)</h4>
+                        {formData.config?.conditions.map((cond, index) => (
+                            <div key={index} style={styles.conditionRow}>
+                               <select style={styles.input} value={cond.metric} onChange={e => handleConditionChange(index, 'metric', e.target.value)}>
+                                    <option value="spend">Spend</option>
+                                    <option value="sales">Sales</option>
+                                    <option value="acos">ACOS</option>
+                                    <option value="orders">Orders</option>
+                                    <option value="clicks">Clicks</option>
+                                </select>
+                                <select style={styles.input} value={cond.timeWindow} onChange={e => handleConditionChange(index, 'timeWindow', Number(e.target.value))}>
+                                    <option value={14}>Last 14 Days</option>
+                                    <option value={30}>Last 30 Days</option>
+                                    <option value={60}>Last 60 Days</option>
+                                </select>
+                                <select style={styles.input} value={cond.operator} onChange={e => handleConditionChange(index, 'operator', e.target.value)}>
+                                    <option value=">">&gt;</option>
+                                    <option value="<">&lt;</option>
+                                    <option value="=">=</option>
+                                </select>
+                                <input type="number" step="0.01" style={styles.input} value={cond.value} onChange={e => handleConditionChange(index, 'value', Number(e.target.value))} required />
+                                <button type="button" onClick={() => removeCondition(index)} style={{...styles.button, ...styles.dangerButton}}>✕</button>
+                            </div>
+                        ))}
+                        <button type="button" onClick={addCondition} style={{...styles.button, ...styles.addConditionButton}}>+ Add Condition</button>
                     </div>
 
-                    {currentStrategy && currentStrategy.id !== 'custom' && (
-                        <div style={styles.strategyDescription}>
-                            {currentStrategy.description}
-                        </div>
-                    )}
-                    
-                    {strategyId === 'custom' && ruleType === 'bidAdjustment' && <BidAdjustmentForm config={formData.config!} onChange={handleConfigChange} />}
-                    {strategyId === 'custom' && ruleType === 'searchTerm' && <SearchTermForm config={formData.config!} onChange={handleConfigChange} />}
+                    <div style={styles.formSection}>
+                        <h4 style={styles.formSectionTitle}>THEN</h4>
+                        {ruleType === 'bidAdjustment' && (
+                            <div style={{...styles.formGrid, gridTemplateColumns: '1fr 1fr'}}>
+                                <div style={styles.formGroup}>
+                                    <label style={styles.label}>Action</label>
+                                    <input style={styles.input} value="Decrease Bid By" disabled />
+                                </div>
+                                <div style={styles.formGroup}>
+                                    <label style={styles.label}>Value (%)</label>
+                                    <input type="number" style={styles.input} value={Math.abs(formData.config?.action.value || 0)} onChange={e => handleActionChange('value', -Math.abs(Number(e.target.value)))} />
+                                </div>
+                            </div>
+                        )}
+                         {ruleType === 'searchTerm' && (
+                            <div style={{...styles.formGrid, gridTemplateColumns: '1fr 1fr'}}>
+                                 <div style={styles.formGroup}>
+                                    <label style={styles.label}>Action</label>
+                                    <input style={styles.input} value="Create Negative Keyword" disabled />
+                                </div>
+                                <div style={styles.formGroup}>
+                                    <label style={styles.label}>Match Type</label>
+                                    <select style={styles.input} value={formData.config?.action.matchType} onChange={e => handleActionChange('matchType', e.target.value)}>
+                                        <option value="NEGATIVE_EXACT">Negative Exact</option>
+                                        <option value="NEGATIVE_PHRASE">Negative Phrase</option>
+                                    </select>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                     
                      <div style={{...styles.formGroup, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
                         <label style={styles.label}>Rule is Active</label>
@@ -329,90 +349,3 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
         </div>
     );
 };
-
-const BidAdjustmentForm = ({ config, onChange }: {config: any, onChange: (path: string, value: any) => void}) => (
-    <>
-        <div style={styles.formSection}>
-            <h4 style={styles.formSectionTitle}>Điều kiện (IF)</h4>
-            <div style={styles.formGrid}>
-                <div style={styles.formGroup}>
-                    <label style={styles.label} title="Chi phí quảng cáo trên doanh thu (ACOS) mục tiêu. Nếu ACOS của một từ khóa vượt quá mục tiêu này, giá thầu sẽ được giảm. Nếu thấp hơn đáng kể, giá thầu có thể được tăng lên.">ACOS Mục tiêu (%)</label>
-                    <input type="number" style={styles.input} value={config.targetAcos * 100} onChange={e => onChange('targetAcos', Number(e.target.value) / 100)} step="1" />
-                </div>
-                <div style={styles.formGroup}>
-                    <label style={styles.label} title="Số ngày dữ liệu hiệu suất trong quá khứ (ví dụ: 7, 14, 30) mà hệ thống sẽ phân tích để đưa ra quyết định.">Khoảng thời gian (Ngày)</label>
-                    <input type="number" style={styles.input} value={config.lookbackDays} onChange={e => onChange('lookbackDays', Number(e.target.value))} />
-                </div>
-                <div style={styles.formGroup}>
-                    <label style={styles.label} title="Từ khóa phải có ít nhất số lượt nhấp này trong khoảng thời gian nhìn lại để được xem xét điều chỉnh giá thầu. Điều này ngăn chặn các thay đổi dựa trên dữ liệu không đủ.">Lượt nhấp Tối thiểu</label>
-                    <input type="number" style={styles.input} value={config.minClicks} onChange={e => onChange('minClicks', Number(e.target.value))} />
-                </div>
-            </div>
-        </div>
-        <div style={styles.formSection}>
-            <h4 style={styles.formSectionTitle}>Hành động (THEN)</h4>
-             <div style={styles.formGrid}>
-                 <div style={styles.formGroup}>
-                    <label style={styles.label} title="Phần trăm tăng giá thầu nếu từ khóa đang hoạt động tốt với ACOS thấp hơn nhiều so với ACOS Mục tiêu.">Tăng giá thầu (%)</label>
-                    <input type="number" style={styles.input} value={config.bidUpPct} onChange={e => onChange('bidUpPct', Number(e.target.value))} />
-                </div>
-                 <div style={styles.formGroup}>
-                    <label style={styles.label} title="Phần trăm giảm giá thầu nếu ACOS của từ khóa quá cao.">Giảm giá thầu (%)</label>
-                    <input type="number" style={styles.input} value={config.bidDownPct} onChange={e => onChange('bidDownPct', Number(e.target.value))} />
-                </div>
-            </div>
-        </div>
-         <div style={styles.formSection}>
-            <h4 style={styles.formSectionTitle}>Giới hạn An toàn</h4>
-             <div style={styles.formGrid}>
-                 <div style={styles.formGroup}>
-                    <label style={styles.label} title="Mức thay đổi giá thầu tối thiểu (bằng tiền) trong một lần điều chỉnh. Ngăn chặn các thay đổi nhỏ, không đáng kể (ví dụ: $0.01).">Bước nhảy Tối thiểu ($)</label>
-                    <input type="number" style={styles.input} value={config.minStep} onChange={e => onChange('minStep', Number(e.target.value))} step="0.01" />
-                </div>
-                 <div style={styles.formGroup}>
-                    <label style={styles.label} title="Mức thay đổi giá thầu tối đa (bằng tiền) trong một lần điều chỉnh. Điều này ngăn chặn các thay đổi đột ngột, rủi ro.">Bước nhảy Tối đa ($)</label>
-                    <input type="number" style={styles.input} value={config.maxStep} onChange={e => onChange('maxStep', Number(e.target.value))} step="0.01" />
-                </div>
-                 <div style={styles.formGroup}>
-                    <label style={styles.label} title="Số giờ mà hệ thống phải chờ trước khi đánh giá lại cùng một từ khóa sau khi đã điều chỉnh. Điều này cho phép có thời gian thu thập dữ liệu hiệu suất mới.">Thời gian chờ (Giờ)</label>
-                    <input type="number" style={styles.input} value={config.cooldownHours} onChange={e => onChange('cooldownHours', Number(e.target.value))} />
-                </div>
-            </div>
-        </div>
-    </>
-);
-
-const SearchTermForm = ({ config, onChange }: {config: any, onChange: (path: string, value: any) => void}) => (
-    <>
-       <div style={styles.formSection}>
-            <h4 style={styles.formSectionTitle}>Chung</h4>
-            <div style={styles.formGrid}>
-                 <div style={styles.formGroup}>
-                    <label style={styles.label} title="Số ngày dữ liệu hiệu suất trong quá khứ mà hệ thống sẽ phân tích để đánh giá các cụm từ tìm kiếm (search term).">Khoảng thời gian (Ngày)</label>
-                    <input type="number" style={styles.input} value={config.lookbackDays} onChange={e => onChange('lookbackDays', Number(e.target.value))} />
-                </div>
-                <div style={styles.formGroup}>
-                    <label style={styles.label} title="Số giờ mà hệ thống phải chờ trước khi đánh giá lại cùng một cụm từ tìm kiếm sau khi đã thực hiện một hành động.">Thời gian chờ (Giờ)</label>
-                    <input type="number" style={styles.input} value={config.cooldownHours} onChange={e => onChange('cooldownHours', Number(e.target.value))} />
-                </div>
-            </div>
-       </div>
-       <div style={styles.formSection}>
-            <h4 style={styles.formSectionTitle}>Hành động Phủ định</h4>
-            <div style={styles.formGrid}>
-                <div style={styles.formGroup}><label style={styles.label} title="Cụm từ tìm kiếm phải có ít nhất số lượt nhấp này và không có đơn hàng nào để được xem xét phủ định.">Lượt nhấp Tối thiểu</label><input type="number" style={styles.input} value={config.negative.minClicks} onChange={e => onChange('negative.minClicks', Number(e.target.value))} /></div>
-                <div style={styles.formGroup}><label style={styles.label} title="Cụm từ tìm kiếm phải chi tiêu nhiều hơn số tiền này và không có đơn hàng nào để được xem xét phủ định.">Chi tiêu Tối đa ($)</label><input type="number" step="0.01" style={styles.input} value={config.negative.maxSpend} onChange={e => onChange('negative.maxSpend', Number(e.target.value))} /></div>
-                <div style={styles.formGroup}><label style={styles.label} title="Giá trị này phải là 0. Quy tắc chỉ phủ định các cụm từ không tạo ra đơn hàng nào.">Đơn hàng Tối thiểu (phải là 0)</label><input type="number" style={styles.input} value={0} disabled /></div>
-                <div style={styles.formGroup}><label style={styles.label} title="Loại đối sánh (Phủ định chính xác hoặc Phủ định cụm từ) sẽ được sử dụng khi tạo từ khóa phủ định.">Loại Đối sánh</label><select style={styles.input} value={config.negative.matchType} onChange={e => onChange('negative.matchType', e.target.value)}><option value="NEGATIVE_EXACT">Phủ định Chính xác</option><option value="NEGATIVE_PHRASE">Phủ định Cụm từ</option></select></div>
-            </div>
-       </div>
-        <div style={styles.formSection}>
-            <h4 style={styles.formSectionTitle}>Hành động Chuyển đổi thành Từ khóa</h4>
-            <div style={styles.formGrid}>
-                <div style={styles.formGroup}><label style={styles.label} title="Cụm từ tìm kiếm phải có ít nhất số đơn hàng này để được xem xét chuyển thành một từ khóa mới.">Đơn hàng Tối thiểu</label><input type="number" style={styles.input} value={config.promote.minOrders} onChange={e => onChange('promote.minOrders', Number(e.target.value))} /></div>
-                <div style={styles.formGroup}><label style={styles.label} title="ACOS của cụm từ tìm kiếm phải thấp hơn ngưỡng này để được xem xét chuyển đổi. Điều này đảm bảo chỉ những cụm từ có lợi nhuận mới được chuyển đổi.">ACOS Tối đa (%)</label><input type="number" style={styles.input} value={config.promote.maxAcos * 100} onChange={e => onChange('promote.maxAcos', Number(e.target.value) / 100)} /></div>
-                <div style={styles.formGroup}><label style={styles.label} title="Giá thầu sẽ được đặt cho từ khóa mới được tạo ra.">Giá thầu Ban đầu ($)</label><input type="number" step="0.01" style={styles.input} value={config.promote.initialBid} onChange={e => onChange('promote.initialBid', Number(e.target.value))} /></div>
-            </div>
-       </div>
-    </>
-);

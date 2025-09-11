@@ -73,13 +73,27 @@ export interface SummaryMetricsData {
     impressions: number;
 }
 
+export interface AutomationRuleCondition {
+    metric: 'spend' | 'sales' | 'acos' | 'orders' | 'clicks';
+    timeWindow: 14 | 30 | 60;
+    operator: '>' | '<' | '=';
+    value: number;
+}
+
+export interface AutomationRuleAction {
+    type: 'adjustBidPercent' | 'negateSearchTerm';
+    value?: number; // For bid adjustment percentage
+    matchType?: 'NEGATIVE_EXACT' | 'NEGATIVE_PHRASE'; // For search term negation
+}
+
+
 export interface AutomationRule {
     id: number;
     name: string;
     rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION';
     config: {
-        strategyId?: string; // e.g., 'BID_RULE_1'
-        [key: string]: any; // Keep it flexible for existing custom rules
+        conditions: AutomationRuleCondition[];
+        action: AutomationRuleAction;
     };
     scope: {
         campaignIds?: (number | string)[];

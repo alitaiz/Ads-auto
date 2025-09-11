@@ -1,276 +1,277 @@
 // backend/services/rulesEngine.js
+
+import cron from 'node-cron';
 import pool from '../db.js';
 import { amazonAdsApiRequest } from '../helpers/amazon-api.js';
 
-async function evaluateBidAdjustmentRule(rule) {
-  const { config, scope, profile_id } = rule;
-  const campaignIds = scope.campaignIds || [];
-
-  if (campaignIds.length === 0) {
-    return { status: 'NO_ACTION', summary: 'Rule has no campaigns in scope.' };
+// --- Logging Helper ---
+const logAction = async (rule, status, summary, details = {}) => {
+  try {
+    await pool.query(
+      `INSERT INTO automation_logs (rule_id, status, summary, details) VALUES ($1, $2, $3, $4)`,
+      [rule.id, status, summary, details]
+    );
+  } catch (e) {
+    console.error(`[RulesEngine] FATAL: Could not write to automation_logs table for rule ${rule.id}.`, e);
   }
-  
-  const allConditions = config.conditionGroups.flatMap(g => g.conditions);
-  const timeWindows = [...new Set(allConditions.map(c => c.timeWindow))];
-  let metricsQuery = `
-    SELECT
-        k.keyword_id,
-        k.current_bid
-  `;
-  const joins = [];
+};
 
-  timeWindows.forEach(tw => {
-    metricsQuery += `
-      , COALESCE(m${tw}.spend, 0)::float AS spend_${tw}d
-      , COALESCE(m${tw}.sales, 0)::float AS sales_${tw}d
-      , COALESCE(m${tw}.orders, 0)::bigint AS orders_${tw}d
-      , COALESCE(m${tw}.clicks, 0)::bigint AS clicks_${tw}d
-    `;
-    joins.push(`
-      LEFT JOIN (
-        SELECT
-            keyword_id,
-            SUM(COALESCE(spend, cost, 0)) AS spend,
-            SUM(COALESCE(sales_7d, seven_day_total_sales, 0)) AS sales,
-            SUM(COALESCE(purchases_7d, seven_day_total_orders, 0)) AS orders,
-            SUM(clicks) AS clicks
-        FROM sponsored_products_search_term_report
-        WHERE campaign_id = ANY($1::bigint[]) AND report_date >= (CURRENT_DATE - '${tw} days'::interval)
-        GROUP BY keyword_id
-      ) m${tw} ON k.keyword_id = m${tw}.keyword_id
-    `);
-  });
+// --- Data Fetching ---
 
-  metricsQuery += `
-    FROM (
-        SELECT keyword_id, MAX(keyword_bid) AS current_bid
-        FROM sponsored_products_search_term_report
-        WHERE campaign_id = ANY($1::bigint[]) AND keyword_bid IS NOT NULL
-        GROUP BY keyword_id
-    ) k
-    ${joins.join('\n')}
-  `;
+/**
+ * Fetches performance data for keywords or search terms using a hybrid strategy.
+ * This is the core data gathering function for the entire engine.
+ * @param {string} entityType - 'keyword' or 'searchTerm'
+ * @param {object} rule - The automation rule object to determine lookback periods.
+ * @returns {Promise<Map<string, object>>} - A map of entities with their aggregated performance metrics.
+ */
+const getPerformanceData = async (entityType, rule) => {
+    // Determine the maximum lookback period needed by analyzing all timeWindow values in the rule's conditions.
+    const allTimeWindows = rule.config.conditionGroups.flatMap(g => g.conditions.map(c => c.timeWindow));
+    const maxLookbackDays = Math.max(...allTimeWindows, 1);
 
-  const { rows: keywordMetrics } = await pool.query(metricsQuery, [campaignIds]);
-  const updates = [];
-
-  for (const kw of keywordMetrics) {
-    // "First Match Wins" logic: iterate through groups in order
-    for (const group of config.conditionGroups) {
-      let allConditionsInGroupMet = true;
-      for (const condition of group.conditions) {
-        const spend = kw[`spend_${condition.timeWindow}d`];
-        const sales = kw[`sales_${condition.timeWindow}d`];
-        const orders = kw[`orders_${condition.timeWindow}d`];
-        const clicks = kw[`clicks_${condition.timeWindow}d`];
-        const acos = sales > 0 ? spend / sales : (condition.operator === '>' ? Infinity : 0);
-
-        let metricValue;
-        switch (condition.metric) {
-            case 'spend': metricValue = spend; break;
-            case 'sales': metricValue = sales; break;
-            case 'acos': metricValue = acos; break;
-            case 'orders': metricValue = orders; break;
-            case 'clicks': metricValue = clicks; break;
-        }
-
-        let conditionMet = false;
-        switch (condition.operator) {
-            case '>': conditionMet = metricValue > condition.value; break;
-            case '<': conditionMet = metricValue < condition.value; break;
-            case '=': conditionMet = metricValue === condition.value; break;
-        }
-
-        if (!conditionMet) {
-            allConditionsInGroupMet = false;
-            break; 
-        }
-      }
-
-      if (allConditionsInGroupMet) {
-        // First group that matches triggers its action
-        const { action } = group;
-        const { value: adjustmentPct = 0, minBid, maxBid } = action;
-        let newBid = Number(kw.current_bid) * (1 + adjustmentPct / 100);
-
-        newBid = Number(newBid.toFixed(2));
-        if (minBid !== null && typeof minBid !== 'undefined') newBid = Math.max(newBid, minBid);
-        if (maxBid !== null && typeof maxBid !== 'undefined') newBid = Math.min(newBid, maxBid);
-        newBid = Math.max(0.02, Number(newBid.toFixed(2)));
-        
-        if (newBid !== Number(kw.current_bid)) {
-          updates.push({ keywordId: kw.keyword_id, bid: newBid });
-        }
-        // Break from the group loop for this keyword since we found a match
-        break; 
-      }
-    }
-  }
-
-  if (updates.length > 0) {
-    await amazonAdsApiRequest({
-      method: 'put', url: '/sp/keywords', profileId: profile_id,
-      data: { keywords: updates },
-    });
-    return { status: 'SUCCESS', summary: `Adjusted ${updates.length} keyword bids.` };
-  } else {
-    return { status: 'NO_ACTION', summary: 'No keywords met conditions in any group.' };
-  }
-}
-
-
-async function evaluateSearchTermRule(rule) {
-    const { config, scope, profile_id } = rule;
-    const campaignIds = scope.campaignIds || [];
-    if (campaignIds.length === 0) return { status: 'NO_ACTION', summary: 'Rule has no campaigns in scope.' };
+    const today = new Date();
+    const startDate = new Date();
+    startDate.setDate(today.getDate() - maxLookbackDays);
     
-    const allConditions = config.conditionGroups.flatMap(g => g.conditions);
-    const timeWindows = [...new Set(allConditions.map(c => c.timeWindow))];
-    let metricsQuery = `
-        SELECT
-            st.customer_search_term,
-            st.campaign_id,
-            st.ad_group_id
-    `;
-    const joins = [];
-    
-    timeWindows.forEach(tw => {
-        metricsQuery += `
-            , COALESCE(m${tw}.spend, 0)::float AS spend_${tw}d
-            , COALESCE(m${tw}.sales, 0)::float AS sales_${tw}d
-            , COALESCE(m${tw}.orders, 0)::bigint AS orders_${tw}d
-            , COALESCE(m${tw}.clicks, 0)::bigint AS clicks_${tw}d
-        `;
-        joins.push(`
-            LEFT JOIN (
-                SELECT customer_search_term, campaign_id, ad_group_id,
-                    SUM(COALESCE(spend, cost, 0)) AS spend,
-                    SUM(COALESCE(sales_7d, seven_day_total_sales, 0)) AS sales,
-                    SUM(COALESCE(purchases_7d, seven_day_total_orders, 0)) AS orders,
-                    SUM(clicks) AS clicks
-                FROM sponsored_products_search_term_report
-                WHERE campaign_id = ANY($1::bigint[]) AND report_date >= (CURRENT_DATE - '${tw} days'::interval)
-                GROUP BY customer_search_term, campaign_id, ad_group_id
-            ) m${tw} ON st.customer_search_term = m${tw}.customer_search_term AND st.campaign_id = m${tw}.campaign_id AND st.ad_group_id = m${tw}.ad_group_id
-        `);
-    });
+    // Data older than 3 days is considered stable and comes from reports.
+    const splitDate = new Date();
+    splitDate.setDate(today.getDate() - 3);
 
-    metricsQuery += `
-        FROM (
-            SELECT DISTINCT customer_search_term, campaign_id, ad_group_id
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const splitDateStr = splitDate.toISOString().split('T')[0];
+
+    // Determine which columns to group by based on whether we're analyzing keywords or search terms.
+    const entityColumns = {
+        keyword: { id: 'keyword_id', text: 'keyword_text', groupBy: 'keyword_id, keyword_text' },
+        searchTerm: { id: 'customer_search_term', text: 'customer_search_term', groupBy: 'customer_search_term' }
+    };
+    const entityConfig = entityColumns[entityType];
+
+    const query = `
+        WITH combined_data AS (
+            -- 1. Data from historical, aggregated reports (older than 3 days)
+            SELECT
+                campaign_id, ad_group_id, keyword_id, keyword_text, customer_search_term,
+                SUM(COALESCE(spend, cost, 0))::numeric AS spend,
+                SUM(COALESCE(sales_7d, 0))::numeric AS sales,
+                SUM(COALESCE(clicks, 0))::bigint AS clicks,
+                SUM(COALESCE(purchases_7d, 0))::bigint AS orders
             FROM sponsored_products_search_term_report
-            WHERE campaign_id = ANY($1::bigint[])
-        ) st
-        ${joins.join('\n')}
+            WHERE report_date >= $1 AND report_date < $2
+            GROUP BY 1, 2, 3, 4, 5
+
+            UNION ALL
+
+            -- 2. Data from real-time stream events (last 3 days)
+            SELECT
+                (event_data->>'campaignId')::bigint AS campaign_id,
+                (event_data->>'adGroupId')::bigint AS ad_group_id,
+                (event_data->>'keywordId')::bigint AS keyword_id,
+                (event_data->>'keywordText') AS keyword_text,
+                (event_data->>'searchTerm') AS customer_search_term,
+                SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END) AS spend,
+                SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributedSales1d')::numeric ELSE 0 END) AS sales,
+                SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END) AS clicks,
+                SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'conversions')::bigint ELSE 0 END) AS orders
+            FROM raw_stream_events
+            WHERE (event_data->>'timeWindowStart')::timestamptz >= $2
+            GROUP BY 1, 2, 3, 4, 5
+        ),
+        final_aggregation AS (
+            SELECT
+                campaign_id, ad_group_id, keyword_id, keyword_text, customer_search_term,
+                SUM(spend) AS spend, SUM(sales) AS sales, SUM(clicks) AS clicks, SUM(orders) AS orders
+            FROM combined_data
+            WHERE ${entityConfig.id} IS NOT NULL
+            GROUP BY 1, 2, 3, 4, 5
+        )
+        SELECT
+            campaign_id, ad_group_id, ${entityConfig.groupBy},
+            SUM(spend) AS total_spend, SUM(sales) AS total_sales,
+            SUM(clicks) AS total_clicks, SUM(orders) AS total_orders
+        FROM final_aggregation
+        WHERE ${entityConfig.id} IS NOT NULL
+        GROUP BY campaign_id, ad_group_id, ${entityConfig.groupBy};
     `;
 
-    const { rows: termMetrics } = await pool.query(metricsQuery, [campaignIds]);
-    const negativesToAdd = [];
-    const processedTerms = new Set();
-    
-    for (const term of termMetrics) {
-        const termIdentifier = `${term.campaign_id}-${term.ad_group_id}-${term.customer_search_term}`;
-        if (processedTerms.has(termIdentifier)) continue;
+    const { rows } = await pool.query(query, [startDateStr, splitDateStr]);
 
-        for (const group of config.conditionGroups) {
-            let allConditionsInGroupMet = true;
-            for (const condition of group.conditions) {
-                const spend = term[`spend_${condition.timeWindow}d`];
-                const sales = term[`sales_${condition.timeWindow}d`];
-                const orders = term[`orders_${condition.timeWindow}d`];
-                const clicks = term[`clicks_${condition.timeWindow}d`];
-                const acos = sales > 0 ? spend / sales : (condition.operator === '>' ? Infinity : 0);
+    const performanceMap = new Map();
+    for (const row of rows) {
+        const key = (entityType === 'keyword' ? row.keyword_id : row.customer_search_term)?.toString();
+        if (!key) continue;
 
-                let metricValue;
-                switch (condition.metric) {
-                    case 'spend': metricValue = spend; break;
-                    case 'sales': metricValue = sales; break;
-                    case 'acos': metricValue = acos; break;
-                    case 'orders': metricValue = orders; break;
-                    case 'clicks': metricValue = clicks; break;
-                }
-
-                let conditionMet = false;
-                switch (condition.operator) {
-                    case '>': conditionMet = metricValue > condition.value; break;
-                    case '<': conditionMet = metricValue < condition.value; break;
-                    case '=': conditionMet = metricValue === condition.value; break;
-                }
-                if (!conditionMet) {
-                    allConditionsInGroupMet = false;
-                    break;
-                }
+        performanceMap.set(key, {
+            campaignId: row.campaign_id,
+            adGroupId: row.ad_group_id,
+            keywordId: row.keyword_id,
+            keywordText: row.keyword_text,
+            searchTerm: row.customer_search_term,
+            metrics: {
+                spend: parseFloat(row.total_spend || 0),
+                sales: parseFloat(row.total_sales || 0),
+                clicks: parseInt(row.total_clicks || 0, 10),
+                orders: parseInt(row.total_orders || 0, 10),
+                acos: parseFloat(row.total_sales) > 0 ? parseFloat(row.total_spend) / parseFloat(row.total_sales) : 0,
             }
-             if (allConditionsInGroupMet) {
-                negativesToAdd.push({
-                    campaignId: term.campaign_id,
-                    adGroupId: term.ad_group_id,
-                    keywordText: term.customer_search_term,
-                    matchType: group.action.matchType || 'NEGATIVE_EXACT',
-                });
-                processedTerms.add(termIdentifier);
-                break; // First match wins
-            }
-        }
-    }
-    
-    if (negativesToAdd.length > 0) {
-        await amazonAdsApiRequest({
-            method: 'post',
-            url: '/sp/negativeKeywords',
-            profileId: profile_id,
-            data: { negativeKeywords: negativesToAdd }
         });
-        return { status: 'SUCCESS', summary: `Added ${negativesToAdd.length} negative keywords.` };
     }
-    return { status: 'NO_ACTION', summary: `No search terms met conditions for negation.` };
-}
+    return performanceMap;
+};
 
 
-async function processRule(rule) {
-    let result = { status: 'FAILURE', summary: 'Unknown rule type.' };
-    try {
-        if (rule.rule_type === 'BID_ADJUSTMENT') {
-            result = await evaluateBidAdjustmentRule(rule);
-        } else if (rule.rule_type === 'SEARCH_TERM_AUTOMATION') {
-            result = await evaluateSearchTermRule(rule);
+// --- Rule Evaluation Logic ---
+
+const checkCondition = (metricValue, operator, conditionValue) => {
+    switch (operator) {
+        case '>': return metricValue > conditionValue;
+        case '<': return metricValue < conditionValue;
+        case '=': return metricValue === conditionValue;
+        default: return false;
+    }
+};
+
+const evaluateBidAdjustmentRule = async (rule) => {
+    console.log(`[RulesEngine] Evaluating Bid Adjustment Rule: "${rule.name}"`);
+    const performanceData = await getPerformanceData('keyword', rule);
+    if (performanceData.size === 0) {
+        return logAction(rule, 'NO_ACTION', 'No keyword performance data found for the lookback period.');
+    }
+    
+    const bidUpdates = [];
+    const changeLog = [];
+    
+    const keywordIds = Array.from(performanceData.keys());
+    const keywordsResponse = await amazonAdsApiRequest({
+        method: 'post', url: '/sp/keywords/list', profileId: rule.profile_id,
+        data: { keywordIdFilter: { include: keywordIds } }
+    });
+    const currentBids = new Map(keywordsResponse.keywords.map(kw => [kw.keywordId.toString(), kw.bid]));
+
+    for (const [keywordId, data] of performanceData.entries()) {
+        const currentBid = currentBids.get(keywordId);
+        if (typeof currentBid !== 'number') continue;
+
+        for (const group of rule.config.conditionGroups) {
+            const conditionsMet = group.conditions.every(cond => 
+                checkCondition(data.metrics[cond.metric], cond.operator, cond.value)
+            );
+            
+            if (conditionsMet) {
+                const { value, minBid, maxBid } = group.action;
+                let newBid = currentBid * (1 + (value / 100));
+                
+                if (minBid !== undefined && minBid !== null) newBid = Math.max(minBid, newBid);
+                if (maxBid !== undefined && maxBid !== null) newBid = Math.min(maxBid, newBid);
+                
+                newBid = parseFloat(newBid.toFixed(2));
+                
+                if (newBid !== currentBid) {
+                    bidUpdates.push({ keywordId: parseInt(keywordId, 10), bid: newBid });
+                    changeLog.push({ keyword: data.keywordText, oldBid: currentBid, newBid });
+                }
+                break; 
+            }
         }
-        await pool.query('INSERT INTO automation_logs (rule_id, status, summary, details) VALUES ($1, $2, $3, $4)', [rule.id, result.status, result.summary, result.details || null]);
-    } catch(err) {
-        console.error(`[Rules Engine] FAILED to process rule "${rule.name}" (ID: ${rule.id}):`, err);
-        const errorMessage = err.details ? JSON.stringify(err.details) : err.message;
-        await pool.query('INSERT INTO automation_logs (rule_id, status, summary) VALUES ($1, $2, $3)', [rule.id, 'FAILURE', `Error: ${errorMessage}`]);
-    } finally {
-         await pool.query('UPDATE automation_rules SET last_run_at = NOW() WHERE id = $1', [rule.id]);
     }
-}
 
+    if (bidUpdates.length > 0) {
+        console.log(`[RulesEngine] Rule "${rule.name}" triggered ${bidUpdates.length} bid updates.`);
+        await amazonAdsApiRequest({
+            method: 'put', url: '/sp/keywords', profileId: rule.profile_id,
+            data: { keywords: bidUpdates }
+        });
+        await logAction(rule, 'SUCCESS', `Adjusted bids for ${bidUpdates.length} keywords.`, { changes: changeLog });
+    } else {
+        await logAction(rule, 'NO_ACTION', 'No keywords met conditions in any group.');
+    }
+};
 
-export async function runRulesEngine() {
-  console.log('[Rules Engine] Starting run...');
-  const query = `
-    SELECT * FROM automation_rules
-    WHERE is_active = TRUE
-      AND (last_run_at IS NULL OR last_run_at <= NOW() - '1 hour'::INTERVAL)`;
-      // Simple 1-hour cooldown for all rules to prevent rapid re-evaluation.
-      // A per-rule cooldown could be added to the config if needed.
-  const { rows: activeRules } = await pool.query(query);
-  
-  if (activeRules.length === 0) {
-    console.log('[Rules Engine] No active rules ready to run.');
-    return;
-  }
-  
-  console.log(`[Rules Engine] Found ${activeRules.length} rule(s) to process.`);
-  for (const rule of activeRules) {
-    await processRule(rule);
-  }
-  console.log('[Rules Engine] Run finished.');
-}
+const evaluateSearchTermAutomationRule = async (rule) => {
+    console.log(`[RulesEngine] Evaluating Search Term Rule: "${rule.name}"`);
+    const performanceData = await getPerformanceData('searchTerm', rule);
+    if (performanceData.size === 0) {
+        return logAction(rule, 'NO_ACTION', 'No search term performance data found for the lookback period.');
+    }
 
-export function startRulesEngine() {
-  console.log('⚙️  Automation Rules Engine has been initialized. Will run every hour.');
-  // Run once on start, then set interval
-  setTimeout(runRulesEngine, 5000); // Wait 5s on start before first run
-  setInterval(runRulesEngine, 60 * 60 * 1000); // Run every hour
-}
+    const negativeKeywordsToAdd = [];
+    const changeLog = [];
+
+    for (const [searchTerm, data] of performanceData.entries()) {
+        for (const group of rule.config.conditionGroups) {
+            const conditionsMet = group.conditions.every(cond => 
+                checkCondition(data.metrics[cond.metric], cond.operator, cond.value)
+            );
+
+            if (conditionsMet) {
+                if (group.action.type === 'negateSearchTerm') {
+                    negativeKeywordsToAdd.push({
+                        campaignId: data.campaignId,
+                        adGroupId: data.adGroupId,
+                        keywordText: searchTerm,
+                        matchType: group.action.matchType
+                    });
+                    changeLog.push({ searchTerm, campaignId: data.campaignId, matchType: group.action.matchType });
+                }
+                break;
+            }
+        }
+    }
+
+    if (negativeKeywordsToAdd.length > 0) {
+        console.log(`[RulesEngine] Rule "${rule.name}" triggered ${negativeKeywordsToAdd.length} negative keyword additions.`);
+        await amazonAdsApiRequest({
+            method: 'post', url: '/negativeKeywords', profileId: rule.profile_id,
+            data: { negativeKeywords: negativeKeywordsToAdd }
+        });
+        await logAction(rule, 'SUCCESS', `Created ${negativeKeywordsToAdd.length} negative keywords.`, { changes: changeLog });
+    } else {
+        await logAction(rule, 'NO_ACTION', 'No search terms met conditions in any group.');
+    }
+};
+
+// --- Main Engine Orchestrator ---
+
+const runAllRules = async () => {
+    console.log(`[RulesEngine] Starting evaluation cycle at ${new Date().toISOString()}`);
+    let client;
+    try {
+        client = await pool.connect();
+        const { rows: activeRules } = await client.query('SELECT * FROM automation_rules WHERE is_active = true');
+        
+        console.log(`[RulesEngine] Found ${activeRules.length} active rules to evaluate.`);
+        for (const rule of activeRules) {
+            try {
+                await client.query('BEGIN');
+                
+                if (rule.rule_type === 'BID_ADJUSTMENT') {
+                    await evaluateBidAdjustmentRule(rule);
+                } else if (rule.rule_type === 'SEARCH_TERM_AUTOMATION') {
+                    await evaluateSearchTermAutomationRule(rule);
+                }
+                
+                await client.query('UPDATE automation_rules SET last_run_at = NOW() WHERE id = $1', [rule.id]);
+                await client.query('COMMIT');
+            } catch (ruleError) {
+                await client.query('ROLLBACK');
+                console.error(`[RulesEngine] FAILED evaluation for rule "${rule.name}" (ID: ${rule.id}). Error:`, ruleError.message);
+                await logAction(rule, 'FAILURE', 'Rule evaluation failed due to an internal error.', { error: ruleError.message });
+            }
+        }
+    } catch (e) {
+        console.error('[RulesEngine] A critical error occurred during the main evaluation cycle:', e);
+    } finally {
+        if (client) client.release();
+        console.log(`[RulesEngine] Evaluation cycle finished at ${new Date().toISOString()}`);
+    }
+};
+
+// Cron job to run the engine every hour at the 5-minute mark
+export const startRulesEngine = () => {
+  console.log('[RulesEngine] Scheduled to run every hour at the 5-minute mark.');
+  cron.schedule('5 * * * *', runAllRules, {
+    scheduled: true,
+    timezone: "America/Phoenix" // Use a timezone that doesn't observe DST to be consistent
+  });
+};

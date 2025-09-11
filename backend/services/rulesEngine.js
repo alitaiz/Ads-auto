@@ -68,19 +68,37 @@ const getPerformanceData = async (rule, campaignIds) => {
     if (rule.rule_type === 'BID_ADJUSTMENT') {
         query = `
             WITH combined_performance AS (
-                SELECT 'historical' as source, keyword_id AS entity_id, 'keyword' AS entity_type, keyword_text AS entity_text, match_type, campaign_id, ad_group_id,
-                    SUM(COALESCE(spend, cost, 0))::numeric AS spend, SUM(COALESCE(sales_7d, 0))::numeric AS sales,
-                    SUM(COALESCE(clicks, 0))::bigint AS clicks, SUM(COALESCE(purchases_7d, 0))::bigint AS orders
+                -- Historical data for BOTH keywords and targets
+                SELECT
+                    'historical' as source,
+                    keyword_id AS entity_id, -- This will be NULL for targets
+                    CASE WHEN keyword_id IS NOT NULL THEN 'keyword' ELSE 'target' END AS entity_type,
+                    COALESCE(keyword_text, targeting) AS entity_text,
+                    match_type,
+                    campaign_id,
+                    ad_group_id,
+                    SUM(COALESCE(spend, cost, 0))::numeric AS spend,
+                    SUM(COALESCE(sales_7d, 0))::numeric AS sales,
+                    SUM(COALESCE(clicks, 0))::bigint AS clicks,
+                    SUM(COALESCE(purchases_7d, 0))::bigint AS orders
                 FROM sponsored_products_search_term_report
-                WHERE report_date >= $1 AND report_date < $2 AND keyword_id IS NOT NULL ${campaignFilterClauseHistorical}
-                GROUP BY 1, 2, 3, 4, 5, 6, 7
+                WHERE report_date >= $1 AND report_date < $2
+                  AND (keyword_id IS NOT NULL OR targeting IS NOT NULL) -- FIX: Include targets
+                  ${campaignFilterClauseHistorical}
+                -- Group by all non-aggregate columns to get one row per historical entity
+                GROUP BY source, entity_id, entity_type, entity_text, match_type, campaign_id, ad_group_id
 
                 UNION ALL
 
-                SELECT 'stream' as source, COALESCE((event_data->>'keywordId')::bigint, (event_data->>'targetId')::bigint) AS entity_id,
+                -- Stream data
+                SELECT
+                    'stream' as source,
+                    COALESCE((event_data->>'keywordId')::bigint, (event_data->>'targetId')::bigint) AS entity_id,
                     CASE WHEN event_data->>'keywordId' IS NOT NULL THEN 'keyword' ELSE 'target' END AS entity_type,
-                    event_data->>'keywordText' AS entity_text, event_data->>'matchType' AS match_type,
-                    (event_data->>'campaignId')::bigint AS campaign_id, (event_data->>'adGroupId')::bigint AS ad_group_id,
+                    COALESCE(event_data->>'keywordText', event_data->>'targetingExpression') AS entity_text,
+                    event_data->>'matchType' AS match_type,
+                    (event_data->>'campaignId')::bigint AS campaign_id,
+                    (event_data->>'adGroupId')::bigint AS ad_group_id,
                     SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END) AS spend,
                     SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributedSales1d')::numeric ELSE 0 END) AS sales,
                     SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END) AS clicks,
@@ -89,14 +107,29 @@ const getPerformanceData = async (rule, campaignIds) => {
                 WHERE (event_data->>'timeWindowStart')::timestamptz >= (($2)::timestamp AT TIME ZONE '${REPORTING_TIMEZONE}')
                   AND (event_data->>'keywordId' IS NOT NULL OR event_data->>'targetId' IS NOT NULL)
                   ${campaignFilterClauseStream}
-                GROUP BY 1, 2, 3, 4, 5, 6, 7
+                GROUP BY source, entity_id, entity_type, entity_text, match_type, campaign_id, ad_group_id
             )
-            SELECT entity_id, entity_type, MAX(entity_text) as entity_text, MAX(match_type) as match_type,
-                MAX(campaign_id) as campaign_id, MAX(ad_group_id) as ad_group_id,
-                SUM(spend) AS total_spend, SUM(sales) AS total_sales,
-                SUM(clicks) AS total_clicks, SUM(orders) AS total_orders,
+            SELECT
+                entity_id,
+                entity_type,
+                entity_text,
+                match_type,
+                campaign_id,
+                ad_group_id,
+                SUM(spend) AS total_spend,
+                SUM(sales) AS total_sales,
+                SUM(clicks) AS total_clicks,
+                SUM(orders) AS total_orders,
                 ARRAY_AGG(source) as sources
-            FROM combined_performance WHERE entity_id IS NOT NULL GROUP BY 1, 2;
+            FROM combined_performance
+            GROUP BY
+                -- FIX: Group by a unique key for each entity type to prevent incorrect merging
+                entity_id, -- Groups keywords and stream targets correctly
+                entity_type,
+                entity_text,
+                match_type,
+                campaign_id,
+                ad_group_id;
         `;
     } else { // SEARCH_TERM_AUTOMATION
          query = `
@@ -137,7 +170,7 @@ const getPerformanceData = async (rule, campaignIds) => {
 
     const performanceMap = new Map();
     for (const row of rows) {
-        const key = (rule.rule_type === 'BID_ADJUSTMENT' ? row.entity_id : row.customer_search_term)?.toString();
+        const key = (rule.rule_type === 'BID_ADJUSTMENT' ? (row.entity_id || `${row.campaign_id}-${row.ad_group_id}-${row.entity_text}`) : row.customer_search_term)?.toString();
         if (!key) continue;
 
         if (!performanceMap.has(key)) {
@@ -184,10 +217,13 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     const targetData = new Map();
 
     performanceData.forEach((data) => {
-        if (data.entityType === 'keyword') {
-            keywordData.set(data.entityId.toString(), data);
-        } else {
-            targetData.set(data.entityId.toString(), data);
+        // Only consider actionable entities that have an ID
+        if (data.entityId) {
+            if (data.entityType === 'keyword') {
+                keywordData.set(data.entityId.toString(), data);
+            } else {
+                targetData.set(data.entityId.toString(), data);
+            }
         }
     });
 
@@ -327,7 +363,7 @@ const runSingleRule = async (rule) => {
         if (changes.length > 0) {
             await logAction(rule, 'SUCCESS', `Rule executed successfully with ${changes.length} change(s).`, { changes });
         } else {
-            await logAction(rule, 'NO_ACTION', 'Conditions were not met for any entity.');
+            await logAction(rule, 'NO_ACTION', 'Conditions were not met for any actionable entity.');
         }
         
         await client.query('COMMIT');

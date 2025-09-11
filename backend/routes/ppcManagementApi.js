@@ -236,6 +236,59 @@ router.put('/keywords', async (req, res) => {
 });
 
 /**
+ * POST /api/amazon/targets/list
+ * Fetches targeting clauses for a given list of target IDs.
+ */
+router.post('/targets/list', async (req, res) => {
+    const { profileId, targetIdFilter } = req.body;
+    if (!profileId || !Array.isArray(targetIdFilter) || targetIdFilter.length === 0) {
+        return res.status(400).json({ message: 'profileId and targetIdFilter array are required.' });
+    }
+    try {
+        const data = await amazonAdsApiRequest({
+            method: 'post',
+            url: '/sp/targets/list',
+            profileId,
+            data: { targetIdFilter: { include: targetIdFilter } },
+            headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' }
+        });
+        res.json(data);
+    } catch (error) {
+        res.status(error.status || 500).json(error.details || { message: 'Failed to list targets' });
+    }
+});
+
+/**
+ * PUT /api/amazon/targets
+ * Updates one or more SP targets.
+ */
+router.put('/targets', async (req, res) => {
+    const { profileId, updates } = req.body;
+    if (!profileId || !Array.isArray(updates) || updates.length === 0) {
+        return res.status(400).json({ message: 'profileId and a non-empty updates array are required.' });
+    }
+    try {
+        const transformedUpdates = updates.map(u => ({
+            targetId: u.targetId,
+            state: u.state?.toUpperCase(),
+            bid: u.bid,
+        }));
+
+        const data = await amazonAdsApiRequest({
+            method: 'put',
+            url: '/sp/targets',
+            profileId,
+            data: { targets: transformedUpdates },
+            headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' },
+        });
+        res.json(data);
+    } catch (error) {
+        res.status(error.status || 500).json(error.details || { message: 'Failed to update targets' });
+    }
+});
+
+
+/**
  * POST /api/amazon/negativeKeywords
  * Creates one or more negative keywords.
  */

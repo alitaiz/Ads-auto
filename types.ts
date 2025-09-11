@@ -102,6 +102,11 @@ export interface AutomationRule {
         // A rule is composed of one or more condition groups.
         // They are evaluated in order ("first match wins").
         conditionGroups: AutomationConditionGroup[];
+        // NEW: Dynamic frequency configuration
+        frequency: {
+            unit: 'minutes' | 'hours' | 'days';
+            value: number;
+        };
     };
     scope: {
         campaignIds?: (number | string)[];

@@ -74,10 +74,16 @@ const getDefaultSearchTermGroup = (): AutomationConditionGroup => ({
     action: getDefaultSearchTermAction()
 });
 
+const getDefaultRuleConfig = () => ({
+    conditionGroups: [],
+    frequency: { unit: 'hours' as 'minutes' | 'hours' | 'days', value: 1 }
+});
+
+
 const getDefaultBidAdjustmentRule = (): Partial<AutomationRule> => ({
     name: '',
     rule_type: 'BID_ADJUSTMENT',
-    config: { conditionGroups: [getDefaultBidAdjustmentGroup()] },
+    config: { ...getDefaultRuleConfig(), conditionGroups: [getDefaultBidAdjustmentGroup()] },
     scope: { campaignIds: [] },
     is_active: true,
 });
@@ -85,7 +91,7 @@ const getDefaultBidAdjustmentRule = (): Partial<AutomationRule> => ({
 const getDefaultSearchTermRule = (): Partial<AutomationRule> => ({
     name: '',
     rule_type: 'SEARCH_TERM_AUTOMATION',
-    config: { conditionGroups: [getDefaultSearchTermGroup()] },
+    config: { ...getDefaultRuleConfig(), conditionGroups: [getDefaultSearchTermGroup()] },
     scope: { campaignIds: [] },
     is_active: true,
 });
@@ -210,6 +216,8 @@ const RulesList = ({ rules, onEdit, onDelete }: { rules: AutomationRule[], onEdi
                     </label>
                 </div>
                 <div style={styles.ruleDetails}>
+                    <span style={styles.ruleLabel}>Frequency</span>
+                    <span style={styles.ruleValue}>Every {rule.config.frequency?.value || 1} {rule.config.frequency?.unit || 'hour'}(s)</span>
                     <span style={styles.ruleLabel}>Last Run</span>
                     <span style={styles.ruleValue}>{rule.last_run_at ? new Date(rule.last_run_at).toLocaleString() : 'Never'}</span>
                 </div>
@@ -250,6 +258,13 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
         if (rule) return JSON.parse(JSON.stringify(rule));
         return ruleType === 'bidAdjustment' ? getDefaultBidAdjustmentRule() : getDefaultSearchTermRule();
     });
+
+    const handleConfigChange = (field: string, value: any) => {
+        setFormData(prev => ({
+            ...prev,
+            config: { ...prev.config!, [field]: value }
+        }));
+    };
 
     const handleConditionChange = (groupIndex: number, condIndex: number, field: keyof AutomationRuleCondition, value: any) => {
         setFormData(prev => {
@@ -302,6 +317,30 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                     <div style={styles.formGroup}>
                         <label style={styles.label}>Rule Name</label>
                         <input style={styles.input} value={formData.name} onChange={e => setFormData(p => ({...p, name: e.target.value}))} required />
+                    </div>
+
+                     <div style={styles.formSection}>
+                        <h4 style={styles.formSectionTitle}>Frequency</h4>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span>Run every</span>
+                            <input 
+                                type="number" 
+                                style={{...styles.input, width: '80px'}} 
+                                value={formData.config?.frequency?.value || 1}
+                                min="1"
+                                onChange={e => handleConfigChange('frequency', { ...formData.config?.frequency, value: Number(e.target.value) })}
+                                required
+                            />
+                            <select 
+                                style={styles.input}
+                                value={formData.config?.frequency?.unit || 'hours'}
+                                onChange={e => handleConfigChange('frequency', { ...formData.config?.frequency, unit: e.target.value as any })}
+                            >
+                                <option value="minutes">Minute(s)</option>
+                                <option value="hours">Hour(s)</option>
+                                <option value="days">Day(s)</option>
+                            </select>
+                        </div>
                     </div>
 
                     <div style={styles.formSection}>

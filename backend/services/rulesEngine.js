@@ -21,11 +21,9 @@ const logAction = async (rule, status, summary, details = {}) => {
 
 // --- Data Fetching ---
 const getPerformanceData = async (rule, campaignIds) => {
-    // Determine the maximum lookback window needed for this rule evaluation
     const allTimeWindows = rule.config.conditionGroups.flatMap(g => g.conditions.map(c => c.timeWindow));
     const maxLookbackDays = Math.max(...allTimeWindows, 1);
     
-    // Define date ranges
     const today = new Date();
     const startDate = new Date();
     startDate.setDate(today.getDate() - maxLookbackDays);
@@ -36,13 +34,7 @@ const getPerformanceData = async (rule, campaignIds) => {
     const startDateStr = startDate.toISOString().split('T')[0];
     const streamCutoffDateStr = streamCutoffDate.toISOString().split('T')[0];
 
-    const isSearchTermRule = rule.rule_type === 'SEARCH_TERM_AUTOMATION';
-    const entityIdColumn = isSearchTermRule ? 'customer_search_term' : 'keyword_id';
-    const entityTextField = isSearchTermRule ? 'customer_search_term' : 'keyword_text';
-    const groupByColumns = isSearchTermRule 
-        ? 'customer_search_term' 
-        : 'keyword_id, keyword_text, match_type';
-
+    let query;
     const params = [startDateStr, streamCutoffDateStr];
     let campaignFilterClauseHistorical = '';
     let campaignFilterClauseStream = '';
@@ -54,60 +46,124 @@ const getPerformanceData = async (rule, campaignIds) => {
         campaignFilterClauseStream = `AND (event_data->>'campaignId')::bigint = ANY(${campaignParamIndex})`;
     }
 
-    const query = `
-        WITH combined_data AS (
-            -- Fetch historical data from the report table (older than 3 days)
-            SELECT
-                campaign_id, ad_group_id, ${groupByColumns},
-                COALESCE(SUM(COALESCE(spend, cost)), 0)::numeric AS spend,
-                COALESCE(SUM(COALESCE(sales_7d, 0)), 0)::numeric AS sales,
-                COALESCE(SUM(clicks), 0)::bigint AS clicks,
-                COALESCE(SUM(purchases_7d), 0)::bigint AS orders
-            FROM sponsored_products_search_term_report
-            WHERE report_date >= $1 AND report_date < $2 AND ${entityIdColumn} IS NOT NULL ${campaignFilterClauseHistorical}
-            GROUP BY campaign_id, ad_group_id, ${groupByColumns}
+    if (rule.rule_type === 'BID_ADJUSTMENT') {
+        query = `
+            WITH combined_performance AS (
+                -- Section 1: Fetch historical data for KEYWORDS ONLY
+                -- (The report table does not contain target_id)
+                SELECT
+                    keyword_id AS entity_id,
+                    'keyword' AS entity_type,
+                    keyword_text AS entity_text,
+                    match_type,
+                    campaign_id,
+                    ad_group_id,
+                    SUM(COALESCE(spend, cost, 0))::numeric AS spend,
+                    SUM(COALESCE(sales_7d, 0))::numeric AS sales,
+                    SUM(COALESCE(clicks, 0))::bigint AS clicks,
+                    SUM(COALESCE(purchases_7d, 0))::bigint AS orders
+                FROM sponsored_products_search_term_report
+                WHERE report_date >= $1 AND report_date < $2
+                  AND keyword_id IS NOT NULL
+                  ${campaignFilterClauseHistorical}
+                GROUP BY keyword_id, keyword_text, match_type, campaign_id, ad_group_id
 
-            UNION ALL
+                UNION ALL
 
-            -- Fetch recent data from the stream events table (last 3 days)
+                -- Section 2: Fetch recent data for BOTH KEYWORDS AND TARGETS from the stream
+                SELECT
+                    COALESCE((event_data->>'keywordId')::bigint, (event_data->>'targetId')::bigint) AS entity_id,
+                    CASE WHEN event_data->>'keywordId' IS NOT NULL THEN 'keyword' ELSE 'target' END AS entity_type,
+                    event_data->>'keywordText' AS entity_text, -- Note: targetText is not in stream, will be null for targets
+                    event_data->>'matchType' AS match_type,
+                    (event_data->>'campaignId')::bigint AS campaign_id,
+                    (event_data->>'adGroupId')::bigint AS ad_group_id,
+                    SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END) AS spend,
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributedSales1d')::numeric ELSE 0 END) AS sales,
+                    SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END) AS clicks,
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'conversions')::bigint ELSE 0 END) AS orders
+                FROM raw_stream_events
+                WHERE (event_data->>'timeWindowStart')::timestamptz >= $2
+                  AND (event_data->>'keywordId' IS NOT NULL OR event_data->>'targetId' IS NOT NULL)
+                  ${campaignFilterClauseStream}
+                GROUP BY entity_id, entity_type, entity_text, match_type, campaign_id, ad_group_id
+            )
+            -- Final Aggregation: Combine historical and stream data for each unique entity
             SELECT
-                (event_data->>'campaignId')::bigint,
-                (event_data->>'adGroupId')::bigint,
-                ${isSearchTermRule ? "(event_data->>'searchTerm')," : "(event_data->>'keywordId')::bigint, (event_data->>'keywordText'), (event_data->>'matchType'),"}
-                SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END),
-                SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributedSales1d')::numeric ELSE 0 END),
-                SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END),
-                SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'conversions')::bigint ELSE 0 END)
-            FROM raw_stream_events
-            WHERE (event_data->>'timeWindowStart')::timestamptz >= $2 
-              AND (event_data->>'${isSearchTermRule ? 'searchTerm' : 'keywordId'}') IS NOT NULL ${campaignFilterClauseStream}
-            GROUP BY 1, 2, 3${isSearchTermRule ? "" : ", 4, 5"}
-        )
-        SELECT
-            campaign_id, ad_group_id, ${groupByColumns},
-            SUM(spend) AS total_spend, SUM(sales) AS total_sales,
-            SUM(clicks) AS total_clicks, SUM(orders) AS total_orders
-        FROM combined_data
-        GROUP BY campaign_id, ad_group_id, ${groupByColumns};
-    `;
+                entity_id,
+                entity_type,
+                MAX(entity_text) as entity_text, -- Take the most recent non-null text
+                MAX(match_type) as match_type,
+                MAX(campaign_id) as campaign_id,
+                MAX(ad_group_id) as ad_group_id,
+                SUM(spend) AS total_spend,
+                SUM(sales) AS total_sales,
+                SUM(clicks) AS total_clicks,
+                SUM(orders) AS total_orders
+            FROM combined_performance
+            WHERE entity_id IS NOT NULL
+            GROUP BY entity_id, entity_type;
+        `;
+    } else { // SEARCH_TERM_AUTOMATION
+         query = `
+            SELECT
+                customer_search_term,
+                campaign_id,
+                ad_group_id,
+                SUM(spend) AS total_spend,
+                SUM(sales) AS total_sales,
+                SUM(clicks) AS total_clicks,
+                SUM(orders) AS total_orders
+            FROM (
+                SELECT
+                    customer_search_term, campaign_id, ad_group_id,
+                    COALESCE(SUM(COALESCE(spend, cost)), 0)::numeric AS spend,
+                    COALESCE(SUM(COALESCE(sales_7d, 0)), 0)::numeric AS sales,
+                    COALESCE(SUM(clicks), 0)::bigint AS clicks,
+                    COALESCE(SUM(purchases_7d), 0)::bigint AS orders
+                FROM sponsored_products_search_term_report
+                WHERE report_date >= $1 AND report_date < $2 AND customer_search_term IS NOT NULL ${campaignFilterClauseHistorical}
+                GROUP BY 1, 2, 3
+
+                UNION ALL
+
+                SELECT
+                    (event_data->>'searchTerm') as customer_search_term,
+                    (event_data->>'campaignId')::bigint as campaign_id,
+                    (event_data->>'adGroupId')::bigint as ad_group_id,
+                    SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END),
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributedSales1d')::numeric ELSE 0 END),
+                    SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END),
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'conversions')::bigint ELSE 0 END)
+                FROM raw_stream_events
+                WHERE (event_data->>'timeWindowStart')::timestamptz >= $2
+                AND (event_data->>'searchTerm') IS NOT NULL ${campaignFilterClauseStream}
+                GROUP BY 1, 2, 3
+            ) AS combined_data
+            WHERE customer_search_term IS NOT NULL
+            GROUP BY 1, 2, 3;
+         `;
+    }
 
     const { rows } = await pool.query(query, params);
     
     const performanceMap = new Map();
     for (const row of rows) {
-        const key = row[entityIdColumn]?.toString();
+        const key = (rule.rule_type === 'BID_ADJUSTMENT' ? row.entity_id : row.customer_search_term)?.toString();
         if (!key) continue;
 
         if (!performanceMap.has(key)) {
-            performanceMap.set(key, {
+             performanceMap.set(key, {
                 campaignId: row.campaign_id,
                 adGroupId: row.ad_group_id,
-                keywordId: row.keyword_id,
-                keywordText: row[entityTextField],
+                entityId: row.entity_id,
+                entityType: row.entity_type,
+                entityText: row.entity_text || row.customer_search_term,
                 matchType: row.match_type,
                 metrics: { spend: 0, sales: 0, clicks: 0, orders: 0, acos: 0 }
             });
         }
+        
         const entry = performanceMap.get(key);
         entry.metrics.spend += parseFloat(row.total_spend || 0);
         entry.metrics.sales += parseFloat(row.total_sales || 0);
@@ -141,11 +197,11 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     const keywordData = new Map();
     const targetData = new Map();
 
-    performanceData.forEach((data, id) => {
-        if (['BROAD', 'PHRASE', 'EXACT'].includes(data.matchType?.toUpperCase())) {
-            keywordData.set(id, data);
+    performanceData.forEach((data) => {
+        if (data.entityType === 'keyword') {
+            keywordData.set(data.entityId.toString(), data);
         } else {
-            targetData.set(id, data);
+            targetData.set(data.entityId.toString(), data);
         }
     });
 
@@ -163,9 +219,9 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
                     let newBid = parseFloat((currentBid * (1 + (value / 100))).toFixed(2));
                     if (minBid !== undefined && minBid !== null) newBid = Math.max(minBid, newBid);
                     if (maxBid !== undefined && maxBid !== null) newBid = Math.min(maxBid, newBid);
-                    if (newBid !== currentBid) {
+                    if (newBid !== currentBid && newBid > 0.01) {
                         keywordsToUpdate.push({ keywordId: parseInt(id, 10), bid: newBid });
-                        changeLog.push({ type: 'Keyword', text: data.keywordText, oldBid: currentBid, newBid });
+                        changeLog.push({ type: 'Keyword', text: data.entityText, oldBid: currentBid, newBid });
                     }
                     break;
                 }
@@ -175,7 +231,7 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
 
     if (targetData.size > 0) {
         const targetIds = Array.from(targetData.keys());
-        const { targets: amazonTargets } = await amazonAdsApiRequest({ method: 'post', url: '/sp/targets/list', profileId: rule.profile_id, data: { targetIdFilter: { include: targetIds } } });
+        const { targetingClauses: amazonTargets } = await amazonAdsApiRequest({ method: 'post', url: '/sp/targets/list', profileId: rule.profile_id, data: { targetIdFilter: { include: targetIds } } });
         const currentBids = new Map(amazonTargets.map(t => [t.targetId.toString(), t.bid]));
         for (const [id, data] of targetData.entries()) {
             const currentBid = currentBids.get(id);
@@ -186,9 +242,9 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
                     let newBid = parseFloat((currentBid * (1 + (value / 100))).toFixed(2));
                     if (minBid !== undefined && minBid !== null) newBid = Math.max(minBid, newBid);
                     if (maxBid !== undefined && maxBid !== null) newBid = Math.min(maxBid, newBid);
-                    if (newBid !== currentBid) {
+                    if (newBid !== currentBid && newBid > 0.01) {
                         targetsToUpdate.push({ targetId: parseInt(id, 10), bid: newBid });
-                        changeLog.push({ type: 'Target', text: data.keywordText, oldBid: currentBid, newBid });
+                        changeLog.push({ type: 'Target', text: `Target ID ${id}`, oldBid: currentBid, newBid });
                     }
                     break;
                 }
@@ -267,7 +323,6 @@ const runSingleRule = async (rule) => {
 
         const performanceData = await getPerformanceData(rule, rule.scope?.campaignIds);
 
-        // Enhanced diagnostic logging
         console.log(`[RulesEngine] Found ${performanceData.size} entities with performance data matching the rule's scope.`);
 
         if (performanceData.size === 0) {
@@ -293,8 +348,9 @@ const runSingleRule = async (rule) => {
 
     } catch (ruleError) {
         if (client) await client.query('ROLLBACK');
-        console.error(`[RulesEngine] ❌ FAILED evaluation for rule "${rule.name}" (ID: ${rule.id}). Error:`, ruleError.details || ruleError.message);
-        await logAction(rule, 'FAILURE', 'Rule evaluation failed due to an internal error.', { error: ruleError.details || ruleError.message });
+        const errorMessage = ruleError.details ? JSON.stringify(ruleError.details) : ruleError.message;
+        console.error(`[RulesEngine] ❌ FAILED evaluation for rule "${rule.name}" (ID: ${rule.id}). Error:`, errorMessage);
+        await logAction(rule, 'FAILURE', 'Rule evaluation failed due to an internal error.', { error: errorMessage });
     } finally {
         if (client) client.release();
     }
@@ -309,7 +365,6 @@ const checkAndRunDueRules = async () => {
 
         if (dueRules.length > 0) {
             console.log(`[RulesEngine Tick] Found ${dueRules.length} due rule(s). Running them now.`);
-            // Run rules sequentially to avoid overwhelming the API or DB connection pool
             for (const rule of dueRules) {
                 await runSingleRule(rule);
             }
@@ -335,6 +390,5 @@ export const startRulesEngine = () => {
         timezone: "America/Phoenix"
     });
 
-    // Run once on startup to catch any rules missed while the server was down.
     checkAndRunDueRules();
 };

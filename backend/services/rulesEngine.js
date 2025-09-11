@@ -20,7 +20,7 @@ const logAction = async (rule, status, summary, details = {}) => {
 };
 
 // --- Data Fetching ---
-const getPerformanceData = async (rule) => {
+const getPerformanceData = async (rule, campaignIds) => {
     // Determine the maximum lookback window needed for this rule evaluation
     const allTimeWindows = rule.config.conditionGroups.flatMap(g => g.conditions.map(c => c.timeWindow));
     const maxLookbackDays = Math.max(...allTimeWindows, 1);
@@ -30,7 +30,6 @@ const getPerformanceData = async (rule) => {
     const startDate = new Date();
     startDate.setDate(today.getDate() - maxLookbackDays);
     
-    // The cutoff point: data older than this comes from historical reports, newer data from the stream.
     const streamCutoffDate = new Date();
     streamCutoffDate.setDate(today.getDate() - 3);
 
@@ -39,10 +38,21 @@ const getPerformanceData = async (rule) => {
 
     const isSearchTermRule = rule.rule_type === 'SEARCH_TERM_AUTOMATION';
     const entityIdColumn = isSearchTermRule ? 'customer_search_term' : 'keyword_id';
-    const entityTextField = isSearchTermRule ? 'customer_search_term' : 'keyword_text'; // Use keyword_text for display
+    const entityTextField = isSearchTermRule ? 'customer_search_term' : 'keyword_text';
     const groupByColumns = isSearchTermRule 
         ? 'customer_search_term' 
         : 'keyword_id, keyword_text, match_type';
+
+    const params = [startDateStr, streamCutoffDateStr];
+    let campaignFilterClauseHistorical = '';
+    let campaignFilterClauseStream = '';
+
+    if (campaignIds && campaignIds.length > 0) {
+        params.push(campaignIds);
+        const campaignParamIndex = `$${params.length}`;
+        campaignFilterClauseHistorical = `AND campaign_id = ANY(${campaignParamIndex})`;
+        campaignFilterClauseStream = `AND (event_data->>'campaignId')::bigint = ANY(${campaignParamIndex})`;
+    }
 
     const query = `
         WITH combined_data AS (
@@ -54,7 +64,7 @@ const getPerformanceData = async (rule) => {
                 COALESCE(SUM(clicks), 0)::bigint AS clicks,
                 COALESCE(SUM(purchases_7d), 0)::bigint AS orders
             FROM sponsored_products_search_term_report
-            WHERE report_date >= $1 AND report_date < $2 AND ${entityIdColumn} IS NOT NULL
+            WHERE report_date >= $1 AND report_date < $2 AND ${entityIdColumn} IS NOT NULL ${campaignFilterClauseHistorical}
             GROUP BY campaign_id, ad_group_id, ${groupByColumns}
 
             UNION ALL
@@ -70,7 +80,7 @@ const getPerformanceData = async (rule) => {
                 SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'conversions')::bigint ELSE 0 END)
             FROM raw_stream_events
             WHERE (event_data->>'timeWindowStart')::timestamptz >= $2 
-              AND (event_data->>'${isSearchTermRule ? 'searchTerm' : 'keywordId'}') IS NOT NULL
+              AND (event_data->>'${isSearchTermRule ? 'searchTerm' : 'keywordId'}') IS NOT NULL ${campaignFilterClauseStream}
             GROUP BY 1, 2, 3${isSearchTermRule ? "" : ", 4, 5"}
         )
         SELECT
@@ -81,12 +91,7 @@ const getPerformanceData = async (rule) => {
         GROUP BY campaign_id, ad_group_id, ${groupByColumns};
     `;
 
-    // Only query historical data if the lookback period extends beyond the stream cutoff
-    const queryParams = maxLookbackDays > 3 
-        ? [startDateStr, streamCutoffDateStr]
-        : [streamCutoffDateStr, streamCutoffDateStr]; // If lookback is short, we only need stream data, but need to satisfy query params
-
-    const { rows } = await pool.query(query, queryParams);
+    const { rows } = await pool.query(query, params);
     
     const performanceMap = new Map();
     for (const row of rows) {
@@ -117,6 +122,7 @@ const getPerformanceData = async (rule) => {
     return performanceMap;
 };
 
+
 // --- Rule Evaluation Logic ---
 const checkCondition = (metricValue, operator, conditionValue) => {
     switch (operator) {
@@ -132,7 +138,6 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     const targetsToUpdate = [];
     const changeLog = [];
 
-    // Separate keywords and targets based on matchType
     const keywordData = new Map();
     const targetData = new Map();
 
@@ -144,7 +149,6 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         }
     });
 
-    // Process Keywords
     if (keywordData.size > 0) {
         const keywordIds = Array.from(keywordData.keys());
         const { keywords: amazonKeywords } = await amazonAdsApiRequest({ method: 'post', url: '/sp/keywords/list', profileId: rule.profile_id, data: { keywordIdFilter: { include: keywordIds } } });
@@ -169,7 +173,6 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         }
     }
 
-    // Process Targets (Product/Category Targeting)
     if (targetData.size > 0) {
         const targetIds = Array.from(targetData.keys());
         const { targets: amazonTargets } = await amazonAdsApiRequest({ method: 'post', url: '/sp/targets/list', profileId: rule.profile_id, data: { targetIdFilter: { include: targetIds } } });
@@ -234,9 +237,7 @@ const isRuleDue = (rule) => {
         return false;
     }
 
-    if (!last_run_at) {
-        return true; // Never been run, so it's due.
-    }
+    if (!last_run_at) return true;
 
     const now = new Date();
     const lastRun = new Date(last_run_at);
@@ -247,11 +248,10 @@ const isRuleDue = (rule) => {
         case 'minutes': valueInMs = value * 60 * 1000; break;
         case 'hours': valueInMs = value * 60 * 60 * 1000; break;
         case 'days': valueInMs = value * 24 * 60 * 60 * 1000; break;
-        default: return false; // Invalid unit
+        default: return false;
     }
     
     const nextRunTime = new Date(lastRun.getTime() + valueInMs);
-
     return now >= nextRunTime;
 };
 
@@ -265,9 +265,13 @@ const runSingleRule = async (rule) => {
 
         await client.query('UPDATE automation_rules SET last_run_at = NOW() WHERE id = $1', [rule.id]);
 
-        const performanceData = await getPerformanceData(rule);
+        const performanceData = await getPerformanceData(rule, rule.scope?.campaignIds);
+
+        // Enhanced diagnostic logging
+        console.log(`[RulesEngine] Found ${performanceData.size} entities with performance data matching the rule's scope.`);
+
         if (performanceData.size === 0) {
-            await logAction(rule, 'NO_ACTION', `No performance data found for the lookback period.`);
+            await logAction(rule, 'NO_ACTION', `No performance data found for the lookback period matching the rule's campaign scope.`);
             await client.query('COMMIT');
             return;
         }
@@ -301,12 +305,14 @@ const checkAndRunDueRules = async () => {
     console.log(`[RulesEngine Tick] Ticking... checking for due rules.`);
     try {
         const { rows: activeRules } = await pool.query('SELECT * FROM automation_rules WHERE is_active = true');
-        
         const dueRules = activeRules.filter(isRuleDue);
 
         if (dueRules.length > 0) {
             console.log(`[RulesEngine Tick] Found ${dueRules.length} due rule(s). Running them now.`);
-            await Promise.all(dueRules.map(runSingleRule));
+            // Run rules sequentially to avoid overwhelming the API or DB connection pool
+            for (const rule of dueRules) {
+                await runSingleRule(rule);
+            }
         } else {
             console.log(`[RulesEngine Tick] No rules are due to run at this time.`);
         }

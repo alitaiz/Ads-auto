@@ -3,7 +3,8 @@ import cron from 'node-cron';
 import pool from '../db.js';
 import { amazonAdsApiRequest } from '../helpers/amazon-api.js';
 
-// Global variable to hold the main ticker task
+// Define a constant for Amazon's reporting timezone to ensure consistency.
+const REPORTING_TIMEZONE = 'America/Los_Angeles';
 let mainTask = null;
 
 // --- Logging Helper ---
@@ -24,15 +25,33 @@ const getPerformanceData = async (rule, campaignIds) => {
     const allTimeWindows = rule.config.conditionGroups.flatMap(g => g.conditions.map(c => c.timeWindow));
     const maxLookbackDays = Math.max(...allTimeWindows, 1);
     
-    const today = new Date();
-    const startDate = new Date();
+    // Use a function to get "today" in the specific reporting timezone
+    const getTodayInReportingTimezone = () => {
+        const now = new Date();
+        const zonedDate = new Date(now.toLocaleString('en-US', { timeZone: REPORTING_TIMEZONE }));
+        return zonedDate;
+    };
+
+    const today = getTodayInReportingTimezone();
+    today.setHours(0, 0, 0, 0);
+
+    const startDate = new Date(today);
     startDate.setDate(today.getDate() - maxLookbackDays);
     
-    const streamCutoffDate = new Date();
+    const streamCutoffDate = new Date(today);
     streamCutoffDate.setDate(today.getDate() - 3);
 
     const startDateStr = startDate.toISOString().split('T')[0];
     const streamCutoffDateStr = streamCutoffDate.toISOString().split('T')[0];
+
+    // --- Enhanced Diagnostic Logging ---
+    console.log(`[RulesEngine DBG] Preparing to query performance data with parameters:`, {
+        ruleName: rule.name,
+        lookbackDays: maxLookbackDays,
+        startDate: startDateStr,
+        streamCutoffDate: streamCutoffDateStr,
+        campaignIds: campaignIds || 'ALL',
+    });
 
     let query;
     const params = [startDateStr, streamCutoffDateStr];
@@ -49,104 +68,73 @@ const getPerformanceData = async (rule, campaignIds) => {
     if (rule.rule_type === 'BID_ADJUSTMENT') {
         query = `
             WITH combined_performance AS (
-                -- Section 1: Fetch historical data for KEYWORDS ONLY
-                -- (The report table does not contain target_id)
-                SELECT
-                    keyword_id AS entity_id,
-                    'keyword' AS entity_type,
-                    keyword_text AS entity_text,
-                    match_type,
-                    campaign_id,
-                    ad_group_id,
-                    SUM(COALESCE(spend, cost, 0))::numeric AS spend,
-                    SUM(COALESCE(sales_7d, 0))::numeric AS sales,
-                    SUM(COALESCE(clicks, 0))::bigint AS clicks,
-                    SUM(COALESCE(purchases_7d, 0))::bigint AS orders
+                SELECT 'historical' as source, keyword_id AS entity_id, 'keyword' AS entity_type, keyword_text AS entity_text, match_type, campaign_id, ad_group_id,
+                    SUM(COALESCE(spend, cost, 0))::numeric AS spend, SUM(COALESCE(sales_7d, 0))::numeric AS sales,
+                    SUM(COALESCE(clicks, 0))::bigint AS clicks, SUM(COALESCE(purchases_7d, 0))::bigint AS orders
                 FROM sponsored_products_search_term_report
-                WHERE report_date >= $1 AND report_date < $2
-                  AND keyword_id IS NOT NULL
-                  ${campaignFilterClauseHistorical}
-                GROUP BY keyword_id, keyword_text, match_type, campaign_id, ad_group_id
+                WHERE report_date >= $1 AND report_date < $2 AND keyword_id IS NOT NULL ${campaignFilterClauseHistorical}
+                GROUP BY 1, 2, 3, 4, 5, 6, 7
 
                 UNION ALL
 
-                -- Section 2: Fetch recent data for BOTH KEYWORDS AND TARGETS from the stream
-                SELECT
-                    COALESCE((event_data->>'keywordId')::bigint, (event_data->>'targetId')::bigint) AS entity_id,
+                SELECT 'stream' as source, COALESCE((event_data->>'keywordId')::bigint, (event_data->>'targetId')::bigint) AS entity_id,
                     CASE WHEN event_data->>'keywordId' IS NOT NULL THEN 'keyword' ELSE 'target' END AS entity_type,
-                    event_data->>'keywordText' AS entity_text, -- Note: targetText is not in stream, will be null for targets
-                    event_data->>'matchType' AS match_type,
-                    (event_data->>'campaignId')::bigint AS campaign_id,
-                    (event_data->>'adGroupId')::bigint AS ad_group_id,
+                    event_data->>'keywordText' AS entity_text, event_data->>'matchType' AS match_type,
+                    (event_data->>'campaignId')::bigint AS campaign_id, (event_data->>'adGroupId')::bigint AS ad_group_id,
                     SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END) AS spend,
                     SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributedSales1d')::numeric ELSE 0 END) AS sales,
                     SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END) AS clicks,
                     SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'conversions')::bigint ELSE 0 END) AS orders
                 FROM raw_stream_events
-                WHERE (event_data->>'timeWindowStart')::timestamptz >= $2
+                WHERE (event_data->>'timeWindowStart')::timestamptz >= (($2)::timestamp AT TIME ZONE '${REPORTING_TIMEZONE}')
                   AND (event_data->>'keywordId' IS NOT NULL OR event_data->>'targetId' IS NOT NULL)
                   ${campaignFilterClauseStream}
-                GROUP BY entity_id, entity_type, entity_text, match_type, campaign_id, ad_group_id
+                GROUP BY 1, 2, 3, 4, 5, 6, 7
             )
-            -- Final Aggregation: Combine historical and stream data for each unique entity
-            SELECT
-                entity_id,
-                entity_type,
-                MAX(entity_text) as entity_text, -- Take the most recent non-null text
-                MAX(match_type) as match_type,
-                MAX(campaign_id) as campaign_id,
-                MAX(ad_group_id) as ad_group_id,
-                SUM(spend) AS total_spend,
-                SUM(sales) AS total_sales,
-                SUM(clicks) AS total_clicks,
-                SUM(orders) AS total_orders
-            FROM combined_performance
-            WHERE entity_id IS NOT NULL
-            GROUP BY entity_id, entity_type;
+            SELECT entity_id, entity_type, MAX(entity_text) as entity_text, MAX(match_type) as match_type,
+                MAX(campaign_id) as campaign_id, MAX(ad_group_id) as ad_group_id,
+                SUM(spend) AS total_spend, SUM(sales) AS total_sales,
+                SUM(clicks) AS total_clicks, SUM(orders) AS total_orders,
+                ARRAY_AGG(source) as sources
+            FROM combined_performance WHERE entity_id IS NOT NULL GROUP BY 1, 2;
         `;
     } else { // SEARCH_TERM_AUTOMATION
          query = `
-            SELECT
-                customer_search_term,
-                campaign_id,
-                ad_group_id,
-                SUM(spend) AS total_spend,
-                SUM(sales) AS total_sales,
-                SUM(clicks) AS total_clicks,
-                SUM(orders) AS total_orders
+            SELECT customer_search_term, campaign_id, ad_group_id,
+                SUM(spend) AS total_spend, SUM(sales) AS total_sales, SUM(clicks) AS total_clicks, SUM(orders) AS total_orders,
+                ARRAY_AGG(source) as sources
             FROM (
-                SELECT
-                    customer_search_term, campaign_id, ad_group_id,
-                    COALESCE(SUM(COALESCE(spend, cost)), 0)::numeric AS spend,
-                    COALESCE(SUM(COALESCE(sales_7d, 0)), 0)::numeric AS sales,
-                    COALESCE(SUM(clicks), 0)::bigint AS clicks,
-                    COALESCE(SUM(purchases_7d), 0)::bigint AS orders
+                SELECT 'historical' as source, customer_search_term, campaign_id, ad_group_id,
+                    COALESCE(SUM(COALESCE(spend, cost)), 0)::numeric AS spend, COALESCE(SUM(COALESCE(sales_7d, 0)), 0)::numeric AS sales,
+                    COALESCE(SUM(clicks), 0)::bigint AS clicks, COALESCE(SUM(purchases_7d), 0)::bigint AS orders
                 FROM sponsored_products_search_term_report
                 WHERE report_date >= $1 AND report_date < $2 AND customer_search_term IS NOT NULL ${campaignFilterClauseHistorical}
-                GROUP BY 1, 2, 3
+                GROUP BY 1, 2, 3, 4
 
                 UNION ALL
 
-                SELECT
-                    (event_data->>'searchTerm') as customer_search_term,
-                    (event_data->>'campaignId')::bigint as campaign_id,
+                SELECT 'stream' as source, (event_data->>'searchTerm') as customer_search_term, (event_data->>'campaignId')::bigint as campaign_id,
                     (event_data->>'adGroupId')::bigint as ad_group_id,
                     SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END),
                     SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributedSales1d')::numeric ELSE 0 END),
                     SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END),
                     SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'conversions')::bigint ELSE 0 END)
                 FROM raw_stream_events
-                WHERE (event_data->>'timeWindowStart')::timestamptz >= $2
-                AND (event_data->>'searchTerm') IS NOT NULL ${campaignFilterClauseStream}
-                GROUP BY 1, 2, 3
+                WHERE (event_data->>'timeWindowStart')::timestamptz >= (($2)::timestamp AT TIME ZONE '${REPORTING_TIMEZONE}')
+                  AND (event_data->>'searchTerm') IS NOT NULL ${campaignFilterClauseStream}
+                GROUP BY 1, 2, 3, 4
             ) AS combined_data
-            WHERE customer_search_term IS NOT NULL
-            GROUP BY 1, 2, 3;
+            WHERE customer_search_term IS NOT NULL GROUP BY 1, 2, 3;
          `;
     }
 
     const { rows } = await pool.query(query, params);
     
+    // --- Enhanced Diagnostic Logging ---
+    const historicalRowsCount = rows.filter(r => r.sources.includes('historical')).length;
+    const streamRowsCount = rows.filter(r => r.sources.includes('stream')).length;
+    console.log(`[RulesEngine DBG] Query returned ${historicalRowsCount} historical rows and ${streamRowsCount} stream rows.`);
+
     const performanceMap = new Map();
     for (const row of rows) {
         const key = (rule.rule_type === 'BID_ADJUSTMENT' ? row.entity_id : row.customer_search_term)?.toString();
@@ -154,12 +142,9 @@ const getPerformanceData = async (rule, campaignIds) => {
 
         if (!performanceMap.has(key)) {
              performanceMap.set(key, {
-                campaignId: row.campaign_id,
-                adGroupId: row.ad_group_id,
-                entityId: row.entity_id,
-                entityType: row.entity_type,
-                entityText: row.entity_text || row.customer_search_term,
-                matchType: row.match_type,
+                campaignId: row.campaign_id, adGroupId: row.ad_group_id,
+                entityId: row.entity_id, entityType: row.entity_type,
+                entityText: row.entity_text || row.customer_search_term, matchType: row.match_type,
                 metrics: { spend: 0, sales: 0, clicks: 0, orders: 0, acos: 0 }
             });
         }
@@ -174,7 +159,8 @@ const getPerformanceData = async (rule, campaignIds) => {
     performanceMap.forEach(entry => {
         entry.metrics.acos = entry.metrics.sales > 0 ? entry.metrics.spend / entry.metrics.sales : 0;
     });
-
+    
+    console.log(`[RulesEngine DBG] Aggregated performance data into a map of ${performanceMap.size} unique entities.`);
     return performanceMap;
 };
 

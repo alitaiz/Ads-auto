@@ -303,7 +303,8 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         let enrichedCount = 0;
         for (const target of unactionableTargets) {
             const expressionMap = adGroupExpressionToTargetId.get(target.adGroupId);
-            const targetId = expressionMap?.get(target.entityText);
+            const lookupKey = target.entityText?.toLowerCase().replace(/_/g, '-');
+            const targetId = expressionMap?.get(lookupKey);
             
             if (targetId) {
                 target.entityId = targetId;

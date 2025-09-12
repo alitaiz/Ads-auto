@@ -265,3 +265,257 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     // --- Step 1: Classify all actionable entities ---
     const keywordsToProcess = new Map();
     const targetsToProcess = new Map();
+
+    for (const [entityId, data] of performanceData.entries()) {
+        if (data.entityType === 'keyword') {
+            keywordsToProcess.set(entityId, data);
+        } else if (data.entityType === 'target') {
+            targetsToProcess.set(entityId, data);
+        }
+    }
+    
+    // --- Step 2: Fetch current state (bids) from Amazon API ---
+    if (keywordsToProcess.size > 0) {
+        try {
+            const keywordIds = Array.from(keywordsToProcess.keys());
+            const response = await amazonAdsApiRequest({
+                method: 'post', url: '/sp/keywords/list', profileId: rule.profile_id,
+                data: { keywordIdFilter: { include: keywordIds } }
+            });
+            (response.keywords || []).forEach(kw => {
+                const perfData = keywordsToProcess.get(kw.keywordId.toString());
+                if (perfData) perfData.currentBid = kw.bid;
+            });
+        } catch (e) { console.error('[RulesEngine] Failed to fetch current keyword bids.', e); }
+    }
+    if (targetsToProcess.size > 0) {
+         try {
+            const targetIds = Array.from(targetsToProcess.keys());
+            const response = await amazonAdsApiRequest({
+                method: 'post', url: '/sp/targets/list', profileId: rule.profile_id,
+                data: { targetIdFilter: { include: targetIds } }
+            });
+            (response.targets || []).forEach(t => {
+                const perfData = targetsToProcess.get(t.targetId.toString());
+                if (perfData) perfData.currentBid = t.bid;
+            });
+        } catch (e) { console.error('[RulesEngine] Failed to fetch current target bids.', e); }
+    }
+
+    // --- Step 3: Evaluate rules for each entity ---
+    const allEntities = [...keywordsToProcess.values(), ...targetsToProcess.values()];
+    for (const entity of allEntities) {
+        if (typeof entity.currentBid !== 'number') {
+            continue; // Skip entities we couldn't get a current bid for.
+        }
+        
+        // "First Match Wins" logic
+        for (const group of rule.config.conditionGroups) {
+            let allConditionsMet = true;
+            for (const condition of group.conditions) {
+                const metrics = calculateMetricsForWindow(entity.dailyData, condition.timeWindow, referenceDate);
+                if (!checkCondition(metrics[condition.metric], condition.operator, condition.value)) {
+                    allConditionsMet = false;
+                    break;
+                }
+            }
+
+            if (allConditionsMet) {
+                const { type, value, minBid, maxBid } = group.action;
+                if (type === 'adjustBidPercent') {
+                    let newBid = entity.currentBid * (1 + (value / 100));
+                    if (typeof minBid === 'number') newBid = Math.max(minBid, newBid);
+                    if (typeof maxBid === 'number') newBid = Math.min(maxBid, newBid);
+                    newBid = parseFloat(newBid.toFixed(2));
+                    
+                    if (newBid !== entity.currentBid) {
+                         const updatePayload = {
+                             [entity.entityType === 'keyword' ? 'keywordId' : 'targetId']: entity.entityId,
+                             bid: newBid
+                         };
+                         if (entity.entityType === 'keyword') keywordsToUpdate.push(updatePayload);
+                         else targetsToUpdate.push(updatePayload);
+                         changeLog.push({ entityId: entity.entityId, entityText: entity.entityText, oldBid: entity.currentBid, newBid });
+                    }
+                }
+                break; // Exit after first match
+            }
+        }
+    }
+
+    // --- Step 4: Execute bulk updates ---
+    if (keywordsToUpdate.length > 0) {
+        try {
+            await amazonAdsApiRequest({
+                method: 'put', url: '/sp/keywords', profileId: rule.profile_id,
+                data: { keywords: keywordsToUpdate }
+            });
+        } catch(e) { console.error('[RulesEngine] Failed to apply keyword bid updates.', e); }
+    }
+     if (targetsToUpdate.length > 0) {
+        try {
+            await amazonAdsApiRequest({
+                method: 'put', url: '/sp/targets', profileId: rule.profile_id,
+                data: { targets: targetsToUpdate }
+            });
+        } catch (e) { console.error('[RulesEngine] Failed to apply target bid updates.', e); }
+    }
+
+    return {
+        summary: `Adjusted bids for ${changeLog.length} target(s)/keyword(s).`,
+        details: { changes: changeLog }
+    };
+};
+
+const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
+    const negativesToCreate = [];
+    const changeLog = [];
+    const referenceDate = new Date(getLocalDateString(REPORTING_TIMEZONE));
+    referenceDate.setDate(referenceDate.getDate() - 2); // Reference date is 2 days ago for this rule type
+
+    for (const entity of performanceData.values()) {
+        for (const group of rule.config.conditionGroups) {
+            let allConditionsMet = true;
+            for (const condition of group.conditions) {
+                const metrics = calculateMetricsForWindow(entity.dailyData, condition.timeWindow, referenceDate);
+                 if (!checkCondition(metrics[condition.metric], condition.operator, condition.value)) {
+                    allConditionsMet = false;
+                    break;
+                }
+            }
+
+            if (allConditionsMet) {
+                const { type, matchType } = group.action;
+                if (type === 'negateSearchTerm') {
+                    negativesToCreate.push({
+                        campaignId: entity.campaignId,
+                        adGroupId: entity.adGroupId,
+                        keywordText: entity.entityText,
+                        matchType: matchType // e.g., 'NEGATIVE_EXACT'
+                    });
+                     changeLog.push({
+                        searchTerm: entity.entityText,
+                        campaignId: entity.campaignId,
+                        adGroupId: entity.adGroupId,
+                        matchType
+                    });
+                }
+                break; // First match wins
+            }
+        }
+    }
+
+    if (negativesToCreate.length > 0) {
+        try {
+            await amazonAdsApiRequest({
+                method: 'post', url: '/sp/negativeKeywords', profileId: rule.profile_id,
+                data: { negativeKeywords: negativesToCreate }
+            });
+        } catch (e) {
+            console.error('[RulesEngine] Failed to create negative keywords.', e);
+        }
+    }
+
+    return {
+        summary: `Created ${changeLog.length} new negative keyword(s).`,
+        details: { newNegatives: changeLog }
+    };
+};
+// --- Main Orchestration ---
+
+const isRuleDue = (rule) => {
+    if (!rule.last_run_at) return true;
+    const lastRun = new Date(rule.last_run_at);
+    const now = new Date();
+    const frequency = rule.config.frequency;
+    if (!frequency || !frequency.unit || !frequency.value) return false;
+    
+    const diffMs = now.getTime() - lastRun.getTime();
+    let requiredMs = 0;
+    switch (frequency.unit) {
+        case 'minutes': requiredMs = frequency.value * 60 * 1000; break;
+        case 'hours': requiredMs = frequency.value * 60 * 60 * 1000; break;
+        case 'days': requiredMs = frequency.value * 24 * 60 * 60 * 1000; break;
+    }
+    return diffMs >= requiredMs;
+};
+
+const processRule = async (rule) => {
+    console.log(`[RulesEngine] ⚙️  Processing rule "${rule.name}" (ID: ${rule.id}).`);
+    
+    try {
+        const campaignIds = rule.scope?.campaignIds || [];
+        const performanceData = await getPerformanceData(rule, campaignIds);
+        
+        let result;
+        if (rule.rule_type === 'BID_ADJUSTMENT') {
+            result = await evaluateBidAdjustmentRule(rule, performanceData);
+        } else if (rule.rule_type === 'SEARCH_TERM_AUTOMATION') {
+            result = await evaluateSearchTermAutomationRule(rule, performanceData);
+        } else {
+             throw new Error(`Unknown rule type: ${rule.rule_type}`);
+        }
+
+        if (result && (result.details?.changes?.length > 0 || result.details?.newNegatives?.length > 0)) {
+            await logAction(rule, 'SUCCESS', result.summary, result.details);
+        } else {
+            await logAction(rule, 'NO_ACTION', 'No entities met the rule criteria.');
+        }
+
+    } catch (error) {
+        console.error(`[RulesEngine] ❌ Error processing rule ${rule.id}:`, error);
+        await logAction(rule, 'FAILURE', 'Rule processing failed due to an error.', { error: error.message });
+    } finally {
+        await pool.query('UPDATE automation_rules SET last_run_at = NOW() WHERE id = $1', [rule.id]);
+    }
+};
+
+const checkAndRunDueRules = async () => {
+    console.log(`[RulesEngine] ⏰ Cron tick: Checking for due rules at ${new Date().toISOString()}`);
+    try {
+        const { rows: activeRules } = await pool.query('SELECT * FROM automation_rules WHERE is_active = TRUE');
+        const dueRules = activeRules.filter(isRuleDue);
+
+        if (dueRules.length === 0) {
+            console.log('[RulesEngine] No rules are due to run.');
+            return;
+        }
+
+        console.log(`[RulesEngine] Found ${dueRules.length} rule(s) to run.`);
+        for (const rule of dueRules) {
+            await processRule(rule);
+        }
+    } catch (e) {
+        console.error('[RulesEngine] CRITICAL: Failed to fetch or process rules.', e);
+    }
+};
+
+export const startRulesEngine = () => {
+    if (mainTask) {
+        console.warn('[RulesEngine] Engine is already running. Skipping new start.');
+        return;
+    }
+    console.log('[RulesEngine] 🚀 Starting the automation rules engine...');
+    // Run every minute to check for due rules
+    mainTask = cron.schedule('* * * * *', checkAndRunDueRules, {
+        scheduled: true,
+        timezone: "UTC"
+    });
+};
+
+export const stopRulesEngine = () => {
+    if (mainTask) {
+        console.log('[RulesEngine] 🛑 Stopping the automation rules engine.');
+        mainTask.stop();
+        mainTask = null;
+    }
+};
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  stopRulesEngine();
+  pool.end(() => {
+    console.log('[RulesEngine] PostgreSQL pool has been closed.');
+    process.exit(0);
+  });
+});

@@ -96,14 +96,19 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
     let campaignFilterClauseStream = '';
     let campaignFilterClauseHistorical = '';
 
-    if (campaignIds && campaignIds.length > 0) {
-        const campaignIdStrings = campaignIds.map(id => id.toString());
+    // FIX: Defensively ensure campaignIds is always an array to handle malformed scope data.
+    const campaignIdArray = Array.isArray(campaignIds) ? campaignIds : (campaignIds ? [String(campaignIds)] : []);
+
+    if (campaignIdArray.length > 0 && campaignIdArray[0]) {
+        const campaignIdStrings = campaignIdArray.map(id => String(id));
         params.push(campaignIdStrings);
         campaignFilterClauseStream = `AND (event_data->>'campaign_id') = ANY($${params.length})`;
         
-        params.push(campaignIds);
+        const campaignIdNumbers = campaignIdArray.map(id => BigInt(id));
+        params.push(campaignIdNumbers);
         campaignFilterClauseHistorical = `AND campaign_id = ANY($${params.length})`;
     }
+
 
     const query = `
         WITH stream_data AS (
@@ -351,8 +356,23 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
                 const { type, value, minBid, maxBid } = group.action;
                 if (type === 'adjustBidPercent') {
                     let newBid = entity.currentBid * (1 + (value / 100));
+
+                    // BUG FIX: Use floor for decrease and ceil for increase to avoid rounding issues
+                    // where a small change results in the same bid value (e.g., $0.50 * 0.99 = 0.495, which rounds to $0.50).
+                    if (value < 0) { // decreasing
+                        newBid = Math.floor(newBid * 100) / 100;
+                    } else { // increasing
+                        newBid = Math.ceil(newBid * 100) / 100;
+                    }
+
+                    // Enforce Amazon's minimum bid of $0.02
+                    newBid = Math.max(0.02, newBid);
+
+                    // Apply user-defined min/max bid caps
                     if (typeof minBid === 'number') newBid = Math.max(minBid, newBid);
                     if (typeof maxBid === 'number') newBid = Math.min(maxBid, newBid);
+                    
+                    // Final formatting to ensure two decimal places.
                     newBid = parseFloat(newBid.toFixed(2));
                     
                     if (newBid !== entity.currentBid) {

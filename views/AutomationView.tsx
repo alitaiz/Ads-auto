@@ -22,36 +22,40 @@ const styles: { [key: string]: React.CSSProperties } = {
   button: { padding: '8px 12px', border: '1px solid var(--border-color)', borderRadius: '4px', cursor: 'pointer', background: 'none' },
   dangerButton: { borderColor: 'var(--danger-color)', color: 'var(--danger-color)' },
   modalBackdrop: { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
-  modalContent: { backgroundColor: 'white', padding: '30px', borderRadius: 'var(--border-radius)', width: '90%', maxWidth: '800px', maxHeight: '90vh', overflowY: 'auto' },
-  modalHeader: { fontSize: '1.5rem', marginBottom: '20px' },
+  modalContent: { backgroundColor: '#f0f2f2', padding: '30px', borderRadius: 'var(--border-radius)', width: '90%', maxWidth: '800px', maxHeight: '90vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '25px' },
+  modalHeader: { fontSize: '1.75rem', margin: 0, paddingBottom: '10px', color: '#333' },
   form: { display: 'flex', flexDirection: 'column', gap: '20px' },
-  formSection: { border: '1px solid var(--border-color)', borderRadius: '4px', padding: '15px' },
-  formSectionTitle: { fontWeight: 600, margin: '-15px 0 15px', padding: '0 5px', background: 'white', width: 'fit-content' },
+  card: { border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius)', backgroundColor: 'white', padding: '20px' },
+  cardTitle: { fontSize: '1.1rem', fontWeight: 600, margin: '0 0 15px 0', color: '#333' },
   formGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
-  formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '15px' },
-  label: { fontWeight: 500, fontSize: '0.9rem' },
-  input: { padding: '10px', border: '1px solid var(--border-color)', borderRadius: '4px', fontSize: '1rem' },
-  modalActions: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '30px' },
+  label: { fontWeight: 500, fontSize: '0.9rem', color: '#555' },
+  input: { padding: '10px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '1rem', width: '100%' },
+  modalFooter: { display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 'auto', paddingTop: '20px', gap: '10px' },
+  activeCheckboxContainer: { display: 'flex', alignItems: 'center', gap: '10px', marginRight: 'auto' },
   logTable: { width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' },
   th: { textAlign: 'left', padding: '8px', borderBottom: '1px solid var(--border-color)' },
   td: { padding: '8px', borderBottom: '1px solid var(--border-color)'},
-  conditionRow: { display: 'grid', gridTemplateColumns: '1.5fr 1fr 0.5fr 1fr auto', gap: '10px', alignItems: 'center', marginBottom: '10px' },
-  conditionGroup: { border: '1px dashed #ccc', padding: '15px', borderRadius: '4px', marginBottom: '15px', position: 'relative' },
-  orDivider: { textAlign: 'center', fontWeight: 'bold', margin: '10px 0' },
-  andDivider: { fontSize: '0.8rem', fontWeight: 'bold', margin: '5px 0 5px 20px' },
-  thenBlock: { marginTop: '15px', paddingTop: '15px', borderTop: '1px solid #ddd' }
+  ifThenBlock: { border: '1px dashed #ccc', borderRadius: 'var(--border-radius)', padding: '20px', backgroundColor: '#fafafa' },
+  ifBlockHeader: { fontWeight: 'bold', fontSize: '1rem', marginBottom: '15px', color: '#333' },
+  conditionRow: { display: 'grid', gridTemplateColumns: '2fr auto auto auto 1.5fr auto', alignItems: 'center', gap: '10px', marginBottom: '10px' },
+  conditionInput: { padding: '8px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '0.9rem' },
+  conditionText: { fontSize: '0.9rem', color: '#333' },
+  deleteButton: { background: 'none', border: '1px solid var(--danger-color)', color: 'var(--danger-color)', borderRadius: '4px', width: '36px', height: '36px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', lineHeight: '1' },
+  thenBlock: { marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #eee' },
+  thenHeader: { fontWeight: 'bold', fontSize: '1rem', marginBottom: '15px', color: '#333' },
+  thenGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '15px' },
 };
 
 const getDefaultCondition = (): AutomationRuleCondition => ({
     metric: 'spend',
-    timeWindow: 60,
+    timeWindow: 5,
     operator: '>',
-    value: 20
+    value: 0
 });
 
 const getDefaultBidAdjustmentAction = (): AutomationRuleAction => ({ 
     type: 'adjustBidPercent', 
-    value: -25,
+    value: -1,
     minBid: undefined,
     maxBid: undefined,
 });
@@ -76,7 +80,7 @@ const getDefaultSearchTermGroup = (): AutomationConditionGroup => ({
 
 const getDefaultRuleConfig = () => ({
     conditionGroups: [],
-    frequency: { unit: 'hours' as 'minutes' | 'hours' | 'days', value: 1 }
+    frequency: { unit: 'minutes' as 'minutes' | 'hours' | 'days', value: 1 }
 });
 
 
@@ -150,7 +154,7 @@ export function AutomationView() {
     await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload), // FIX: Removed double JSON.stringify
     });
     setIsModalOpen(false);
     setEditingRule(null);
@@ -285,8 +289,11 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
     const removeCondition = (groupIndex: number, condIndex: number) => {
          setFormData(prev => {
             const newGroups = JSON.parse(JSON.stringify(prev.config!.conditionGroups));
-            newGroups[groupIndex].conditions.splice(condIndex, 1);
-            if (newGroups[groupIndex].conditions.length === 0) {
+            // Don't remove the last condition in a group
+            if (newGroups[groupIndex].conditions.length > 1) {
+                newGroups[groupIndex].conditions.splice(condIndex, 1);
+            } else if (newGroups.length > 1) {
+                // If it's the last condition, remove the whole group
                 newGroups.splice(groupIndex, 1);
             }
             return { ...prev, config: { ...prev.config!, conditionGroups: newGroups } };
@@ -309,20 +316,23 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
         });
     };
 
+    const modalTitle = ruleType === 'bidAdjustment' ? 'Edit Bid Adjustment Rule' : 'Edit Search Term Rule';
+
     return (
-        <div style={styles.modalBackdrop}>
-            <div style={styles.modalContent}>
-                <h2 style={styles.modalHeader}>{rule ? 'Edit' : 'Create'} {ruleType === 'bidAdjustment' ? 'Bid Adjustment' : 'Search Term'} Rule</h2>
+        <div style={styles.modalBackdrop} onClick={onClose}>
+            <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
                 <form style={styles.form} onSubmit={e => { e.preventDefault(); onSave(formData); }}>
+                    <h2 style={styles.modalHeader}>{modalTitle}</h2>
+                    
                     <div style={styles.formGroup}>
                         <label style={styles.label}>Rule Name</label>
                         <input style={styles.input} value={formData.name} onChange={e => setFormData(p => ({...p, name: e.target.value}))} required />
                     </div>
 
-                     <div style={styles.formSection}>
-                        <h4 style={styles.formSectionTitle}>Frequency</h4>
+                     <div style={styles.card}>
+                        <h3 style={styles.cardTitle}>Frequency</h3>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span>Run every</span>
+                            <span style={styles.conditionText}>Run every</span>
                             <input 
                                 type="number" 
                                 style={{...styles.input, width: '80px'}} 
@@ -332,7 +342,7 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                                 required
                             />
                             <select 
-                                style={styles.input}
+                                style={{...styles.input, flex: 1}}
                                 value={formData.config?.frequency?.unit || 'hours'}
                                 onChange={e => handleConfigChange('frequency', { ...formData.config?.frequency, unit: e.target.value as any })}
                             >
@@ -343,41 +353,36 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                         </div>
                     </div>
 
-                    <div style={styles.formSection}>
-                         <h4 style={styles.formSectionTitle}>Rule Logic (First Match Wins)</h4>
+                    <div style={styles.card}>
+                         <h3 style={styles.cardTitle}>Rule Logic (First Match Wins)</h3>
                          <p style={{fontSize: '0.8rem', color: '#666', marginTop: '-10px', marginBottom: '15px'}}>Rules are checked from top to bottom. The first group whose conditions are met will trigger its action, and the engine will stop.</p>
 
                         {formData.config?.conditionGroups.map((group, groupIndex) => (
                            <React.Fragment key={groupIndex}>
-                                <div style={styles.conditionGroup}>
-                                    <h4 style={{margin: '0 0 10px 0', fontSize: '1rem'}}>IF</h4>
+                                <div style={styles.ifThenBlock}>
+                                    <h4 style={styles.ifBlockHeader}>IF</h4>
                                     {group.conditions.map((cond, condIndex) => (
-                                        <React.Fragment key={condIndex}>
-                                            <div style={styles.conditionRow}>
-                                               <select style={styles.input} value={cond.metric} onChange={e => handleConditionChange(groupIndex, condIndex, 'metric', e.target.value)}>
-                                                    <option value="spend">Spend</option> <option value="sales">Sales</option> <option value="acos">ACOS</option>
-                                                    <option value="orders">Orders</option> <option value="clicks">Clicks</option>
-                                                </select>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                                                    <label style={{fontSize: '0.8rem'}}>in last</label>
-                                                    <input type="number" min="1" max="90" style={styles.input} value={cond.timeWindow} onChange={e => handleConditionChange(groupIndex, condIndex, 'timeWindow', Number(e.target.value))} required />
-                                                    <label style={{fontSize: '0.8rem'}}>days</label>
-                                                </div>
-                                                <select style={styles.input} value={cond.operator} onChange={e => handleConditionChange(groupIndex, condIndex, 'operator', e.target.value)}>
-                                                    <option value=">">&gt;</option> <option value="<">&lt;</option> <option value="=">=</option>
-                                                </select>
-                                                <input type="number" step="0.01" style={styles.input} value={cond.value} onChange={e => handleConditionChange(groupIndex, condIndex, 'value', Number(e.target.value))} required />
-                                                <button type="button" onClick={() => removeCondition(groupIndex, condIndex)} style={{...styles.button, ...styles.dangerButton}}>✕</button>
-                                            </div>
-                                            {condIndex < group.conditions.length - 1 && <div style={styles.andDivider}>AND</div>}
-                                        </React.Fragment>
+                                        <div key={condIndex} style={styles.conditionRow}>
+                                           <select style={styles.conditionInput} value={cond.metric} onChange={e => handleConditionChange(groupIndex, condIndex, 'metric', e.target.value)}>
+                                                <option value="spend">Spend</option> <option value="sales">Sales</option> <option value="acos">ACOS</option>
+                                                <option value="orders">Orders</option> <option value="clicks">Clicks</option>
+                                            </select>
+                                            <span style={styles.conditionText}>in last</span>
+                                            <input type="number" min="1" max="90" style={{...styles.conditionInput, width: '60px'}} value={cond.timeWindow} onChange={e => handleConditionChange(groupIndex, condIndex, 'timeWindow', Number(e.target.value))} required />
+                                            <span style={styles.conditionText}>days</span>
+                                            <select style={{...styles.conditionInput, width: '60px'}} value={cond.operator} onChange={e => handleConditionChange(groupIndex, condIndex, 'operator', e.target.value)}>
+                                                <option value=">">&gt;</option> <option value="<">&lt;</option> <option value="=">=</option>
+                                            </select>
+                                            <input type="number" step="0.01" style={styles.conditionInput} value={cond.value} onChange={e => handleConditionChange(groupIndex, condIndex, 'value', Number(e.target.value))} required />
+                                            <button type="button" onClick={() => removeCondition(groupIndex, condIndex)} style={styles.deleteButton}>&times;</button>
+                                        </div>
                                     ))}
                                      <button type="button" onClick={() => addConditionToGroup(groupIndex)} style={{...styles.button, marginTop: '10px'}}>+ Add Condition (AND)</button>
                                 
                                      <div style={styles.thenBlock}>
-                                        <h4 style={{margin: '0 0 10px 0', fontSize: '1rem'}}>THEN</h4>
+                                        <h4 style={styles.thenHeader}>THEN</h4>
                                         {ruleType === 'bidAdjustment' && (
-                                            <div style={styles.formGrid}>
+                                            <div style={styles.thenGrid}>
                                                 <div style={styles.formGroup}>
                                                     <label style={styles.label}>Action</label>
                                                     <select style={styles.input} value={(group.action.value || 0) >= 0 ? 'increase' : 'decrease'} 
@@ -414,7 +419,7 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                                             </div>
                                         )}
                                          {ruleType === 'searchTerm' && (
-                                            <div style={styles.formGrid}>
+                                            <div style={styles.thenGrid}>
                                                  <div style={styles.formGroup}>
                                                     <label style={styles.label}>Action</label>
                                                     <input style={styles.input} value="Create Negative Keyword" disabled />
@@ -430,19 +435,18 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                                         )}
                                     </div>
                                 </div>
-                               {groupIndex < formData.config!.conditionGroups.length - 1 && <div style={styles.orDivider}>OR</div>}
+                               {groupIndex < formData.config!.conditionGroups.length - 1 && <div style={{textAlign: 'center', margin: '15px 0', fontWeight: 'bold', color: '#555'}}>OR</div>}
                            </React.Fragment>
                         ))}
                         <button type="button" onClick={addConditionGroup} style={{...styles.button, marginTop: '15px'}}>+ Add Condition Group (OR)</button>
                     </div>
                     
-                     <div style={{...styles.formGroup, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
-                        <label style={styles.label}>Rule is Active</label>
-                        <input type="checkbox" style={{ transform: 'scale(1.5)' }} checked={formData.is_active} onChange={e => setFormData(p => ({...p, is_active: e.target.checked!}))} />
-                    </div>
-
-                    <div style={styles.modalActions}>
-                        <button type="button" style={styles.button} onClick={onClose}>Cancel</button>
+                    <div style={styles.modalFooter}>
+                        <div style={styles.activeCheckboxContainer}>
+                           <input type="checkbox" id="rule-is-active" style={{ transform: 'scale(1.2)' }} checked={formData.is_active} onChange={e => setFormData(p => ({...p, is_active: e.target.checked!}))} />
+                           <label htmlFor="rule-is-active" style={{...styles.label, cursor: 'pointer'}}>Rule is Active</label>
+                        </div>
+                        <button type="button" style={{...styles.button, ...styles.dangerButton}} onClick={onClose}>Cancel</button>
                         <button type="submit" style={styles.primaryButton}>Save Rule</button>
                     </div>
                 </form>

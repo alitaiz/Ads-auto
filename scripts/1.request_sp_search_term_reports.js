@@ -32,6 +32,27 @@ const REPORT_TYPE_ID = 'spSearchTerm';
 
 const createReportRequest = async (accessToken, dateStr) => {
     console.log(`[API] ➡️  Requesting report from Amazon for date: ${dateStr}`);
+    
+    // A comprehensive list of columns to request, covering most available metrics.
+    const comprehensiveColumns = [
+        "date", "portfolioId", "campaignName", "campaignId", "campaignStatus", "campaignBudgetType", "campaignBudgetAmount",
+        "adGroupName", "adGroupId", "targeting", "matchType", "searchTerm",
+        "keywordId", "keywordText", "keywordBid", "adKeywordStatus",
+        "impressions", "clicks", "cost", "costPerClick", "clickThroughRate",
+        // 7-Day Window
+        "purchases7d", "sales7d", "unitsSoldClicks7d", "acosClicks7d", "roasClicks7d",
+        "purchasesSameSku7d", "attributedSalesSameSku7d", "unitsSoldSameSku7d",
+        "salesOtherSku7d", "unitsSoldOtherSku7d",
+        // 1-Day Window
+        "purchases1d", "sales1d", "unitsSoldClicks1d", "purchasesSameSku1d", "attributedSalesSameSku1d", "unitsSoldSameSku1d",
+        // 14-Day Window
+        "purchases14d", "sales14d", "unitsSoldClicks14d", "acosClicks14d", "roasClicks14d",
+        "purchasesSameSku14d", "attributedSalesSameSku14d", "unitsSoldSameSku14d",
+        // 30-Day Window
+        "purchases30d", "sales30d", "unitsSoldClicks30d",
+        "purchasesSameSku30d", "attributedSalesSameSku30d", "unitsSoldSameSku30d",
+    ];
+
     const reportRequestBody = {
         name: `SP Search Term Full Report for ${dateStr}`,
         startDate: dateStr,
@@ -39,7 +60,7 @@ const createReportRequest = async (accessToken, dateStr) => {
         configuration: {
             adProduct: "SPONSORED_PRODUCTS",
             groupBy: ["searchTerm"],
-            columns: ["date", "campaignName", "campaignId", "adGroupName", "adGroupId", "targeting", "matchType", "searchTerm", "keyword", "impressions", "clicks", "cost", "sales7d", "purchases7d"],
+            columns: comprehensiveColumns,
             reportTypeId: REPORT_TYPE_ID,
             timeUnit: "DAILY",
             format: "GZIP_JSON"

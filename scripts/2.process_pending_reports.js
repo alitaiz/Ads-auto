@@ -73,21 +73,51 @@ const saveDataToDB = async (client, reportData) => {
 
     const query = `
         INSERT INTO sponsored_products_search_term_report (
-            report_date, campaign_name, campaign_id, ad_group_name, ad_group_id, 
-            targeting, match_type, customer_search_term, keyword_text, impressions, 
-            clicks, cost, sales_7d, purchases_7d, asin
+            report_date, portfolio_id, campaign_name, campaign_id, campaign_status, campaign_budget_type, campaign_budget_amount,
+            ad_group_name, ad_group_id, targeting, match_type, customer_search_term,
+            keyword_id, keyword_text, keyword_bid, ad_keyword_status, asin,
+            impressions, clicks, cost, cost_per_click, click_through_rate,
+            -- 7d
+            purchases_7d, sales_7d, units_sold_clicks_7d, acos_clicks_7d, roas_clicks_7d,
+            purchases_same_sku_7d, attributed_sales_same_sku_7d, units_sold_same_sku_7d,
+            sales_other_sku_7d, units_sold_other_sku_7d,
+            -- 1d
+            purchases_1d, sales_1d, units_sold_clicks_1d,
+            purchases_same_sku_1d, attributed_sales_same_sku_1d, units_sold_same_sku_1d,
+            -- 14d
+            purchases_14d, sales_14d, units_sold_clicks_14d, acos_clicks_14d, roas_clicks_14d,
+            purchases_same_sku_14d, attributed_sales_same_sku_14d, units_sold_same_sku_14d,
+            -- 30d
+            purchases_30d, sales_30d, units_sold_clicks_30d,
+            purchases_same_sku_30d, attributed_sales_same_sku_30d, units_sold_same_sku_30d
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+            $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36,
+            $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53
         )
-        ON CONFLICT (report_date, campaign_id, ad_group_id, customer_search_term, targeting) DO NOTHING;
+        ON CONFLICT (report_date, campaign_id, ad_group_id, keyword_id, customer_search_term, targeting) DO NOTHING;
     `;
     
     let insertedCount = 0;
     for (const item of reportData) {
         const values = [
-            item.date, item.campaignName, item.campaignId, item.adGroupName, item.adGroupId,
-            item.targeting, item.matchType, item.searchTerm, item.keyword, item.impressions,
-            item.clicks, item.cost, item.sales7d, item.purchases7d, extractAsinFromName(item.campaignName)
+            item.date, item.portfolioId, item.campaignName, item.campaignId, item.campaignStatus, item.campaignBudgetType, item.campaignBudgetAmount,
+            item.adGroupName, item.adGroupId, item.targeting, item.matchType, item.searchTerm,
+            item.keywordId, item.keywordText, item.keywordBid, item.adKeywordStatus, extractAsinFromName(item.campaignName),
+            item.impressions, item.clicks, item.cost, item.costPerClick, item.clickThroughRate,
+            // 7d
+            item.purchases7d, item.sales7d, item.unitsSoldClicks7d, item.acosClicks7d, item.roasClicks7d,
+            item.purchasesSameSku7d, item.attributedSalesSameSku7d, item.unitsSoldSameSku7d,
+            item.salesOtherSku7d, item.unitsSoldOtherSku7d,
+            // 1d
+            item.purchases1d, item.sales1d, item.unitsSoldClicks1d,
+            item.purchasesSameSku1d, item.attributedSalesSameSku1d, item.unitsSoldSameSku1d,
+            // 14d
+            item.purchases14d, item.sales14d, item.unitsSoldClicks14d, item.acosClicks14d, item.roasClicks14d,
+            item.purchasesSameSku14d, item.attributedSalesSameSku14d, item.unitsSoldSameSku14d,
+            // 30d
+            item.purchases30d, item.sales30d, item.unitsSoldClicks30d,
+            item.purchasesSameSku30d, item.attributedSalesSameSku30d, item.unitsSoldSameSku30d
         ];
         const res = await client.query(query, values);
         if (res.rowCount > 0) {

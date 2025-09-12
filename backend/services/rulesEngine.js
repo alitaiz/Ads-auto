@@ -90,28 +90,32 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
     historicalEndDate.setDate(today.getDate() - 2);
 
     const historicalStartDate = new Date(historicalEndDate);
-    // Adjust lookback to account for the days covered by the stream
     const historicalLookback = maxLookbackDays > 2 ? maxLookbackDays - 2 : 0;
     if (historicalLookback > 0) {
         historicalStartDate.setDate(historicalEndDate.getDate() - (historicalLookback - 1));
     }
 
+    // --- REVISED FILTERING LOGIC ---
     const params = [];
-    let campaignFilterClauseStream = '';
-    let campaignFilterClauseHistorical = '';
+    let streamCampaignFilter = '';
+    let historicalCampaignFilter = '';
 
-    const campaignIdArray = Array.isArray(campaignIds) ? campaignIds : (campaignIds ? [String(campaignIds)] : []);
+    // Sanitize and prepare campaign IDs into a single array of bigints.
+    const campaignIdArray = (Array.isArray(campaignIds) ? campaignIds : [])
+        .map(id => {
+            try { return BigInt(id); } catch (e) { return null; }
+        })
+        .filter(id => id !== null);
 
-    if (campaignIdArray.length > 0 && campaignIdArray[0]) {
-        const campaignIdStrings = campaignIdArray.map(id => String(id));
-        params.push(campaignIdStrings);
-        campaignFilterClauseStream = `AND (event_data->>'campaign_id') = ANY($${params.length})`;
-        
-        const campaignIdNumbers = campaignIdArray.map(id => BigInt(id));
-        params.push(campaignIdNumbers);
-        campaignFilterClauseHistorical = `AND campaign_id = ANY($${params.length})`;
+    if (campaignIdArray.length > 0) {
+        params.push(campaignIdArray);
+        const campaignParamIndex = `$${params.length}`; // Will be $1
+        // For stream data, cast the JSON text to bigint for comparison.
+        streamCampaignFilter = `AND (event_data->>'campaign_id')::bigint = ANY(${campaignParamIndex})`;
+        // For historical data, compare directly with the bigint column.
+        historicalCampaignFilter = `AND campaign_id = ANY(${campaignParamIndex})`;
     }
-
+    // --- END REVISED LOGIC ---
 
     const query = `
         WITH stream_data AS (
@@ -130,7 +134,7 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
             WHERE event_type IN ('sp-traffic', 'sp-conversion')
               AND (event_data->>'time_window_start')::timestamptz >= '${streamStartDate.toISOString()}'
               AND COALESCE(event_data->>'keyword_id', event_data->>'target_id') IS NOT NULL
-              ${campaignFilterClauseStream}
+              ${streamCampaignFilter}
             GROUP BY 1, 2, 3, 4, 5, 6
         ),
         historical_data AS (
@@ -148,14 +152,14 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
             FROM sponsored_products_search_term_report
             WHERE report_date >= '${historicalStartDate.toISOString().split('T')[0]}' AND report_date <= '${historicalEndDate.toISOString().split('T')[0]}'
               AND keyword_id IS NOT NULL
-              ${campaignFilterClauseHistorical}
+              ${historicalCampaignFilter}
             GROUP BY 1, 2, 3, 4, 5, 6
         )
         SELECT * FROM stream_data
         UNION ALL
         SELECT * FROM historical_data;
     `;
-
+    
     const { rows } = await pool.query(query, params);
     
     const performanceMap = new Map();

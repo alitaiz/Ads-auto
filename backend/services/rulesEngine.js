@@ -289,7 +289,7 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
                     const expressionMap = new Map();
                     for (const target of targetingClauses) {
                         if (target.expression && Array.isArray(target.expression) && target.expression[0]?.type) {
-                            const reportFriendlyExpression = target.expression[0].type.toLowerCase().replace('_', '-');
+                            const reportFriendlyExpression = target.expression[0].type.toLowerCase().replace(/_/g, '-');
                             expressionMap.set(reportFriendlyExpression, target.targetId);
                         }
                     }

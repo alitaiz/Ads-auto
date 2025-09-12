@@ -299,11 +299,12 @@ router.post('/negativeKeywords', async (req, res) => {
     }
 
     try {
-        // Amazon API expects matchType to be like 'negativeExact', not 'NEGATIVE_EXACT'.
+        // FIX: The Amazon API expects uppercase enum values for matchType, e.g., 'NEGATIVE_EXACT'.
+        // The previous logic and comment were incorrect.
         const transformedKeywords = negativeKeywords.map(kw => ({
             ...kw,
             state: 'ENABLED',
-            matchType: kw.matchType === 'NEGATIVE_EXACT' ? 'negativeExact' : 'negativePhrase'
+            matchType: kw.matchType // Pass the value directly from the request
         }));
 
         const data = await amazonAdsApiRequest({

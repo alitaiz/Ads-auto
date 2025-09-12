@@ -515,7 +515,8 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
             adGroupId: kw.adGroupId,
             keywordText: kw.keywordText,
             state: 'ENABLED',
-            matchType: kw.matchType === 'NEGATIVE_EXACT' ? 'negativeExact' : 'negativePhrase'
+            // FIX: The API expects uppercase enum values like 'NEGATIVE_EXACT'.
+            matchType: kw.matchType
         }));
 
         await amazonAdsApiRequest({

@@ -211,12 +211,12 @@ const getSearchTermAutomationPerformanceData = async (rule, campaignIds, maxLook
     }
 
     const query = `
-            SELECT
+        SELECT
             report_date AS performance_date, customer_search_term, campaign_id, ad_group_id,
-            COALESCE(SUM(COALESCE(spend, cost)), 0)::numeric AS spend,
-            COALESCE(SUM(COALESCE(sales_1d, 0)), 0)::numeric AS sales,
-            COALESCE(SUM(clicks), 0)::bigint AS clicks,
-            COALESCE(SUM(purchases_1d, 0))::bigint AS orders
+            COALESCE(SUM(COALESCE(spend, cost, 0::numeric)), 0)::numeric AS spend,
+            COALESCE(SUM(COALESCE(sales_1d, 0::numeric)), 0)::numeric AS sales,
+            COALESCE(SUM(COALESCE(clicks, 0::bigint)), 0)::bigint AS clicks,
+            COALESCE(SUM(COALESCE(purchases_1d, 0::bigint)), 0)::bigint AS orders
         FROM sponsored_products_search_term_report
         WHERE report_date >= $1 AND report_date <= $2
             AND customer_search_term IS NOT NULL

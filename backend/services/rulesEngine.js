@@ -117,8 +117,8 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
         WITH stream_data AS (
             SELECT
                 ((event_data->>'time_window_start')::timestamptz AT TIME ZONE '${REPORTING_TIMEZONE}')::date AS performance_date,
-                (event_data->>'keyword_id') AS entity_id_text,
-                (event_data->>'keyword_text') AS entity_text,
+                COALESCE(event_data->>'keyword_id', event_data->>'target_id') AS entity_id_text,
+                COALESCE(event_data->>'keyword_text', event_data->>'targeting') AS entity_text,
                 (event_data->>'match_type') AS match_type,
                 (event_data->>'campaign_id') AS campaign_id_text,
                 (event_data->>'ad_group_id') AS ad_group_id_text,
@@ -129,15 +129,15 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
             FROM raw_stream_events
             WHERE event_type IN ('sp-traffic', 'sp-conversion')
               AND (event_data->>'time_window_start')::timestamptz >= '${streamStartDate.toISOString()}'
-              AND (event_data->>'keyword_id') IS NOT NULL
+              AND COALESCE(event_data->>'keyword_id', event_data->>'target_id') IS NOT NULL
               ${campaignFilterClauseStream}
             GROUP BY 1, 2, 3, 4, 5, 6
         ),
         historical_data AS (
             SELECT
                 report_date AS performance_date,
-                keyword_id::text AS entity_id_text,
-                targeting AS entity_text,
+                COALESCE(keyword_id::text, target_id::text) AS entity_id_text,
+                COALESCE(keyword_text, targeting) AS entity_text,
                 match_type,
                 campaign_id::text AS campaign_id_text,
                 ad_group_id::text AS ad_group_id_text,
@@ -147,7 +147,7 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
                 SUM(COALESCE(purchases_1d, 0))::bigint AS orders
             FROM sponsored_products_search_term_report
             WHERE report_date >= '${historicalStartDate.toISOString().split('T')[0]}' AND report_date <= '${historicalEndDate.toISOString().split('T')[0]}'
-              AND keyword_id IS NOT NULL
+              AND COALESCE(keyword_id, target_id) IS NOT NULL
               ${campaignFilterClauseHistorical}
             GROUP BY 1, 2, 3, 4, 5, 6
         )
@@ -290,12 +290,20 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
 
     const keywordsToProcess = new Map();
     const targetsToProcess = new Map();
+    const autoTargetsToProcess = new Map(); // For auto-campaign targets
 
+    // Split entities into keywords, manual targets, and auto targets
     for (const [entityId, data] of performanceData.entries()) {
         if (data.entityType === 'keyword') {
             keywordsToProcess.set(entityId, data);
         } else if (data.entityType === 'target') {
-            targetsToProcess.set(entityId, data);
+            // Predefined targets (like loose-match) are handled differently
+            // as they don't have individual bids returned by the /targets/list API.
+            if (data.matchType === 'TARGETING_EXPRESSION_PREDEFINED') {
+                autoTargetsToProcess.set(entityId, data);
+            } else {
+                targetsToProcess.set(entityId, data);
+            }
         }
     }
     
@@ -344,7 +352,10 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         } catch (e) { console.error('[RulesEngine] Failed to fetch current target bids.', e); }
     }
     
-    const entitiesWithoutBids = [...keywordsWithoutBids, ...targetsWithoutBids];
+    // Combine entities that need their bid inherited from the ad group default.
+    // This now includes auto-targets right away, bypassing the failing API call.
+    const entitiesWithoutBids = [...keywordsWithoutBids, ...targetsWithoutBids, ...autoTargetsToProcess.values()];
+    
     if (entitiesWithoutBids.length > 0) {
         console.log(`[RulesEngine] Found ${entitiesWithoutBids.length} entity/entities inheriting bids. Fetching ad group default bids...`);
         // Robustness fix: Filter out any null/undefined ad group IDs before making the API call.
@@ -380,7 +391,7 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     }
 
 
-    const allEntities = [...keywordsToProcess.values(), ...targetsToProcess.values()];
+    const allEntities = [...keywordsToProcess.values(), ...targetsToProcess.values(), ...autoTargetsToProcess.values()];
     for (const entity of allEntities) {
         if (typeof entity.currentBid !== 'number') {
             continue;

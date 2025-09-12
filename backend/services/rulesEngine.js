@@ -95,29 +95,11 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
         historicalStartDate.setDate(historicalEndDate.getDate() - (historicalLookback - 1));
     }
 
-    // --- REVISED FILTERING LOGIC ---
-    // Bugfix: The previous parameterization for campaign filtering was unreliable.
-    // This has been fixed by simplifying the logic to use a single array of string IDs
-    // and casting the database columns to TEXT for a robust comparison, avoiding
-    // potential issues with the database driver's handling of BigInt arrays.
-    const params = [];
-    let streamCampaignFilter = '';
-    let historicalCampaignFilter = '';
-
-    const campaignIdArray = (Array.isArray(campaignIds) ? campaignIds : [])
-        .map(id => id?.toString())
-        .filter(id => id); // Filter out null/empty strings.
-
-    if (campaignIdArray.length > 0) {
-        params.push(campaignIdArray);
-        const campaignParamIndex = `$${params.length}`; // This will be $1
-        // For stream data, the campaign ID is already text.
-        streamCampaignFilter = `AND (event_data->>'campaign_id') = ANY(${campaignParamIndex})`;
-        // For historical data, cast the bigint column to text for the comparison.
-        historicalCampaignFilter = `AND campaign_id::text = ANY(${campaignParamIndex})`;
-    }
-    // --- END REVISED LOGIC ---
-
+    const params = [campaignIds.map(id => id.toString())];
+    const campaignParamIndex = `$${params.length}`;
+    
+    const streamCampaignFilter = `AND (event_data->>'campaign_id') = ANY(${campaignParamIndex})`;
+    const historicalCampaignFilter = `AND campaign_id::text = ANY(${campaignParamIndex})`;
 
     const query = `
         WITH stream_data AS (
@@ -207,14 +189,8 @@ const getSearchTermAutomationPerformanceData = async (rule, campaignIds, maxLook
     const startDateStr = startDate.toISOString().split('T')[0];
     const endDateStr = endDate.toISOString().split('T')[0];
     
-    const params = [startDateStr, endDateStr];
-    let campaignFilterClauseHistorical = '';
-
-    if (campaignIds && campaignIds.length > 0) {
-        params.push(campaignIds);
-        const campaignParamIndex = `$${params.length}`;
-        campaignFilterClauseHistorical = `AND campaign_id = ANY(${campaignParamIndex})`;
-    }
+    const params = [startDateStr, endDateStr, campaignIds.map(id => id.toString())];
+    const campaignFilterClauseHistorical = `AND campaign_id::text = ANY($3)`;
 
     const query = `
         SELECT
@@ -261,6 +237,13 @@ const getSearchTermAutomationPerformanceData = async (rule, campaignIds, maxLook
  * Main data fetching dispatcher. Determines which specialized function to call based on rule type.
  */
 const getPerformanceData = async (rule, campaignIds) => {
+    // CRITICAL FIX: If the scope is not defined or is an empty array, this rule should not
+    // apply to any campaigns. Return an empty map immediately to prevent fetching data for the entire account.
+    if (!campaignIds || !Array.isArray(campaignIds) || campaignIds.length === 0) {
+        console.log(`[RulesEngine DBG] Rule "${rule.name}" has an empty campaign scope. Skipping data fetch.`);
+        return new Map();
+    }
+
     const allTimeWindows = rule.config.conditionGroups.flatMap(g => g.conditions.map(c => c.timeWindow));
     const maxLookbackDays = Math.max(...allTimeWindows, 1);
     const todayStr = getLocalDateString(REPORTING_TIMEZONE);
@@ -566,6 +549,13 @@ const processRule = async (rule) => {
         const campaignIds = rule.scope?.campaignIds || [];
         const performanceData = await getPerformanceData(rule, campaignIds);
         
+        // If performanceData is empty (e.g., due to an empty scope), we can stop early.
+        if (performanceData.size === 0) {
+            await logAction(rule, 'NO_ACTION', 'No entities to process; scope may be empty or no data found.');
+            await pool.query('UPDATE automation_rules SET last_run_at = NOW() WHERE id = $1', [rule.id]);
+            return;
+        }
+
         let result;
         if (rule.rule_type === 'BID_ADJUSTMENT') {
             result = await evaluateBidAdjustmentRule(rule, performanceData);

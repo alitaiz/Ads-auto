@@ -96,26 +96,28 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
     }
 
     // --- REVISED FILTERING LOGIC ---
+    // Bugfix: The previous parameterization for campaign filtering was unreliable.
+    // This has been fixed by simplifying the logic to use a single array of string IDs
+    // and casting the database columns to TEXT for a robust comparison, avoiding
+    // potential issues with the database driver's handling of BigInt arrays.
     const params = [];
     let streamCampaignFilter = '';
     let historicalCampaignFilter = '';
 
-    // Sanitize and prepare campaign IDs into a single array of bigints.
     const campaignIdArray = (Array.isArray(campaignIds) ? campaignIds : [])
-        .map(id => {
-            try { return BigInt(id); } catch (e) { return null; }
-        })
-        .filter(id => id !== null);
+        .map(id => id?.toString())
+        .filter(id => id); // Filter out null/empty strings.
 
     if (campaignIdArray.length > 0) {
         params.push(campaignIdArray);
-        const campaignParamIndex = `$${params.length}`; // Will be $1
-        // For stream data, cast the JSON text to bigint for comparison.
-        streamCampaignFilter = `AND (event_data->>'campaign_id')::bigint = ANY(${campaignParamIndex})`;
-        // For historical data, compare directly with the bigint column.
-        historicalCampaignFilter = `AND campaign_id = ANY(${campaignParamIndex})`;
+        const campaignParamIndex = `$${params.length}`; // This will be $1
+        // For stream data, the campaign ID is already text.
+        streamCampaignFilter = `AND (event_data->>'campaign_id') = ANY(${campaignParamIndex})`;
+        // For historical data, cast the bigint column to text for the comparison.
+        historicalCampaignFilter = `AND campaign_id::text = ANY(${campaignParamIndex})`;
     }
     // --- END REVISED LOGIC ---
+
 
     const query = `
         WITH stream_data AS (

@@ -38,6 +38,12 @@ const getLocalDateString = (timeZone) => {
     return formatter.format(today);
 };
 
+// Convert strings from camelCase or snake_case to kebab-case for consistent lookups.
+const toKebabCase = (str = '') =>
+    str
+        .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+        .replace(/_/g, '-')
+        .toLowerCase();
 
 /**
  * Calculates aggregated metrics from a list of daily data points for a specific lookback period.
@@ -289,7 +295,7 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
                     const expressionMap = new Map();
                     for (const target of targetingClauses) {
                         if (target.expression && Array.isArray(target.expression) && target.expression[0]?.type) {
-                            const reportFriendlyExpression = target.expression[0].type.toLowerCase().replace(/_/g, '-');
+                            const reportFriendlyExpression = toKebabCase(target.expression[0].type);
                             expressionMap.set(reportFriendlyExpression, target.targetId);
                         }
                     }
@@ -303,7 +309,7 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         let enrichedCount = 0;
         for (const target of unactionableTargets) {
             const expressionMap = adGroupExpressionToTargetId.get(target.adGroupId);
-            const lookupKey = target.entityText?.toLowerCase().replace(/_/g, '-');
+            const lookupKey = target.entityText ? toKebabCase(target.entityText) : undefined;
             const targetId = expressionMap?.get(lookupKey);
             
             if (targetId) {

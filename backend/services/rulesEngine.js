@@ -364,7 +364,7 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
                     
                     if (newBid !== entity.currentBid) {
                          const updatePayload = {
-                             [entity.entityType === 'keyword' ? 'keywordId' : 'targetId']: Number(entity.entityId),
+                             [entity.entityType === 'keyword' ? 'keywordId' : 'targetId']: entity.entityId,
                              bid: newBid
                          };
                          if (entity.entityType === 'keyword') keywordsToUpdate.push(updatePayload);
@@ -421,8 +421,8 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
                 const { type, matchType } = group.action;
                 if (type === 'negateSearchTerm') {
                     negativesToCreate.push({
-                        campaignId: Number(entity.campaignId),
-                        adGroupId: Number(entity.adGroupId),
+                        campaignId: entity.campaignId,
+                        adGroupId: entity.adGroupId,
                         keywordText: entity.entityText,
                         matchType: matchType
                     });

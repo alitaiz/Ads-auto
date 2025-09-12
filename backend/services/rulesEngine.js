@@ -290,26 +290,20 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
 
     const keywordsToProcess = new Map();
     const targetsToProcess = new Map();
-    const autoTargetsToProcess = new Map(); // For auto-campaign targets
 
-    // Split entities into keywords, manual targets, and auto targets
+    // Split entities into keywords and targets. All targets are now treated the same initially.
     for (const [entityId, data] of performanceData.entries()) {
         if (data.entityType === 'keyword') {
             keywordsToProcess.set(entityId, data);
         } else if (data.entityType === 'target') {
-            // Predefined targets (like loose-match) are handled differently
-            // as they don't have individual bids returned by the /targets/list API.
-            if (data.matchType === 'TARGETING_EXPRESSION_PREDEFINED') {
-                autoTargetsToProcess.set(entityId, data);
-            } else {
-                targetsToProcess.set(entityId, data);
-            }
+            targetsToProcess.set(entityId, data);
         }
     }
     
     const keywordsWithoutBids = [];
     const targetsWithoutBids = [];
 
+    // Attempt to fetch specific bids for all keywords.
     if (keywordsToProcess.size > 0) {
         try {
             const keywordIds = Array.from(keywordsToProcess.keys());
@@ -331,6 +325,7 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         } catch (e) { console.error('[RulesEngine] Failed to fetch current keyword bids.', e); }
     }
 
+    // Attempt to fetch specific bids for ALL targets (including auto-targets).
     if (targetsToProcess.size > 0) {
         try {
             const targetIds = Array.from(targetsToProcess.keys());
@@ -349,16 +344,21 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
                     }
                 }
             });
+             // Any target not found in the response needs its bid from the ad group.
+            const foundTargetIds = new Set((response.targets || []).map(t => t.targetId.toString()));
+            for (const [targetId, perfData] of targetsToProcess.entries()) {
+                if (!foundTargetIds.has(targetId)) {
+                    targetsWithoutBids.push(perfData);
+                }
+            }
         } catch (e) { console.error('[RulesEngine] Failed to fetch current target bids.', e); }
     }
     
-    // Combine entities that need their bid inherited from the ad group default.
-    // This now includes auto-targets right away, bypassing the failing API call.
-    const entitiesWithoutBids = [...keywordsWithoutBids, ...targetsWithoutBids, ...autoTargetsToProcess.values()];
+    // Fallback: Fetch ad group default bids for any entity that didn't have a specific bid.
+    const entitiesWithoutBids = [...keywordsWithoutBids, ...targetsWithoutBids];
     
     if (entitiesWithoutBids.length > 0) {
         console.log(`[RulesEngine] Found ${entitiesWithoutBids.length} entity/entities inheriting bids. Fetching ad group default bids...`);
-        // Robustness fix: Filter out any null/undefined ad group IDs before making the API call.
         const adGroupIdsToFetch = [...new Set(entitiesWithoutBids.map(e => e.adGroupId).filter(id => id))];
         
         if (adGroupIdsToFetch.length > 0) {
@@ -391,7 +391,7 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     }
 
 
-    const allEntities = [...keywordsToProcess.values(), ...targetsToProcess.values(), ...autoTargetsToProcess.values()];
+    const allEntities = [...keywordsToProcess.values(), ...targetsToProcess.values()];
     for (const entity of allEntities) {
         if (typeof entity.currentBid !== 'number') {
             continue;

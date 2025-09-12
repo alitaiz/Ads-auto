@@ -299,6 +299,9 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         }
     }
     
+    const keywordsWithoutBids = [];
+    const targetsWithoutBids = [];
+
     if (keywordsToProcess.size > 0) {
         try {
             const keywordIds = Array.from(keywordsToProcess.keys());
@@ -309,12 +312,19 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
             });
             (response.keywords || []).forEach(kw => {
                 const perfData = keywordsToProcess.get(kw.keywordId.toString());
-                if (perfData) perfData.currentBid = kw.bid;
+                if (perfData) {
+                    if (typeof kw.bid === 'number') {
+                        perfData.currentBid = kw.bid;
+                    } else {
+                        keywordsWithoutBids.push(perfData);
+                    }
+                }
             });
         } catch (e) { console.error('[RulesEngine] Failed to fetch current keyword bids.', e); }
     }
+
     if (targetsToProcess.size > 0) {
-         try {
+        try {
             const targetIds = Array.from(targetsToProcess.keys());
             const response = await amazonAdsApiRequest({
                 method: 'post', url: '/sp/targets/list', profileId: rule.profile_id,
@@ -323,10 +333,47 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
             });
             (response.targets || []).forEach(t => {
                 const perfData = targetsToProcess.get(t.targetId.toString());
-                if (perfData) perfData.currentBid = t.bid;
+                if (perfData) {
+                    if (typeof t.bid === 'number') {
+                        perfData.currentBid = t.bid;
+                    } else {
+                        targetsWithoutBids.push(perfData);
+                    }
+                }
             });
         } catch (e) { console.error('[RulesEngine] Failed to fetch current target bids.', e); }
     }
+    
+    const entitiesWithoutBids = [...keywordsWithoutBids, ...targetsWithoutBids];
+    if (entitiesWithoutBids.length > 0) {
+        console.log(`[RulesEngine] Found ${entitiesWithoutBids.length} entity/entities inheriting bids. Fetching ad group default bids...`);
+        const adGroupIdsToFetch = [...new Set(entitiesWithoutBids.map(e => e.adGroupId))];
+        
+        try {
+            const adGroupResponse = await amazonAdsApiRequest({
+                method: 'post', url: '/sp/adGroups/list', profileId: rule.profile_id,
+                data: { adGroupIdFilter: { include: adGroupIdsToFetch } },
+                headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' }
+            });
+    
+            const adGroupBidMap = new Map();
+            (adGroupResponse.adGroups || []).forEach(ag => {
+                adGroupBidMap.set(ag.adGroupId.toString(), ag.defaultBid);
+            });
+    
+            entitiesWithoutBids.forEach(entity => {
+                const defaultBid = adGroupBidMap.get(entity.adGroupId.toString());
+                if (typeof defaultBid === 'number') {
+                    entity.currentBid = defaultBid;
+                } else {
+                     console.warn(`[RulesEngine] Could not find default bid for ad group ${entity.adGroupId} for entity ${entity.entityId}`);
+                }
+            });
+        } catch (e) {
+            console.error('[RulesEngine] Failed to fetch ad group default bids.', e);
+        }
+    }
+
 
     const allEntities = [...keywordsToProcess.values(), ...targetsToProcess.values()];
     for (const entity of allEntities) {

@@ -136,7 +136,7 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
         historical_data AS (
             SELECT
                 report_date AS performance_date,
-                COALESCE(keyword_id::text, target_id::text) AS entity_id_text,
+                keyword_id::text AS entity_id_text,
                 COALESCE(keyword_text, targeting) AS entity_text,
                 match_type,
                 campaign_id::text AS campaign_id_text,
@@ -147,7 +147,7 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
                 SUM(COALESCE(purchases_1d, 0))::bigint AS orders
             FROM sponsored_products_search_term_report
             WHERE report_date >= '${historicalStartDate.toISOString().split('T')[0]}' AND report_date <= '${historicalEndDate.toISOString().split('T')[0]}'
-              AND COALESCE(keyword_id, target_id) IS NOT NULL
+              AND keyword_id IS NOT NULL
               ${campaignFilterClauseHistorical}
             GROUP BY 1, 2, 3, 4, 5, 6
         )

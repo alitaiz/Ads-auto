@@ -278,7 +278,11 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
                     method: 'post',
                     url: '/sp/targets/list',
                     profileId: rule.profile_id,
-                    data: { adGroupIdFilter: { include: [adGroupId] } }
+                    data: { adGroupIdFilter: { include: [adGroupId] } },
+                    headers: { 
+                        'Content-Type': 'application/vnd.spTargetingClause.v3+json', 
+                        'Accept': 'application/vnd.spTargetingClause.v3+json' 
+                    }
                 });
 
                 if (targetingClauses && targetingClauses.length > 0) {
@@ -316,7 +320,13 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     // --- Process Keywords with IDs ---
     if (keywordsWithId.size > 0) {
         console.log(`[RulesEngine DBG] Fetching current bids for ${keywordsWithId.size} keywords...`);
-        const { keywords: amazonKeywords } = await amazonAdsApiRequest({ method: 'post', url: '/sp/keywords/list', profileId: rule.profile_id, data: { keywordIdFilter: { include: Array.from(keywordsWithId.keys()) } } });
+        const { keywords: amazonKeywords } = await amazonAdsApiRequest({ 
+            method: 'post', 
+            url: '/sp/keywords/list', 
+            profileId: rule.profile_id, 
+            data: { keywordIdFilter: { include: Array.from(keywordsWithId.keys()) } },
+            headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' }
+        });
         console.log(`[RulesEngine DBG] API returned ${amazonKeywords.length} keyword records.`);
         const currentBids = new Map(amazonKeywords.map(kw => [kw.keywordId.toString(), kw.bid]));
 
@@ -349,7 +359,13 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     // --- Process Targets with IDs ---
     if (targetsWithId.size > 0) {
         console.log(`[RulesEngine DBG] Fetching current bids for ${targetsWithId.size} targets...`);
-        const { targetingClauses: amazonTargets } = await amazonAdsApiRequest({ method: 'post', url: '/sp/targets/list', profileId: rule.profile_id, data: { targetIdFilter: { include: Array.from(targetsWithId.keys()) } } });
+        const { targetingClauses: amazonTargets } = await amazonAdsApiRequest({ 
+            method: 'post', 
+            url: '/sp/targets/list', 
+            profileId: rule.profile_id, 
+            data: { targetIdFilter: { include: Array.from(targetsWithId.keys()) } },
+            headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' }
+        });
         console.log(`[RulesEngine DBG] API returned ${amazonTargets.length} target records.`);
         const currentBids = new Map(amazonTargets.map(t => [t.targetId.toString(), t.bid]));
 
@@ -380,8 +396,20 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     }
     
     // --- API Calls ---
-    if (keywordsToUpdate.length > 0) await amazonAdsApiRequest({ method: 'put', url: '/sp/keywords', profileId: rule.profile_id, data: { keywords: keywordsToUpdate } });
-    if (targetsToUpdate.length > 0) await amazonAdsApiRequest({ method: 'put', url: '/sp/targets', profileId: rule.profile_id, data: { targets: targetsToUpdate } });
+    if (keywordsToUpdate.length > 0) await amazonAdsApiRequest({ 
+        method: 'put', 
+        url: '/sp/keywords', 
+        profileId: rule.profile_id, 
+        data: { keywords: keywordsToUpdate },
+        headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' }
+    });
+    if (targetsToUpdate.length > 0) await amazonAdsApiRequest({ 
+        method: 'put', 
+        url: '/sp/targets', 
+        profileId: rule.profile_id, 
+        data: { targets: targetsToUpdate },
+        headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' }
+    });
     
     // --- Determine Final Summary ---
     if (changeLog.length > 0) {
@@ -416,7 +444,13 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
         }
     }
     if (negativeKeywordsToAdd.length > 0) {
-        await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeKeywords', profileId: rule.profile_id, data: { negativeKeywords: negativeKeywordsToAdd } });
+        await amazonAdsApiRequest({ 
+            method: 'post', 
+            url: '/sp/negativeKeywords', 
+            profileId: rule.profile_id, 
+            data: { negativeKeywords: negativeKeywordsToAdd },
+            headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json', 'Accept': 'application/vnd.spNegativeKeyword.v3+json' }
+        });
     }
     return changeLog;
 };

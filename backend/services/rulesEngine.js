@@ -10,9 +10,13 @@ let mainTask = null;
 // --- Logging Helper ---
 const logAction = async (rule, status, summary, details = {}) => {
   try {
+    // Custom replacer to handle BigInts safely during JSON serialization for logging.
+    const replacer = (key, value) => (typeof value === 'bigint' ? value.toString() : value);
+    const detailsJson = JSON.stringify(details, replacer);
+
     await pool.query(
       `INSERT INTO automation_logs (rule_id, status, summary, details) VALUES ($1, $2, $3, $4)`,
-      [rule.id, status, summary, details]
+      [rule.id, status, summary, detailsJson]
     );
     console.log(`[RulesEngine] Logged action for rule "${rule.name}": ${summary}`);
   } catch (e) {
@@ -96,7 +100,6 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
     let campaignFilterClauseStream = '';
     let campaignFilterClauseHistorical = '';
 
-    // FIX: Defensively ensure campaignIds is always an array to handle malformed scope data.
     const campaignIdArray = Array.isArray(campaignIds) ? campaignIds : (campaignIds ? [String(campaignIds)] : []);
 
     if (campaignIdArray.length > 0 && campaignIdArray[0]) {
@@ -139,9 +142,9 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
                 campaign_id::text AS campaign_id_text,
                 ad_group_id::text AS ad_group_id_text,
                 SUM(COALESCE(spend, cost, 0))::numeric AS spend,
-                SUM(COALESCE(sales_1d, 0))::numeric AS sales, -- FIX: Use 1-day attribution for daily sum
+                SUM(COALESCE(sales_1d, 0))::numeric AS sales,
                 SUM(COALESCE(clicks, 0))::bigint AS clicks,
-                SUM(COALESCE(purchases_1d, 0))::bigint AS orders -- FIX: Use 1-day attribution for daily sum
+                SUM(COALESCE(purchases_1d, 0))::bigint AS orders
             FROM sponsored_products_search_term_report
             WHERE report_date >= '${historicalStartDate.toISOString().split('T')[0]}' AND report_date <= '${historicalEndDate.toISOString().split('T')[0]}'
               AND keyword_id IS NOT NULL
@@ -162,12 +165,12 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
 
         if (!performanceMap.has(key)) {
              performanceMap.set(key, {
-                entityId: BigInt(row.entity_id_text),
+                entityId: row.entity_id_text,
                 entityType: ['BROAD', 'PHRASE', 'EXACT'].includes(row.match_type) ? 'keyword' : 'target',
                 entityText: row.entity_text,
                 matchType: row.match_type,
-                campaignId: BigInt(row.campaign_id_text),
-                adGroupId: BigInt(row.ad_group_id_text),
+                campaignId: row.campaign_id_text,
+                adGroupId: row.ad_group_id_text,
                 dailyData: []
             });
         }
@@ -211,9 +214,9 @@ const getSearchTermAutomationPerformanceData = async (rule, campaignIds, maxLook
             SELECT
             report_date AS performance_date, customer_search_term, campaign_id, ad_group_id,
             COALESCE(SUM(COALESCE(spend, cost)), 0)::numeric AS spend,
-            COALESCE(SUM(COALESCE(sales_1d, 0)), 0)::numeric AS sales, -- FIX: Use 1-day attribution
+            COALESCE(SUM(COALESCE(sales_1d, 0)), 0)::numeric AS sales,
             COALESCE(SUM(clicks), 0)::bigint AS clicks,
-            COALESCE(SUM(purchases_1d, 0))::bigint AS orders -- FIX: Use 1-day attribution
+            COALESCE(SUM(purchases_1d, 0))::bigint AS orders
         FROM sponsored_products_search_term_report
         WHERE report_date >= $1 AND report_date <= $2
             AND customer_search_term IS NOT NULL
@@ -283,10 +286,8 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     const changeLog = [];
     const keywordsToUpdate = [];
     const targetsToUpdate = [];
-    // Reference date for bid adjustments is TODAY, as we are using hybrid data.
     const referenceDate = new Date(getLocalDateString(REPORTING_TIMEZONE));
 
-    // --- Step 1: Classify all actionable entities ---
     const keywordsToProcess = new Map();
     const targetsToProcess = new Map();
 
@@ -298,17 +299,13 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         }
     }
     
-    // --- Step 2: Fetch current state (bids) from Amazon API ---
     if (keywordsToProcess.size > 0) {
         try {
             const keywordIds = Array.from(keywordsToProcess.keys());
             const response = await amazonAdsApiRequest({
                 method: 'post', url: '/sp/keywords/list', profileId: rule.profile_id,
                 data: { keywordIdFilter: { include: keywordIds } },
-                headers: {
-                    'Content-Type': 'application/vnd.spKeyword.v3+json',
-                    'Accept': 'application/vnd.spKeyword.v3+json'
-                }
+                headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' }
             });
             (response.keywords || []).forEach(kw => {
                 const perfData = keywordsToProcess.get(kw.keywordId.toString());
@@ -322,10 +319,7 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
             const response = await amazonAdsApiRequest({
                 method: 'post', url: '/sp/targets/list', profileId: rule.profile_id,
                 data: { targetIdFilter: { include: targetIds } },
-                headers: {
-                    'Content-Type': 'application/vnd.spTargetingClause.v3+json',
-                    'Accept': 'application/vnd.spTargetingClause.v3+json'
-                }
+                headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' }
             });
             (response.targets || []).forEach(t => {
                 const perfData = targetsToProcess.get(t.targetId.toString());
@@ -334,14 +328,12 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         } catch (e) { console.error('[RulesEngine] Failed to fetch current target bids.', e); }
     }
 
-    // --- Step 3: Evaluate rules for each entity ---
     const allEntities = [...keywordsToProcess.values(), ...targetsToProcess.values()];
     for (const entity of allEntities) {
         if (typeof entity.currentBid !== 'number') {
-            continue; // Skip entities we couldn't get a current bid for.
+            continue;
         }
         
-        // "First Match Wins" logic
         for (const group of rule.config.conditionGroups) {
             let allConditionsMet = true;
             for (const condition of group.conditions) {
@@ -357,27 +349,22 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
                 if (type === 'adjustBidPercent') {
                     let newBid = entity.currentBid * (1 + (value / 100));
 
-                    // BUG FIX: Use floor for decrease and ceil for increase to avoid rounding issues
-                    // where a small change results in the same bid value (e.g., $0.50 * 0.99 = 0.495, which rounds to $0.50).
-                    if (value < 0) { // decreasing
+                    if (value < 0) {
                         newBid = Math.floor(newBid * 100) / 100;
-                    } else { // increasing
+                    } else {
                         newBid = Math.ceil(newBid * 100) / 100;
                     }
 
-                    // Enforce Amazon's minimum bid of $0.02
                     newBid = Math.max(0.02, newBid);
 
-                    // Apply user-defined min/max bid caps
                     if (typeof minBid === 'number') newBid = Math.max(minBid, newBid);
                     if (typeof maxBid === 'number') newBid = Math.min(maxBid, newBid);
                     
-                    // Final formatting to ensure two decimal places.
                     newBid = parseFloat(newBid.toFixed(2));
                     
                     if (newBid !== entity.currentBid) {
                          const updatePayload = {
-                             [entity.entityType === 'keyword' ? 'keywordId' : 'targetId']: entity.entityId,
+                             [entity.entityType === 'keyword' ? 'keywordId' : 'targetId']: Number(entity.entityId),
                              bid: newBid
                          };
                          if (entity.entityType === 'keyword') keywordsToUpdate.push(updatePayload);
@@ -385,12 +372,11 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
                          changeLog.push({ entityId: entity.entityId, entityText: entity.entityText, oldBid: entity.currentBid, newBid });
                     }
                 }
-                break; // Exit after first match
+                break;
             }
         }
     }
 
-    // --- Step 4: Execute bulk updates ---
     if (keywordsToUpdate.length > 0) {
         try {
             await amazonAdsApiRequest({
@@ -417,7 +403,6 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
 const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
     const negativesToCreate = [];
     const changeLog = [];
-    // Reference date for search term automation is 2 days ago, as it uses historical data.
     const referenceDate = new Date(getLocalDateString(REPORTING_TIMEZONE));
     referenceDate.setDate(referenceDate.getDate() - 2); 
 
@@ -436,10 +421,10 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
                 const { type, matchType } = group.action;
                 if (type === 'negateSearchTerm') {
                     negativesToCreate.push({
-                        campaignId: entity.campaignId,
-                        adGroupId: entity.adGroupId,
+                        campaignId: Number(entity.campaignId),
+                        adGroupId: Number(entity.adGroupId),
                         keywordText: entity.entityText,
-                        matchType: matchType // e.g., 'NEGATIVE_EXACT'
+                        matchType: matchType
                     });
                      changeLog.push({
                         searchTerm: entity.entityText,
@@ -448,7 +433,7 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
                         matchType
                     });
                 }
-                break; // First match wins
+                break;
             }
         }
     }

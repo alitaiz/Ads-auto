@@ -35,12 +35,23 @@ router.post('/stream-ingest', checkApiKey, async (req, res) => {
         const query = 'INSERT INTO raw_stream_events(event_type, event_data) VALUES($1, $2)';
         
         for (const event of events) {
+            // Robustness: Ensure the event is a processable object.
+            if (typeof event !== 'object' || event === null) {
+                console.warn('[Stream Ingest] Skipping non-object event in payload:', event);
+                continue;
+            }
+
             const eventType = event.dataset_id || event.type || 'unknown';
 
             if (Array.isArray(event.records) && event.records.length > 0) {
                  for (const innerRecord of event.records) {
-                    await client.query(query, [eventType, innerRecord]);
-                    successfulIngests++;
+                    // Robustness: Ensure innerRecord is also an object before inserting.
+                    if (typeof innerRecord === 'object' && innerRecord !== null) {
+                        await client.query(query, [eventType, innerRecord]);
+                        successfulIngests++;
+                    } else {
+                        console.warn('[Stream Ingest] Skipping non-object innerRecord:', innerRecord);
+                    }
                  }
             } else {
                 await client.query(query, [eventType, event]);
@@ -49,22 +60,21 @@ router.post('/stream-ingest', checkApiKey, async (req, res) => {
         }
 
         await client.query('COMMIT');
-        console.log(`[Stream Ingest] Success: Ingested ${successfulIngests} events into PostgreSQL.`);
+        if (successfulIngests > 0) {
+            console.log(`[Stream Ingest] Success: Ingested ${successfulIngests} events into PostgreSQL.`);
+        }
         res.status(200).json({ message: `Successfully ingested ${successfulIngests} events.` });
     } catch (error) {
         if (client) await client.query('ROLLBACK');
 
-        // Graceful handling for database errors
-        if (error.code === '42P01') { // undefined_table
-            console.error("[Stream Ingest] CRITICAL ERROR: The 'raw_stream_events' table is missing. Please run the database migration from '3.AMAZON_MARKETING_STREAM_GUIDE.md'.");
-        } else if (error.code === '42501') { // permission_denied
-             console.error("[Stream Ingest] CRITICAL ERROR: The application user does not have permission to write to 'raw_stream_events'. Please run the GRANT commands from '3.AMAZON_MARKETING_STREAM_GUIDE.md'.");
+        if (error.code === '42P01') {
+            console.error("[Stream Ingest] CRITICAL ERROR: The 'raw_stream_events' table is missing.");
+        } else if (error.code === '42501') {
+             console.error("[Stream Ingest] CRITICAL ERROR: The application user does not have permission to write to 'raw_stream_events'.");
         } else {
             console.error('[Stream Ingest] Error writing to PostgreSQL:', error);
         }
         
-        // Acknowledge the request with a 200 to prevent Firehose from retrying and flooding logs.
-        // The actionable error is logged server-side for the administrator.
         res.status(200).json({ message: "Acknowledged, but failed to process. Check backend logs for details." });
     } finally {
         if (client) client.release();
@@ -112,11 +122,10 @@ router.get('/stream/metrics', async (req, res) => {
             click_count: 0, total_spend: 0, total_orders: 0,
             total_sales: 0, last_event_timestamp: null
         };
-        // Graceful handling for missing table or permission errors
-        if (error.code === '42P01') { // undefined_table
-            console.warn("[Server] WARNING: The 'raw_stream_events' table does not exist. Returning zero metrics. Please run the necessary database migrations.");
-        } else if (error.code === '42501') { // permission_denied
-             console.warn("[Server] WARNING: The application user does not have permission to read from 'raw_stream_events'. Returning zero metrics. Please run the GRANT commands.");
+        if (error.code === '42P01') {
+            console.warn("[Server] WARNING: The 'raw_stream_events' table does not exist. Returning zero metrics.");
+        } else if (error.code === '42501') {
+             console.warn("[Server] WARNING: The application user does not have permission to read from 'raw_stream_events'. Returning zero metrics.");
         } else {
             console.error("[Server] Error fetching stream metrics:", error);
         }
@@ -196,15 +205,14 @@ router.get('/stream/campaign-metrics', async (req, res) => {
         res.json(metrics);
 
     } catch (error) {
-        // Graceful handling for missing table or permission errors
-        if (error.code === '42P01') { // undefined_table
-            console.warn("[Server] WARNING: The 'raw_stream_events' table does not exist. Returning empty metrics array. Please run the necessary database migrations.");
-        } else if (error.code === '42501') { // permission_denied
-             console.warn("[Server] WARNING: The application user does not have permission to read from 'raw_stream_events'. Returning empty metrics array. Please run the GRANT commands.");
+        if (error.code === '42P01') {
+            console.warn("[Server] WARNING: The 'raw_stream_events' table does not exist. Returning empty metrics array.");
+        } else if (error.code === '42501') {
+             console.warn("[Server] WARNING: The application user does not have permission to read from 'raw_stream_events'. Returning empty metrics array.");
         } else {
             console.error("[Server] Error fetching campaign stream metrics:", error);
         }
-        res.json([]); // Return an empty array, which is valid JSON and won't crash the frontend.
+        res.json([]);
     }
 });
 

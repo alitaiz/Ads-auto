@@ -510,18 +510,22 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
     }
 
     if (negativesToCreate.length > 0) {
-        try {
-            await amazonAdsApiRequest({
-                method: 'post', url: '/sp/negativeKeywords', profileId: rule.profile_id,
-                data: { negativeKeywords: negativesToCreate },
-                headers: {
-                    'Content-Type': 'application/vnd.spNegativeKeyword.v3+json',
-                    'Accept': 'application/vnd.spNegativeKeyword.v3+json'
-                }
-            });
-        } catch (e) {
-            console.error('[RulesEngine] Failed to create negative keywords.', e);
-        }
+        const apiPayload = negativesToCreate.map(kw => ({
+            campaignId: kw.campaignId,
+            adGroupId: kw.adGroupId,
+            keywordText: kw.keywordText,
+            state: 'ENABLED',
+            matchType: kw.matchType === 'NEGATIVE_EXACT' ? 'negativeExact' : 'negativePhrase'
+        }));
+
+        await amazonAdsApiRequest({
+            method: 'post', url: '/sp/negativeKeywords', profileId: rule.profile_id,
+            data: { negativeKeywords: apiPayload },
+            headers: {
+                'Content-Type': 'application/vnd.spNegativeKeyword.v3+json',
+                'Accept': 'application/vnd.spNegativeKeyword.v3+json'
+            }
+        });
     }
 
     return {
@@ -572,7 +576,7 @@ const processRule = async (rule) => {
 
     } catch (error) {
         console.error(`[RulesEngine] ❌ Error processing rule ${rule.id}:`, error);
-        await logAction(rule, 'FAILURE', 'Rule processing failed due to an error.', { error: error.message });
+        await logAction(rule, 'FAILURE', 'Rule processing failed due to an error.', { error: error.message, details: error.details });
     } finally {
         await pool.query('UPDATE automation_rules SET last_run_at = NOW() WHERE id = $1', [rule.id]);
     }

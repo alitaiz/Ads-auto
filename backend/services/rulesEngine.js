@@ -134,9 +134,9 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
                 campaign_id::text AS campaign_id_text,
                 ad_group_id::text AS ad_group_id_text,
                 SUM(COALESCE(spend, cost, 0))::numeric AS spend,
-                SUM(COALESCE(sales_7d, 0))::numeric AS sales,
+                SUM(COALESCE(sales_1d, 0))::numeric AS sales, -- FIX: Use 1-day attribution for daily sum
                 SUM(COALESCE(clicks, 0))::bigint AS clicks,
-                SUM(COALESCE(purchases_7d, 0))::bigint AS orders
+                SUM(COALESCE(purchases_1d, 0))::bigint AS orders -- FIX: Use 1-day attribution for daily sum
             FROM sponsored_products_search_term_report
             WHERE report_date >= '${historicalStartDate.toISOString().split('T')[0]}' AND report_date <= '${historicalEndDate.toISOString().split('T')[0]}'
               AND keyword_id IS NOT NULL
@@ -206,9 +206,9 @@ const getSearchTermAutomationPerformanceData = async (rule, campaignIds, maxLook
             SELECT
             report_date AS performance_date, customer_search_term, campaign_id, ad_group_id,
             COALESCE(SUM(COALESCE(spend, cost)), 0)::numeric AS spend,
-            COALESCE(SUM(COALESCE(sales_7d, 0)), 0)::numeric AS sales,
+            COALESCE(SUM(COALESCE(sales_1d, 0)), 0)::numeric AS sales, -- FIX: Use 1-day attribution
             COALESCE(SUM(clicks), 0)::bigint AS clicks,
-            COALESCE(SUM(purchases_7d, 0))::bigint AS orders
+            COALESCE(SUM(purchases_1d, 0))::bigint AS orders -- FIX: Use 1-day attribution
         FROM sponsored_products_search_term_report
         WHERE report_date >= $1 AND report_date <= $2
             AND customer_search_term IS NOT NULL

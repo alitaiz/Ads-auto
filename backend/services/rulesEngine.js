@@ -347,30 +347,35 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     const entitiesWithoutBids = [...keywordsWithoutBids, ...targetsWithoutBids];
     if (entitiesWithoutBids.length > 0) {
         console.log(`[RulesEngine] Found ${entitiesWithoutBids.length} entity/entities inheriting bids. Fetching ad group default bids...`);
-        const adGroupIdsToFetch = [...new Set(entitiesWithoutBids.map(e => e.adGroupId))];
+        // Robustness fix: Filter out any null/undefined ad group IDs before making the API call.
+        const adGroupIdsToFetch = [...new Set(entitiesWithoutBids.map(e => e.adGroupId).filter(id => id))];
         
-        try {
-            const adGroupResponse = await amazonAdsApiRequest({
-                method: 'post', url: '/sp/adGroups/list', profileId: rule.profile_id,
-                data: { adGroupIdFilter: { include: adGroupIdsToFetch } },
-                headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' }
-            });
-    
-            const adGroupBidMap = new Map();
-            (adGroupResponse.adGroups || []).forEach(ag => {
-                adGroupBidMap.set(ag.adGroupId.toString(), ag.defaultBid);
-            });
-    
-            entitiesWithoutBids.forEach(entity => {
-                const defaultBid = adGroupBidMap.get(entity.adGroupId.toString());
-                if (typeof defaultBid === 'number') {
-                    entity.currentBid = defaultBid;
-                } else {
-                     console.warn(`[RulesEngine] Could not find default bid for ad group ${entity.adGroupId} for entity ${entity.entityId}`);
-                }
-            });
-        } catch (e) {
-            console.error('[RulesEngine] Failed to fetch ad group default bids.', e);
+        if (adGroupIdsToFetch.length > 0) {
+            try {
+                const adGroupResponse = await amazonAdsApiRequest({
+                    method: 'post', url: '/sp/adGroups/list', profileId: rule.profile_id,
+                    data: { adGroupIdFilter: { include: adGroupIdsToFetch } },
+                    headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' }
+                });
+        
+                const adGroupBidMap = new Map();
+                (adGroupResponse.adGroups || []).forEach(ag => {
+                    adGroupBidMap.set(ag.adGroupId.toString(), ag.defaultBid);
+                });
+        
+                entitiesWithoutBids.forEach(entity => {
+                    const defaultBid = adGroupBidMap.get(entity.adGroupId.toString());
+                    if (typeof defaultBid === 'number') {
+                        entity.currentBid = defaultBid;
+                    } else {
+                         console.warn(`[RulesEngine] Could not find default bid for ad group ${entity.adGroupId} for entity ${entity.entityId}`);
+                    }
+                });
+            } catch (e) {
+                console.error('[RulesEngine] Failed to fetch ad group default bids.', e);
+            }
+        } else {
+            console.log('[RulesEngine] No valid AdGroup IDs found for fetching default bids.');
         }
     }
 

@@ -294,8 +294,10 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
                 if (targetingClauses && targetingClauses.length > 0) {
                     const expressionMap = new Map();
                     for (const target of targetingClauses) {
-                        if (target.expression && Array.isArray(target.expression) && target.expression[0]?.type) {
-                            const reportFriendlyExpression = toKebabCase(target.expression[0].type);
+                        // FIX: Use the 'value' (e.g., 'Close-match') from the expression, not the 'type'.
+                        // This allows matching against the 'targeting' text from historical reports.
+                        if (target.expression && Array.isArray(target.expression) && target.expression[0]?.value) {
+                            const reportFriendlyExpression = toKebabCase(target.expression[0].value);
                             expressionMap.set(reportFriendlyExpression, target.targetId);
                         }
                     }

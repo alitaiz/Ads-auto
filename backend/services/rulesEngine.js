@@ -74,77 +74,95 @@ const calculateMetricsForWindow = (dailyData, lookbackDays, referenceDate) => {
 // --- Data Fetching ---
 
 /**
- * Fetches performance data for BID_ADJUSTMENT rules.
- * Uses a hybrid model: historical data (>2 days old) and stream data (<2 days old).
+ * Fetches performance data for BID_ADJUSTMENT rules using a HYBRID model.
+ * - Near real-time data (last 2 days) from `raw_stream_events`.
+ * - Settled historical data (>2 days ago) from `sponsored_products_search_term_report`.
  */
 const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDays, today) => {
-    const streamCutoffDate = new Date(today);
-    streamCutoffDate.setDate(today.getDate() - 2);
+    const streamStartDate = new Date(today);
+    streamStartDate.setDate(today.getDate() - 1); // Covers today and yesterday.
 
-    const startDate = new Date(today);
-    startDate.setDate(today.getDate() - (maxLookbackDays - 1));
-    
-    const startDateStr = startDate.toISOString().split('T')[0];
-    const streamCutoffDateStr = streamCutoffDate.toISOString().split('T')[0];
+    const historicalEndDate = new Date(today);
+    historicalEndDate.setDate(today.getDate() - 2);
 
-    const params = [startDateStr, streamCutoffDateStr];
-    let campaignFilterClauseHistorical = '';
+    const historicalStartDate = new Date(historicalEndDate);
+    // Adjust lookback to account for the days covered by the stream
+    const historicalLookback = maxLookbackDays > 2 ? maxLookbackDays - 2 : 0;
+    if (historicalLookback > 0) {
+        historicalStartDate.setDate(historicalEndDate.getDate() - (historicalLookback - 1));
+    }
+
+    const params = [];
     let campaignFilterClauseStream = '';
+    let campaignFilterClauseHistorical = '';
 
     if (campaignIds && campaignIds.length > 0) {
+        const campaignIdStrings = campaignIds.map(id => id.toString());
+        params.push(campaignIdStrings);
+        campaignFilterClauseStream = `AND (event_data->>'campaign_id') = ANY($${params.length})`;
+        
         params.push(campaignIds);
-        const campaignParamIndex = `$${params.length}`;
-        campaignFilterClauseHistorical = `AND campaign_id = ANY(${campaignParamIndex})`;
-        campaignFilterClauseStream = `AND (event_data->>'campaignId')::bigint = ANY(${campaignParamIndex})`;
+        campaignFilterClauseHistorical = `AND campaign_id = ANY($${params.length})`;
     }
-    
+
     const query = `
-        SELECT
-            performance_date, entity_id, entity_type, entity_text, match_type,
-            campaign_id, ad_group_id, spend, sales, clicks, orders
-        FROM (
-            -- Historical data from Search Term Report
+        WITH stream_data AS (
             SELECT
-                report_date AS performance_date, keyword_id AS entity_id,
-                CASE WHEN match_type IN ('BROAD', 'PHRASE', 'EXACT') THEN 'keyword' ELSE 'target' END AS entity_type,
-                targeting AS entity_text, match_type, campaign_id, ad_group_id,
-                SUM(COALESCE(spend, cost, 0))::numeric AS spend, SUM(COALESCE(sales_7d, 0))::numeric AS sales,
-                SUM(COALESCE(clicks, 0))::bigint AS clicks, SUM(COALESCE(purchases_7d, 0))::bigint AS orders
-            FROM sponsored_products_search_term_report
-            WHERE report_date >= $1 AND report_date < $2 AND keyword_id IS NOT NULL ${campaignFilterClauseHistorical}
-            GROUP BY 1, 2, 3, 4, 5, 6, 7
-            UNION ALL
-            -- Stream data
-            SELECT
-                ((event_data->>'timeWindowStart')::timestamptz AT TIME ZONE '${REPORTING_TIMEZONE}')::date AS performance_date,
-                COALESCE((event_data->>'keywordId')::bigint, (event_data->>'targetId')::bigint) AS entity_id,
-                CASE WHEN event_data->>'keywordId' IS NOT NULL THEN 'keyword' ELSE 'target' END AS entity_type,
-                COALESCE(event_data->>'keywordText', event_data->>'targetingExpression', event_data->>'targetingText') AS entity_text,
-                event_data->>'matchType' AS match_type, (event_data->>'campaignId')::bigint AS campaign_id,
-                (event_data->>'adGroupId')::bigint AS ad_group_id,
+                ((event_data->>'time_window_start')::timestamptz AT TIME ZONE '${REPORTING_TIMEZONE}')::date AS performance_date,
+                (event_data->>'keyword_id') AS entity_id_text,
+                (event_data->>'keyword_text') AS entity_text,
+                (event_data->>'match_type') AS match_type,
+                (event_data->>'campaign_id') AS campaign_id_text,
+                (event_data->>'ad_group_id') AS ad_group_id_text,
                 SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END) AS spend,
-                SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributedSales1d')::numeric ELSE 0 END) AS sales,
                 SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END) AS clicks,
-                SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'conversions')::bigint ELSE 0 END) AS orders
+                SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributed_sales_1d')::numeric ELSE 0 END) AS sales,
+                SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributed_conversions_1d')::bigint ELSE 0 END) AS orders
             FROM raw_stream_events
-            WHERE (event_data->>'timeWindowStart')::timestamptz >= (($2)::timestamp AT TIME ZONE '${REPORTING_TIMEZONE}')
-                AND (event_data->>'keywordId' IS NOT NULL OR event_data->>'targetId' IS NOT NULL) ${campaignFilterClauseStream}
-            GROUP BY 1, 2, 3, 4, 5, 6, 7
-        ) AS daily_data;
+            WHERE event_type IN ('sp-traffic', 'sp-conversion')
+              AND (event_data->>'time_window_start')::timestamptz >= '${streamStartDate.toISOString()}'
+              AND (event_data->>'keyword_id') IS NOT NULL
+              ${campaignFilterClauseStream}
+            GROUP BY 1, 2, 3, 4, 5, 6
+        ),
+        historical_data AS (
+            SELECT
+                report_date AS performance_date,
+                keyword_id::text AS entity_id_text,
+                targeting AS entity_text,
+                match_type,
+                campaign_id::text AS campaign_id_text,
+                ad_group_id::text AS ad_group_id_text,
+                SUM(COALESCE(spend, cost, 0))::numeric AS spend,
+                SUM(COALESCE(sales_7d, 0))::numeric AS sales,
+                SUM(COALESCE(clicks, 0))::bigint AS clicks,
+                SUM(COALESCE(purchases_7d, 0))::bigint AS orders
+            FROM sponsored_products_search_term_report
+            WHERE report_date >= '${historicalStartDate.toISOString().split('T')[0]}' AND report_date <= '${historicalEndDate.toISOString().split('T')[0]}'
+              AND keyword_id IS NOT NULL
+              ${campaignFilterClauseHistorical}
+            GROUP BY 1, 2, 3, 4, 5, 6
+        )
+        SELECT * FROM stream_data
+        UNION ALL
+        SELECT * FROM historical_data;
     `;
 
     const { rows } = await pool.query(query, params);
     
     const performanceMap = new Map();
     for (const row of rows) {
-        const key = row.entity_id?.toString();
+        const key = row.entity_id_text;
         if (!key) continue;
 
         if (!performanceMap.has(key)) {
              performanceMap.set(key, {
-                campaignId: row.campaign_id, adGroupId: row.ad_group_id,
-                entityId: row.entity_id, entityType: row.entity_type,
-                entityText: row.entity_text, matchType: row.match_type,
+                entityId: BigInt(row.entity_id_text),
+                entityType: ['BROAD', 'PHRASE', 'EXACT'].includes(row.match_type) ? 'keyword' : 'target',
+                entityText: row.entity_text,
+                matchType: row.match_type,
+                campaignId: BigInt(row.campaign_id_text),
+                adGroupId: BigInt(row.ad_group_id_text),
                 dailyData: []
             });
         }
@@ -260,6 +278,7 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     const changeLog = [];
     const keywordsToUpdate = [];
     const targetsToUpdate = [];
+    // Reference date for bid adjustments is TODAY, as we are using hybrid data.
     const referenceDate = new Date(getLocalDateString(REPORTING_TIMEZONE));
 
     // --- Step 1: Classify all actionable entities ---
@@ -370,8 +389,9 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
 const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
     const negativesToCreate = [];
     const changeLog = [];
+    // Reference date for search term automation is 2 days ago, as it uses historical data.
     const referenceDate = new Date(getLocalDateString(REPORTING_TIMEZONE));
-    referenceDate.setDate(referenceDate.getDate() - 2); // Reference date is 2 days ago for this rule type
+    referenceDate.setDate(referenceDate.getDate() - 2); 
 
     for (const entity of performanceData.values()) {
         for (const group of rule.config.conditionGroups) {

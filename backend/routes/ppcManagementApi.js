@@ -278,7 +278,7 @@ router.put('/targets', async (req, res) => {
             method: 'put',
             url: '/sp/targets',
             profileId,
-            data: { targets: transformedUpdates },
+            data: { targetingClauses: transformedUpdates },
             headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' },
         });
         res.json(data);

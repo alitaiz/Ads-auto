@@ -456,7 +456,7 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         try {
             await amazonAdsApiRequest({
                 method: 'put', url: '/sp/targets', profileId: rule.profile_id,
-                data: { targets: targetsToUpdate },
+                data: { targetingClauses: targetsToUpdate },
                 headers: {
                     'Content-Type': 'application/vnd.spTargetingClause.v3+json',
                     'Accept': 'application/vnd.spTargetingClause.v3+json'

@@ -299,7 +299,11 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
             const keywordIds = Array.from(keywordsToProcess.keys());
             const response = await amazonAdsApiRequest({
                 method: 'post', url: '/sp/keywords/list', profileId: rule.profile_id,
-                data: { keywordIdFilter: { include: keywordIds } }
+                data: { keywordIdFilter: { include: keywordIds } },
+                headers: {
+                    'Content-Type': 'application/vnd.spKeyword.v3+json',
+                    'Accept': 'application/vnd.spKeyword.v3+json'
+                }
             });
             (response.keywords || []).forEach(kw => {
                 const perfData = keywordsToProcess.get(kw.keywordId.toString());
@@ -312,7 +316,11 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
             const targetIds = Array.from(targetsToProcess.keys());
             const response = await amazonAdsApiRequest({
                 method: 'post', url: '/sp/targets/list', profileId: rule.profile_id,
-                data: { targetIdFilter: { include: targetIds } }
+                data: { targetIdFilter: { include: targetIds } },
+                headers: {
+                    'Content-Type': 'application/vnd.spTargetingClause.v3+json',
+                    'Accept': 'application/vnd.spTargetingClause.v3+json'
+                }
             });
             (response.targets || []).forEach(t => {
                 const perfData = targetsToProcess.get(t.targetId.toString());

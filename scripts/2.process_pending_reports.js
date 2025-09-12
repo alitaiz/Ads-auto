@@ -103,7 +103,7 @@ const saveDataToDB = async (client, reportData) => {
         const values = [
             item.date, item.portfolioId, item.campaignName, item.campaignId, item.campaignStatus, item.campaignBudgetType, item.campaignBudgetAmount,
             item.adGroupName, item.adGroupId, item.targeting, item.matchType, item.searchTerm,
-            item.keywordId, item.keywordText, item.keywordBid, item.adKeywordStatus, extractAsinFromName(item.campaignName),
+            item.keywordId, item.keyword, item.keywordBid, item.adKeywordStatus, extractAsinFromName(item.campaignName), // FIX: Changed item.keywordText to item.keyword
             item.impressions, item.clicks, item.cost, item.costPerClick, item.clickThroughRate,
             // 7d
             item.purchases7d, item.sales7d, item.unitsSoldClicks7d, item.acosClicks7d, item.roasClicks7d,

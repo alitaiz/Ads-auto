@@ -37,14 +37,15 @@ const createReportRequest = async (accessToken, dateStr) => {
     const comprehensiveColumns = [
         "date", "portfolioId", "campaignName", "campaignId", "campaignStatus", "campaignBudgetType", "campaignBudgetAmount",
         "adGroupName", "adGroupId", "targeting", "matchType", "searchTerm",
-        "keywordId", "keywordText", "keywordBid", "adKeywordStatus",
+        "keywordId", "keyword", "keywordBid", "adKeywordStatus", // FIX: Changed "keywordText" to "keyword"
         "impressions", "clicks", "cost", "costPerClick", "clickThroughRate",
         // 7-Day Window
         "purchases7d", "sales7d", "unitsSoldClicks7d", "acosClicks7d", "roasClicks7d",
         "purchasesSameSku7d", "attributedSalesSameSku7d", "unitsSoldSameSku7d",
         "salesOtherSku7d", "unitsSoldOtherSku7d",
         // 1-Day Window
-        "purchases1d", "sales1d", "unitsSoldClicks1d", "purchasesSameSku1d", "attributedSalesSameSku1d", "unitsSoldSameSku1d",
+        "purchases1d", "sales1d", "unitsSoldClicks1d",
+        "purchasesSameSku1d", "attributedSalesSameSku1d", "unitsSoldSameSku1d",
         // 14-Day Window
         "purchases14d", "sales14d", "unitsSoldClicks14d", "acosClicks14d", "roasClicks14d",
         "purchasesSameSku14d", "attributedSalesSameSku14d", "unitsSoldSameSku14d",

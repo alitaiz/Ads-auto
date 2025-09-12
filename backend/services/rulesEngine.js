@@ -381,7 +381,11 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         try {
             await amazonAdsApiRequest({
                 method: 'put', url: '/sp/keywords', profileId: rule.profile_id,
-                data: { keywords: keywordsToUpdate }
+                data: { keywords: keywordsToUpdate },
+                headers: {
+                    'Content-Type': 'application/vnd.spKeyword.v3+json',
+                    'Accept': 'application/vnd.spKeyword.v3+json'
+                }
             });
         } catch(e) { console.error('[RulesEngine] Failed to apply keyword bid updates.', e); }
     }
@@ -389,7 +393,11 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         try {
             await amazonAdsApiRequest({
                 method: 'put', url: '/sp/targets', profileId: rule.profile_id,
-                data: { targets: targetsToUpdate }
+                data: { targets: targetsToUpdate },
+                headers: {
+                    'Content-Type': 'application/vnd.spTargetingClause.v3+json',
+                    'Accept': 'application/vnd.spTargetingClause.v3+json'
+                }
             });
         } catch (e) { console.error('[RulesEngine] Failed to apply target bid updates.', e); }
     }
@@ -442,7 +450,11 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
         try {
             await amazonAdsApiRequest({
                 method: 'post', url: '/sp/negativeKeywords', profileId: rule.profile_id,
-                data: { negativeKeywords: negativesToCreate }
+                data: { negativeKeywords: negativesToCreate },
+                headers: {
+                    'Content-Type': 'application/vnd.spNegativeKeyword.v3+json',
+                    'Accept': 'application/vnd.spNegativeKeyword.v3+json'
+                }
             });
         } catch (e) {
             console.error('[RulesEngine] Failed to create negative keywords.', e);

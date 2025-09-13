@@ -1,5 +1,6 @@
 -- Drop existing tables if they exist to start fresh with the new structure.
 -- This is acceptable for a development environment to apply a new schema.
+DROP TABLE IF EXISTS automation_action_throttle;
 DROP TABLE IF EXISTS automation_logs;
 DROP TABLE IF EXISTS automation_rules;
 
@@ -36,6 +37,21 @@ CREATE TABLE IF NOT EXISTS automation_logs (
     details JSONB -- Detailed log, e.g., { changes: [{ keywordId: "...", oldBid: 1.0, newBid: 0.9 }] }
 );
 
+-- NEW TABLE: Tracks when an action was last taken on an entity for a rule.
+-- This enforces a cooldown period to prevent rapid-fire changes.
+CREATE TABLE IF NOT EXISTS automation_action_throttle (
+    id SERIAL PRIMARY KEY,
+    rule_id INTEGER NOT NULL REFERENCES automation_rules(id) ON DELETE CASCADE,
+    entity_id TEXT NOT NULL, -- e.g., keyword ID, target ID, or search term text
+    throttle_until TIMESTAMPTZ NOT NULL
+);
+
+-- A unique index to enforce one throttle per rule/entity combination for fast lookups.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_throttle_unique ON automation_action_throttle (rule_id, entity_id);
+-- An index on the expiration time for potential cleanup tasks.
+CREATE INDEX IF NOT EXISTS idx_automation_throttle_expires ON automation_action_throttle (throttle_until);
+
+
 -- Index for performance
 CREATE INDEX IF NOT EXISTS idx_automation_rules_type ON automation_rules(rule_type);
 CREATE INDEX IF NOT EXISTS idx_automation_rules_active ON automation_rules(is_active);
@@ -63,5 +79,5 @@ EXECUTE PROCEDURE trigger_set_timestamp();
 -- Grant Permissions to Application User
 -- =============================================================================
 -- IMPORTANT: Replace 'yourdbuser' with the actual DB_USER from your .env file.
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE automation_rules, automation_logs TO yourdbuser;
-GRANT USAGE, SELECT ON SEQUENCE automation_rules_id_seq, automation_logs_id_seq TO yourdbuser;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE automation_rules, automation_logs, automation_action_throttle TO yourdbuser;
+GRANT USAGE, SELECT ON SEQUENCE automation_rules_id_seq, automation_logs_id_seq, automation_action_throttle_id_seq TO yourdbuser;

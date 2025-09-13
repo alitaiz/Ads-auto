@@ -74,7 +74,7 @@ export interface SummaryMetricsData {
 }
 
 export interface AutomationRuleCondition {
-    metric: 'spend' | 'sales' | 'acos' | 'orders' | 'clicks';
+    metric: 'spend' | 'sales' | 'acos' | 'orders' | 'clicks' | 'impressions';
     timeWindow: number;
     operator: '>' | '<' | '=';
     value: number;
@@ -102,8 +102,13 @@ export interface AutomationRule {
         // A rule is composed of one or more condition groups.
         // They are evaluated in order ("first match wins").
         conditionGroups: AutomationConditionGroup[];
-        // NEW: Dynamic frequency configuration
+        // Dynamic frequency configuration
         frequency: {
+            unit: 'minutes' | 'hours' | 'days';
+            value: number;
+        };
+        // NEW: Cooldown configuration to prevent rapid-fire actions on the same entity.
+        cooldown?: {
             unit: 'minutes' | 'hours' | 'days';
             value: number;
         };

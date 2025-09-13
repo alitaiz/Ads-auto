@@ -45,10 +45,10 @@ const getLocalDateString = (timeZone) => {
 /**
  * Calculates aggregated metrics from a list of daily data points for a specific lookback period.
  * This function is now timezone-aware and robust.
- * @param {Array<object>} dailyData - Array of { date, spend, sales, clicks, orders }.
+ * @param {Array<object>} dailyData - Array of { date, spend, sales, clicks, orders, impressions }.
  * @param {number} lookbackDays - The number of days to look back (e.g., 7 for "last 7 days").
  * @param {Date} referenceDate - The end date for the lookback window (inclusive).
- * @returns {object} An object with aggregated metrics { spend, sales, clicks, orders, acos }.
+ * @returns {object} An object with aggregated metrics { spend, sales, clicks, orders, impressions, acos }.
  */
 const calculateMetricsForWindow = (dailyData, lookbackDays, referenceDate) => {
     const endDate = new Date(referenceDate);
@@ -67,8 +67,9 @@ const calculateMetricsForWindow = (dailyData, lookbackDays, referenceDate) => {
         acc.sales += day.sales;
         acc.clicks += day.clicks;
         acc.orders += day.orders;
+        acc.impressions += day.impressions;
         return acc;
-    }, { spend: 0, sales: 0, clicks: 0, orders: 0 });
+    }, { spend: 0, sales: 0, clicks: 0, orders: 0, impressions: 0 });
 
     totals.acos = totals.sales > 0 ? totals.spend / totals.sales : 0;
     return totals;
@@ -110,6 +111,7 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
                 (event_data->>'match_type') AS match_type,
                 (event_data->>'campaign_id') AS campaign_id_text,
                 (event_data->>'ad_group_id') AS ad_group_id_text,
+                SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'impressions')::bigint ELSE 0 END) AS impressions,
                 SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END) AS spend,
                 SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END) AS clicks,
                 SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributed_sales_1d')::numeric ELSE 0 END) AS sales,
@@ -129,9 +131,10 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
                 match_type,
                 campaign_id::text AS campaign_id_text,
                 ad_group_id::text AS ad_group_id_text,
+                SUM(COALESCE(impressions, 0))::bigint AS impressions,
                 SUM(COALESCE(spend, cost, 0))::numeric AS spend,
-                SUM(COALESCE(sales_1d, 0))::numeric AS sales,
                 SUM(COALESCE(clicks, 0))::bigint AS clicks,
+                SUM(COALESCE(sales_1d, 0))::numeric AS sales,
                 SUM(COALESCE(purchases_1d, 0))::bigint AS orders
             FROM sponsored_products_search_term_report
             WHERE report_date >= '${historicalStartDate.toISOString().split('T')[0]}' AND report_date <= '${historicalEndDate.toISOString().split('T')[0]}'
@@ -165,6 +168,7 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
         
         performanceMap.get(key).dailyData.push({
             date: new Date(row.performance_date),
+            impressions: parseInt(row.impressions || 0, 10),
             spend: parseFloat(row.spend || 0),
             sales: parseFloat(row.sales || 0),
             clicks: parseInt(row.clicks || 0, 10),
@@ -195,6 +199,7 @@ const getSearchTermAutomationPerformanceData = async (rule, campaignIds, maxLook
     const query = `
         SELECT
             report_date AS performance_date, customer_search_term, campaign_id, ad_group_id,
+            COALESCE(SUM(COALESCE(impressions, 0::bigint)), 0)::bigint AS impressions,
             COALESCE(SUM(COALESCE(spend, cost, 0::numeric)), 0)::numeric AS spend,
             COALESCE(SUM(COALESCE(sales_1d, 0::numeric)), 0)::numeric AS sales,
             COALESCE(SUM(COALESCE(clicks, 0::bigint)), 0)::bigint AS clicks,
@@ -223,6 +228,7 @@ const getSearchTermAutomationPerformanceData = async (rule, campaignIds, maxLook
         
         performanceMap.get(key).dailyData.push({
             date: new Date(row.performance_date),
+            impressions: parseInt(row.impressions || 0, 10),
             spend: parseFloat(row.spend || 0),
             sales: parseFloat(row.sales || 0),
             clicks: parseInt(row.clicks || 0, 10),
@@ -271,7 +277,7 @@ const checkCondition = (metricValue, operator, conditionValue) => {
     }
 };
 
-const evaluateBidAdjustmentRule = async (rule, performanceData) => {
+const evaluateBidAdjustmentRule = async (rule, performanceData, throttledEntities) => {
     const actionsByCampaign = {};
     const keywordsToUpdate = [];
     const targetsToUpdate = [];
@@ -382,9 +388,8 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
 
     const allEntities = [...keywordsToProcess.values(), ...targetsToProcess.values()];
     for (const entity of allEntities) {
-        if (typeof entity.currentBid !== 'number') {
-            continue;
-        }
+        if (throttledEntities.has(entity.entityId)) continue;
+        if (typeof entity.currentBid !== 'number') continue;
         
         for (const group of rule.config.conditionGroups) {
             let allConditionsMet = true;
@@ -471,17 +476,20 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
     const totalChanges = Object.values(actionsByCampaign).reduce((sum, campaign) => sum + campaign.changes.length, 0);
     return {
         summary: `Adjusted bids for ${totalChanges} target(s)/keyword(s).`,
-        details: { actions_by_campaign: actionsByCampaign }
+        details: { actions_by_campaign: actionsByCampaign },
+        actedOnEntities: [...keywordsToUpdate.map(k => k.keywordId), ...targetsToUpdate.map(t => t.targetId)]
     };
 };
 
-const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
+const evaluateSearchTermAutomationRule = async (rule, performanceData, throttledEntities) => {
     const negativesToCreate = [];
     const actionsByCampaign = {};
     const referenceDate = new Date(getLocalDateString(REPORTING_TIMEZONE));
     referenceDate.setDate(referenceDate.getDate() - 2); 
 
     for (const entity of performanceData.values()) {
+        if (throttledEntities.has(entity.entityText)) continue;
+
         for (const group of rule.config.conditionGroups) {
             let allConditionsMet = true;
             for (const condition of group.conditions) {
@@ -543,7 +551,8 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
     const totalNegatives = Object.values(actionsByCampaign).reduce((sum, campaign) => sum + campaign.newNegatives.length, 0);
     return {
         summary: `Created ${totalNegatives} new negative keyword(s).`,
-        details: { actions_by_campaign: actionsByCampaign }
+        details: { actions_by_campaign: actionsByCampaign },
+        actedOnEntities: negativesToCreate.map(n => n.keywordText)
     };
 };
 // --- Main Orchestration ---
@@ -570,15 +579,26 @@ const processRule = async (rule) => {
     
     try {
         const campaignIds = rule.scope?.campaignIds || [];
+
+        // --- Cooldown Logic: Check throttled entities ---
+        const cooldownConfig = rule.config.cooldown || { value: 0 };
+        let throttledEntities = new Set();
+        if (cooldownConfig.value > 0) {
+            const throttleCheckResult = await pool.query(
+                'SELECT entity_id FROM automation_action_throttle WHERE rule_id = $1 AND throttle_until > NOW()',
+                [rule.id]
+            );
+            throttledEntities = new Set(throttleCheckResult.rows.map(r => r.entity_id));
+            if (throttledEntities.size > 0) {
+                console.log(`[RulesEngine] Found ${throttledEntities.size} throttled entities for rule "${rule.name}".`);
+            }
+        }
+        
         const performanceData = await getPerformanceData(rule, campaignIds);
         
-        // If performanceData is empty (e.g., due to an empty scope), we can stop early.
         if (performanceData.size === 0) {
             const emptyActionsDetails = {
-                actions_by_campaign: campaignIds.reduce((acc, id) => {
-                    acc[id] = { changes: [], newNegatives: [] };
-                    return acc;
-                }, {})
+                actions_by_campaign: campaignIds.reduce((acc, id) => { acc[id] = { changes: [], newNegatives: [] }; return acc; }, {})
             };
             await logAction(rule, 'NO_ACTION', 'No entities to process; scope may be empty or no data found.', emptyActionsDetails);
             await pool.query('UPDATE automation_rules SET last_run_at = NOW() WHERE id = $1', [rule.id]);
@@ -587,24 +607,34 @@ const processRule = async (rule) => {
 
         let result;
         if (rule.rule_type === 'BID_ADJUSTMENT') {
-            result = await evaluateBidAdjustmentRule(rule, performanceData);
+            result = await evaluateBidAdjustmentRule(rule, performanceData, throttledEntities);
         } else if (rule.rule_type === 'SEARCH_TERM_AUTOMATION') {
-            result = await evaluateSearchTermAutomationRule(rule, performanceData);
+            result = await evaluateSearchTermAutomationRule(rule, performanceData, throttledEntities);
         } else {
              throw new Error(`Unknown rule type: ${rule.rule_type}`);
         }
 
-        const hasActions = result && result.details && Object.keys(result.details.actions_by_campaign).length > 0;
+        // --- Cooldown Logic: Apply new throttles ---
+        if (result.actedOnEntities && result.actedOnEntities.length > 0 && cooldownConfig.value > 0) {
+            const { value, unit } = cooldownConfig;
+            const interval = `${value} ${unit}`;
+            const upsertQuery = `
+                INSERT INTO automation_action_throttle (rule_id, entity_id, throttle_until)
+                SELECT $1, unnest($2::text[]), NOW() + $3::interval
+                ON CONFLICT (rule_id, entity_id) DO UPDATE
+                SET throttle_until = EXCLUDED.throttle_until;
+            `;
+            await pool.query(upsertQuery, [rule.id, result.actedOnEntities, interval]);
+            console.log(`[RulesEngine] Throttled ${result.actedOnEntities.length} entities for rule "${rule.name}" for ${interval}.`);
+        }
+
+
+        const hasActions = result && result.details && Object.values(result.details.actions_by_campaign).some(c => c.changes.length > 0 || c.newNegatives.length > 0);
         if (hasActions) {
             await logAction(rule, 'SUCCESS', result.summary, result.details);
         } else {
-            // For NO_ACTION, we still create a shell 'actions_by_campaign' object
-            // so the log can be correctly associated with all campaigns in its scope.
             const emptyActionsDetails = {
-                actions_by_campaign: campaignIds.reduce((acc, id) => {
-                    acc[id] = { changes: [], newNegatives: [] };
-                    return acc;
-                }, {})
+                actions_by_campaign: campaignIds.reduce((acc, id) => { acc[id] = { changes: [], newNegatives: [] }; return acc; }, {})
             };
             await logAction(rule, 'NO_ACTION', 'No entities met the rule criteria.', emptyActionsDetails);
         }

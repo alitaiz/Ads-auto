@@ -109,7 +109,7 @@ type SortableKeys = keyof CampaignWithMetrics;
 
 // Interfaces for the new, structured log details
 interface TriggeringMetric {
-  metric: 'spend' | 'sales' | 'acos' | 'orders' | 'clicks';
+  metric: 'spend' | 'sales' | 'acos' | 'orders' | 'clicks' | 'impressions';
   timeWindow: number;
   value: number;
   condition: string;

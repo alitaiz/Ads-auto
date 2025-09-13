@@ -80,7 +80,8 @@ const getDefaultSearchTermGroup = (): AutomationConditionGroup => ({
 
 const getDefaultRuleConfig = () => ({
     conditionGroups: [],
-    frequency: { unit: 'minutes' as 'minutes' | 'hours' | 'days', value: 1 }
+    frequency: { unit: 'hours' as 'minutes' | 'hours' | 'days', value: 1 },
+    cooldown: { unit: 'hours' as 'minutes' | 'hours' | 'days', value: 24 }
 });
 
 
@@ -222,6 +223,8 @@ const RulesList = ({ rules, onEdit, onDelete }: { rules: AutomationRule[], onEdi
                 <div style={styles.ruleDetails}>
                     <span style={styles.ruleLabel}>Frequency</span>
                     <span style={styles.ruleValue}>Every {rule.config.frequency?.value || 1} {rule.config.frequency?.unit || 'hour'}(s)</span>
+                    <span style={styles.ruleLabel}>Cooldown</span>
+                    <span style={styles.ruleValue}>{rule.config.cooldown?.value || 24} {rule.config.cooldown?.unit || 'hour'}(s)</span>
                     <span style={styles.ruleLabel}>Last Run</span>
                     <span style={styles.ruleValue}>{rule.last_run_at ? new Date(rule.last_run_at).toLocaleString() : 'Never'}</span>
                 </div>
@@ -330,26 +333,55 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                     </div>
 
                      <div style={styles.card}>
-                        <h3 style={styles.cardTitle}>Frequency</h3>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span style={styles.conditionText}>Run every</span>
-                            <input 
-                                type="number" 
-                                style={{...styles.input, width: '80px'}} 
-                                value={formData.config?.frequency?.value || 1}
-                                min="1"
-                                onChange={e => handleConfigChange('frequency', { ...formData.config?.frequency, value: Number(e.target.value) })}
-                                required
-                            />
-                            <select 
-                                style={{...styles.input, flex: 1}}
-                                value={formData.config?.frequency?.unit || 'hours'}
-                                onChange={e => handleConfigChange('frequency', { ...formData.config?.frequency, unit: e.target.value as any })}
-                            >
-                                <option value="minutes">Minute(s)</option>
-                                <option value="hours">Hour(s)</option>
-                                <option value="days">Day(s)</option>
-                            </select>
+                        <h3 style={styles.cardTitle}>Scheduling &amp; Cooldown</h3>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                            <div style={styles.formGroup}>
+                                <label style={styles.label}>Frequency</label>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <span style={styles.conditionText}>Run every</span>
+                                    <input 
+                                        type="number" 
+                                        style={{...styles.input, width: '80px'}} 
+                                        value={formData.config?.frequency?.value || 1}
+                                        min="1"
+                                        onChange={e => handleConfigChange('frequency', { ...formData.config?.frequency, value: Number(e.target.value) })}
+                                        required
+                                    />
+                                    <select 
+                                        style={{...styles.input, flex: 1}}
+                                        value={formData.config?.frequency?.unit || 'hours'}
+                                        onChange={e => handleConfigChange('frequency', { ...formData.config?.frequency, unit: e.target.value as any })}
+                                    >
+                                        <option value="minutes">Minute(s)</option>
+                                        <option value="hours">Hour(s)</option>
+                                        <option value="days">Day(s)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div style={styles.formGroup}>
+                                <label style={styles.label}>Action Cooldown</label>
+                                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <span style={styles.conditionText}>Wait for</span>
+                                    <input
+                                        type="number"
+                                        style={{...styles.input, width: '80px'}}
+                                        value={formData.config?.cooldown?.value ?? 24}
+                                        min="0"
+                                        onChange={e => handleConfigChange('cooldown', { ...formData.config?.cooldown, value: Number(e.target.value) })}
+                                        required
+                                    />
+                                    <select
+                                        style={{...styles.input, flex: 1}}
+                                        value={formData.config?.cooldown?.unit || 'hours'}
+                                        onChange={e => handleConfigChange('cooldown', { ...formData.config?.cooldown, unit: e.target.value as any })}
+                                    >
+                                        <option value="minutes">Minute(s)</option>
+                                        <option value="hours">Hour(s)</option>
+                                        <option value="days">Day(s)</option>
+                                    </select>
+                                </div>
+                                <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>After acting on an item, wait this long before acting on it again. Set to 0 to disable.</p>
+                            </div>
                         </div>
                     </div>
 
@@ -364,8 +396,12 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                                     {group.conditions.map((cond, condIndex) => (
                                         <div key={condIndex} style={styles.conditionRow}>
                                            <select style={styles.conditionInput} value={cond.metric} onChange={e => handleConditionChange(groupIndex, condIndex, 'metric', e.target.value)}>
-                                                <option value="spend">Spend</option> <option value="sales">Sales</option> <option value="acos">ACOS</option>
-                                                <option value="orders">Orders</option> <option value="clicks">Clicks</option>
+                                                <option value="spend">Spend</option>
+                                                <option value="sales">Sales</option>
+                                                <option value="acos">ACOS</option>
+                                                <option value="orders">Orders</option>
+                                                <option value="clicks">Clicks</option>
+                                                <option value="impressions">Impressions</option>
                                             </select>
                                             <span style={styles.conditionText}>in last</span>
                                             <input type="number" min="1" max="90" style={{...styles.conditionInput, width: '60px'}} value={cond.timeWindow} onChange={e => handleConditionChange(groupIndex, condIndex, 'timeWindow', Number(e.target.value))} required />

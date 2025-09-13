@@ -80,6 +80,15 @@ const styles: { [key: string]: React.CSSProperties } = {
 const ITEMS_PER_PAGE = 20;
 type SortableKeys = keyof CampaignWithMetrics;
 
+interface AutomationLog {
+    id: number;
+    rule_name: string;
+    run_at: string;
+    status: string;
+    summary: string;
+    details: any;
+}
+
 const getInitialDateRange = () => {
     const end = new Date();
     const start = new Date();
@@ -117,11 +126,11 @@ export function PPCManagementView() {
     const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' } | null>({ key: 'spend', direction: 'descending' });
     const [statusFilter, setStatusFilter] = useState<CampaignState | 'all'>('enabled');
     
-    // State for expanded ad groups
+    // State for expanded automation logs
     const [expandedCampaignId, setExpandedCampaignId] = useState<number | null>(null);
-    const [adGroups, setAdGroups] = useState<Record<number, AdGroup[]>>({});
-    const [loadingAdGroups, setLoadingAdGroups] = useState<number | null>(null);
-    const [adGroupError, setAdGroupError] = useState<string | null>(null);
+    const [automationLogs, setAutomationLogs] = useState<Record<number, AutomationLog[]>>({});
+    const [loadingLogs, setLoadingLogs] = useState<number | null>(null);
+    const [logsError, setLogsError] = useState<string | null>(null);
 
 
     useEffect(() => {
@@ -285,26 +294,22 @@ export function PPCManagementView() {
     const handleToggleExpand = async (campaignId: number) => {
         const currentlyExpanded = expandedCampaignId === campaignId;
         setExpandedCampaignId(currentlyExpanded ? null : campaignId);
-        setAdGroupError(null);
+        setLogsError(null);
 
-        if (!currentlyExpanded && !adGroups[campaignId]) {
-            setLoadingAdGroups(campaignId);
+        if (!currentlyExpanded && !automationLogs[campaignId]) {
+            setLoadingLogs(campaignId);
             try {
-                const response = await fetch(`/api/amazon/campaigns/${campaignId}/adgroups`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ profileId: selectedProfileId }),
-                });
+                const response = await fetch(`/api/automation/logs?campaignId=${campaignId}`);
                 if (!response.ok) {
                     const errorData = await response.json();
-                    throw new Error(errorData.message || 'Failed to fetch ad groups.');
+                    throw new Error(errorData.error || 'Failed to fetch automation logs.');
                 }
                 const data = await response.json();
-                setAdGroups(prev => ({ ...prev, [campaignId]: data.adGroups }));
+                setAutomationLogs(prev => ({ ...prev, [campaignId]: data }));
             } catch (err) {
-                setAdGroupError(err instanceof Error ? err.message : 'An unknown error occurred.');
+                setLogsError(err instanceof Error ? err.message : 'An unknown error occurred.');
             } finally {
-                setLoadingAdGroups(null);
+                setLoadingLogs(null);
             }
         }
     };
@@ -558,10 +563,9 @@ export function PPCManagementView() {
                         onRequestSort={requestSort}
                         expandedCampaignId={expandedCampaignId}
                         onToggleExpand={handleToggleExpand}
-                        adGroups={adGroups}
-                        loadingAdGroups={loadingAdGroups}
-                        adGroupError={adGroupError}
-                        campaignName={campaigns.find(c => c.campaignId === expandedCampaignId)?.name || ''}
+                        automationLogs={automationLogs}
+                        loadingLogs={loadingLogs}
+                        logsError={logsError}
                         automationRules={automationRules}
                         onUpdateRuleAssignment={handleRuleAssignmentChange}
                     />

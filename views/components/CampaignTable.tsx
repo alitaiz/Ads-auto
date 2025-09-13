@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Link } from 'react-router-dom';
-import { CampaignWithMetrics, CampaignState, AdGroup, AutomationRule } from '../../types';
+import { CampaignWithMetrics, CampaignState, AutomationRule } from '../../types';
 import { formatPrice, formatNumber } from '../../utils';
 
 const styles: { [key: string]: React.CSSProperties } = {
@@ -62,32 +61,47 @@ const styles: { [key: string]: React.CSSProperties } = {
     expandIcon: {
         transition: 'transform 0.2s',
     },
-    adGroupSubTableContainer: {
+    logSubTableContainer: {
         backgroundColor: '#f8f9fa',
         padding: '15px 25px 15px 50px', // Indent the sub-table
     },
-    adGroupSubTable: {
+    logSubTable: {
         width: '100%',
         borderCollapse: 'collapse',
     },
-    adGroupTh: {
+    logTh: {
         textAlign: 'left',
         padding: '8px',
         borderBottom: '1px solid #dee2e6',
         fontWeight: 600,
     },
-    adGroupTd: {
+    logTd: {
         textAlign: 'left',
         padding: '8px',
         borderBottom: '1px solid #e9ecef',
+        verticalAlign: 'top',
     },
     subError: {
         color: 'var(--danger-color)',
-        padding: '10px'
+        padding: '20px'
+    },
+    detailsList: {
+        margin: 0,
+        paddingLeft: '20px',
+        fontSize: '0.85rem'
     }
 };
 
 type SortableKeys = keyof CampaignWithMetrics;
+
+interface AutomationLog {
+    id: number;
+    rule_name: string;
+    run_at: string;
+    status: string;
+    summary: string;
+    details: any;
+}
 
 interface CampaignTableProps {
     campaigns: CampaignWithMetrics[];
@@ -96,10 +110,9 @@ interface CampaignTableProps {
     onRequestSort: (key: SortableKeys) => void;
     expandedCampaignId: number | null;
     onToggleExpand: (campaignId: number) => void;
-    adGroups: Record<number, AdGroup[]>;
-    loadingAdGroups: number | null;
-    adGroupError: string | null;
-    campaignName: string;
+    automationLogs: Record<number, AutomationLog[]>;
+    loadingLogs: number | null;
+    logsError: string | null;
     automationRules: AutomationRule[];
     onUpdateRuleAssignment: (campaignId: number, ruleType: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION', newRuleId: string) => void;
 }
@@ -122,7 +135,7 @@ const SortableHeader = ({
 
 export function CampaignTable({
     campaigns, onUpdateCampaign, sortConfig, onRequestSort,
-    expandedCampaignId, onToggleExpand, adGroups, loadingAdGroups, adGroupError, campaignName,
+    expandedCampaignId, onToggleExpand, automationLogs, loadingLogs, logsError,
     automationRules, onUpdateRuleAssignment
 }: CampaignTableProps) {
     const [editingCell, setEditingCell] = useState<{ id: number; field: 'state' | 'budget' } | null>(null);
@@ -155,44 +168,70 @@ export function CampaignTable({
     const formatPercent = (value?: number) => (value ? `${(value * 100).toFixed(2)}%` : '0.00%');
     const formatRoAS = (value?: number) => (value ? `${value.toFixed(2)}` : '0.00');
 
-    const renderAdGroupSubTable = (campaignId: number) => {
-        if (loadingAdGroups === campaignId) return <div style={{ padding: '20px' }}>Loading ad groups...</div>;
-        if (adGroupError && expandedCampaignId === campaignId) return <div style={styles.subError}>Error: {adGroupError}</div>;
+    const renderLogDetails = (log: AutomationLog) => {
+        if (!log.details) return <span>{log.summary}</span>;
+        
+        const changes = log.details.changes;
+        if (changes && Array.isArray(changes) && changes.length > 0) {
+            return (
+                <ul style={styles.detailsList}>
+                    {changes.map((change, index) => (
+                        <li key={index}>
+                            Target "{change.entityText}": bid changed from {formatPrice(change.oldBid)} to {formatPrice(change.newBid)}
+                        </li>
+                    ))}
+                </ul>
+            );
+        }
 
-        const currentAdGroups = adGroups[campaignId];
-        if (!currentAdGroups) return null;
+        const newNegatives = log.details.newNegatives;
+        if (newNegatives && Array.isArray(newNegatives) && newNegatives.length > 0) {
+            return (
+                 <ul style={styles.detailsList}>
+                    {newNegatives.map((neg, index) => (
+                        <li key={index}>
+                            Negated "{neg.searchTerm}" as {neg.matchType?.replace(/_/g, ' ')}
+                        </li>
+                    ))}
+                </ul>
+            );
+        }
+        
+        return <span>{log.summary}</span>;
+    };
+    
+    const renderAutomationLogsSubTable = (campaignId: number) => {
+        if (loadingLogs === campaignId) return <div style={{ padding: '20px' }}>Loading logs...</div>;
+        if (logsError && expandedCampaignId === campaignId) return <div style={styles.subError}>Error: {logsError}</div>;
+
+        const currentLogs = automationLogs[campaignId];
+        if (!currentLogs) return null;
 
         return (
-            <div style={styles.adGroupSubTableContainer}>
-                {currentAdGroups.length > 0 ? (
-                     <table style={styles.adGroupSubTable}>
+            <div style={styles.logSubTableContainer}>
+                {currentLogs.length > 0 ? (
+                     <table style={styles.logSubTable}>
                         <thead>
                             <tr>
-                                <th style={{...styles.adGroupTh, width: '60%'}}>Ad Group Name</th>
-                                <th style={{...styles.adGroupTh, width: '20%'}}>Status</th>
-                                <th style={{...styles.adGroupTh, width: '20%'}}>Default Bid</th>
+                                <th style={{...styles.logTh, width: '20%'}}>Time</th>
+                                <th style={{...styles.logTh, width: '20%'}}>Rule Name</th>
+                                <th style={{...styles.logTh, width: '15%'}}>Status</th>
+                                <th style={{...styles.logTh, width: '45%'}}>Details</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {currentAdGroups.map(ag => (
-                                <tr key={ag.adGroupId}>
-                                    <td style={styles.adGroupTd}>
-                                        <Link 
-                                            to={`/adgroups/${ag.adGroupId}/keywords`} 
-                                            state={{ adGroupName: ag.name, campaignName: campaignName }}
-                                            style={styles.link}
-                                        >
-                                            {ag.name}
-                                        </Link>
-                                    </td>
-                                    <td style={{...styles.adGroupTd, textTransform: 'capitalize'}}>{ag.state}</td>
-                                    <td style={styles.adGroupTd}>{formatPrice(ag.defaultBid)}</td>
+                            {currentLogs.map(log => (
+                                <tr key={log.id}>
+                                    <td style={styles.logTd}>{new Date(log.run_at).toLocaleString()}</td>
+                                    <td style={styles.logTd}>{log.rule_name}</td>
+                                    <td style={styles.logTd}>{log.status}</td>
+                                    <td style={styles.logTd}>{renderLogDetails(log)}</td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 ) : (
-                    <div>No ad groups found in this campaign.</div>
+                    <div>No automation logs found for this campaign in the last 200 runs.</div>
                 )}
             </div>
         );
@@ -296,7 +335,7 @@ export function CampaignTable({
                             {expandedCampaignId === campaign.campaignId && (
                                 <tr>
                                     <td colSpan={totalColumns} style={{padding: 0, borderTop: 0}}>
-                                        {renderAdGroupSubTable(campaign.campaignId)}
+                                        {renderAutomationLogsSubTable(campaign.campaignId)}
                                     </td>
                                 </tr>
                             )}

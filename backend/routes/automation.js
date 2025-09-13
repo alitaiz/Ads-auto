@@ -78,16 +78,36 @@ router.delete('/automation/rules/:id', async (req, res) => {
 
 // GET logs
 router.get('/automation/logs', async (req, res) => {
-  const { ruleId } = req.query;
+  const { ruleId, campaignId } = req.query;
   try {
-    const { rows } = await pool.query(
-      `SELECT r.name as rule_name, l.* FROM automation_logs l
-       LEFT JOIN automation_rules r ON l.rule_id = r.id
-       WHERE ($1::int IS NULL OR rule_id = $1)
-       ORDER BY run_at DESC
-       LIMIT 200`,
-      [ruleId ? Number(ruleId) : null]
-    );
+    let queryText = `
+        SELECT r.name as rule_name, l.* FROM automation_logs l
+        LEFT JOIN automation_rules r ON l.rule_id = r.id
+    `;
+    const conditions = [];
+    const params = [];
+
+    if (ruleId) {
+        params.push(Number(ruleId));
+        conditions.push(`l.rule_id = $${params.length}`);
+    }
+    
+    if (campaignId) {
+        // The campaignIds in scope can be numbers or strings.
+        // The @> operator checks if the JSON array on the left contains the element on the right.
+        // We cast the campaignId parameter to JSONB to handle either type.
+        // e.g., '{"campaignIds": [123, "456"]}' @> '123'::jsonb -> true
+        params.push(campaignId);
+        conditions.push(`r.scope->'campaignIds' @> to_jsonb($${params.length}::text)`);
+    }
+    
+    if (conditions.length > 0) {
+        queryText += ' WHERE ' + conditions.join(' AND ');
+    }
+    
+    queryText += ' ORDER BY l.run_at DESC LIMIT 200';
+
+    const { rows } = await pool.query(queryText, params);
     res.json(rows);
   } catch (err) {
     console.error('Failed to fetch automation logs', err);

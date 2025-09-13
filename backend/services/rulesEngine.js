@@ -272,7 +272,7 @@ const checkCondition = (metricValue, operator, conditionValue) => {
 };
 
 const evaluateBidAdjustmentRule = async (rule, performanceData) => {
-    const changeLog = [];
+    const actionsByCampaign = {};
     const keywordsToUpdate = [];
     const targetsToUpdate = [];
     const referenceDate = new Date(getLocalDateString(REPORTING_TIMEZONE));
@@ -415,13 +415,27 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
                     newBid = parseFloat(newBid.toFixed(2));
                     
                     if (newBid !== entity.currentBid) {
+                        const campaignId = entity.campaignId;
+                        if (!actionsByCampaign[campaignId]) {
+                            actionsByCampaign[campaignId] = { changes: [], newNegatives: [] };
+                        }
+
+                        const triggeringMetrics = group.conditions.map(c => {
+                            const metrics = calculateMetricsForWindow(entity.dailyData, c.timeWindow, referenceDate);
+                            return { metric: c.metric, timeWindow: c.timeWindow, value: metrics[c.metric], condition: `${c.operator} ${c.value}` };
+                        });
+                        
+                        actionsByCampaign[campaignId].changes.push({
+                           entityType: entity.entityType, entityId: entity.entityId, entityText: entity.entityText,
+                           oldBid: entity.currentBid, newBid: newBid, triggeringMetrics
+                        });
+
                          const updatePayload = {
                              [entity.entityType === 'keyword' ? 'keywordId' : 'targetId']: entity.entityId,
                              bid: newBid
                          };
                          if (entity.entityType === 'keyword') keywordsToUpdate.push(updatePayload);
                          else targetsToUpdate.push(updatePayload);
-                         changeLog.push({ entityId: entity.entityId, entityText: entity.entityText, oldBid: entity.currentBid, newBid });
                     }
                 }
                 break;
@@ -454,15 +468,16 @@ const evaluateBidAdjustmentRule = async (rule, performanceData) => {
         } catch (e) { console.error('[RulesEngine] Failed to apply target bid updates.', e); }
     }
 
+    const totalChanges = Object.values(actionsByCampaign).reduce((sum, campaign) => sum + campaign.changes.length, 0);
     return {
-        summary: `Adjusted bids for ${changeLog.length} target(s)/keyword(s).`,
-        details: { changes: changeLog }
+        summary: `Adjusted bids for ${totalChanges} target(s)/keyword(s).`,
+        details: { actions_by_campaign: actionsByCampaign }
     };
 };
 
 const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
     const negativesToCreate = [];
-    const changeLog = [];
+    const actionsByCampaign = {};
     const referenceDate = new Date(getLocalDateString(REPORTING_TIMEZONE));
     referenceDate.setDate(referenceDate.getDate() - 2); 
 
@@ -480,17 +495,25 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
             if (allConditionsMet) {
                 const { type, matchType } = group.action;
                 if (type === 'negateSearchTerm') {
+                    const campaignId = entity.campaignId;
+                    if (!actionsByCampaign[campaignId]) {
+                        actionsByCampaign[campaignId] = { changes: [], newNegatives: [] };
+                    }
+
+                    const triggeringMetrics = group.conditions.map(c => {
+                        const metrics = calculateMetricsForWindow(entity.dailyData, c.timeWindow, referenceDate);
+                        return { metric: c.metric, timeWindow: c.timeWindow, value: metrics[c.metric], condition: `${c.operator} ${c.value}` };
+                    });
+                    
+                    actionsByCampaign[campaignId].newNegatives.push({
+                        searchTerm: entity.entityText, campaignId, adGroupId: entity.adGroupId, matchType, triggeringMetrics
+                    });
+
                     negativesToCreate.push({
                         campaignId: entity.campaignId,
                         adGroupId: entity.adGroupId,
                         keywordText: entity.entityText,
                         matchType: matchType
-                    });
-                     changeLog.push({
-                        searchTerm: entity.entityText,
-                        campaignId: entity.campaignId,
-                        adGroupId: entity.adGroupId,
-                        matchType
                     });
                 }
                 break;
@@ -504,7 +527,6 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
             adGroupId: kw.adGroupId,
             keywordText: kw.keywordText,
             state: 'ENABLED',
-            // FIX: The API expects uppercase enum values like 'NEGATIVE_EXACT'.
             matchType: kw.matchType
         }));
 
@@ -518,9 +540,10 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData) => {
         });
     }
 
+    const totalNegatives = Object.values(actionsByCampaign).reduce((sum, campaign) => sum + campaign.newNegatives.length, 0);
     return {
-        summary: `Created ${changeLog.length} new negative keyword(s).`,
-        details: { newNegatives: changeLog }
+        summary: `Created ${totalNegatives} new negative keyword(s).`,
+        details: { actions_by_campaign: actionsByCampaign }
     };
 };
 // --- Main Orchestration ---
@@ -565,7 +588,8 @@ const processRule = async (rule) => {
              throw new Error(`Unknown rule type: ${rule.rule_type}`);
         }
 
-        if (result && (result.details?.changes?.length > 0 || result.details?.newNegatives?.length > 0)) {
+        const hasActions = result && result.details && Object.keys(result.details.actions_by_campaign).length > 0;
+        if (hasActions) {
             await logAction(rule, 'SUCCESS', result.summary, result.details);
         } else {
             await logAction(rule, 'NO_ACTION', 'No entities met the rule criteria.');

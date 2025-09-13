@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { CampaignWithMetrics, CampaignState, AutomationRule } from '../../types';
-import { formatPrice, formatNumber } from '../../utils';
+import { formatPrice, formatNumber, formatPercent } from '../../utils';
 
 const styles: { [key: string]: React.CSSProperties } = {
     tableContainer: {
@@ -88,20 +88,56 @@ const styles: { [key: string]: React.CSSProperties } = {
     detailsList: {
         margin: 0,
         paddingLeft: '20px',
-        fontSize: '0.85rem'
+        fontSize: '0.85rem',
+        listStyleType: 'none',
+    },
+    metricList: {
+        margin: '5px 0 10px 0',
+        paddingLeft: '20px',
+        fontSize: '0.8rem',
+        color: '#555',
+        borderLeft: '2px solid #ddd',
+        listStyleType: 'circle',
+    },
+    metricListItem: {
+        marginBottom: '3px',
     }
 };
 
 type SortableKeys = keyof CampaignWithMetrics;
 
+
+// Interfaces for the new, structured log details
+interface TriggeringMetric {
+  metric: 'spend' | 'sales' | 'acos' | 'orders' | 'clicks';
+  timeWindow: number;
+  value: number;
+  condition: string;
+}
+interface LogChange {
+  entityText: string;
+  oldBid: number;
+  newBid: number;
+  triggeringMetrics: TriggeringMetric[];
+}
+interface LogNegative {
+    searchTerm: string;
+    matchType: string;
+    triggeringMetrics: TriggeringMetric[];
+}
+interface CampaignLogDetails {
+  changes?: LogChange[];
+  newNegatives?: LogNegative[];
+}
 interface AutomationLog {
     id: number;
     rule_name: string;
     run_at: string;
     status: string;
     summary: string;
-    details: any;
+    details: CampaignLogDetails;
 }
+
 
 interface CampaignTableProps {
     campaigns: CampaignWithMetrics[];
@@ -165,39 +201,52 @@ export function CampaignTable({
         else if (e.key === 'Escape') setEditingCell(null);
     };
     
-    const formatPercent = (value?: number) => (value ? `${(value * 100).toFixed(2)}%` : '0.00%');
     const formatRoAS = (value?: number) => (value ? `${value.toFixed(2)}` : '0.00');
 
-    const renderLogDetails = (log: AutomationLog) => {
-        if (!log.details) return <span>{log.summary}</span>;
-        
-        const changes = log.details.changes;
-        if (changes && Array.isArray(changes) && changes.length > 0) {
-            return (
-                <ul style={styles.detailsList}>
-                    {changes.map((change, index) => (
-                        <li key={index}>
-                            Target "{change.entityText}": bid changed from {formatPrice(change.oldBid)} to {formatPrice(change.newBid)}
-                        </li>
-                    ))}
-                </ul>
-            );
+    const formatMetricValue = (value: number, metric: TriggeringMetric['metric']) => {
+        switch (metric) {
+            case 'acos': return formatPercent(value);
+            case 'spend':
+            case 'sales': return formatPrice(value);
+            default: return formatNumber(value);
         }
+    };
 
-        const newNegatives = log.details.newNegatives;
-        if (newNegatives && Array.isArray(newNegatives) && newNegatives.length > 0) {
-            return (
-                 <ul style={styles.detailsList}>
-                    {newNegatives.map((neg, index) => (
-                        <li key={index}>
-                            Negated "{neg.searchTerm}" as {neg.matchType?.replace(/_/g, ' ')}
-                        </li>
-                    ))}
-                </ul>
-            );
-        }
+    const renderLogDetails = (log: AutomationLog) => {
+        const details = log.details;
+        if (!details) return <span>{log.summary || 'No details available.'}</span>;
+
+        const changes = details.changes || [];
+        const newNegatives = details.newNegatives || [];
         
-        return <span>{log.summary}</span>;
+        return (
+            <ul style={styles.detailsList}>
+                {changes.map((change, index) => (
+                    <li key={`c-${index}`}>
+                        Target "{change.entityText}": bid changed from {formatPrice(change.oldBid)} to {formatPrice(change.newBid)}
+                        <ul style={styles.metricList}>
+                            {change.triggeringMetrics.map((metric, mIndex) => (
+                                <li key={mIndex} style={styles.metricListItem}>
+                                    {metric.metric} ({metric.timeWindow} days) was <strong>{formatMetricValue(metric.value, metric.metric)}</strong> (Condition: {metric.condition})
+                                </li>
+                            ))}
+                        </ul>
+                    </li>
+                ))}
+                {newNegatives.map((neg, index) => (
+                    <li key={`n-${index}`}>
+                         Negated "{neg.searchTerm}" as {neg.matchType?.replace(/_/g, ' ')}
+                         <ul style={styles.metricList}>
+                            {neg.triggeringMetrics.map((metric, mIndex) => (
+                                <li key={mIndex} style={styles.metricListItem}>
+                                    {metric.metric} ({metric.timeWindow} days) was <strong>{formatMetricValue(metric.value, metric.metric)}</strong> (Condition: {metric.condition})
+                                </li>
+                            ))}
+                        </ul>
+                    </li>
+                ))}
+            </ul>
+        );
     };
     
     const renderAutomationLogsSubTable = (campaignId: number) => {

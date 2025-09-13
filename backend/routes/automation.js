@@ -93,10 +93,6 @@ router.get('/automation/logs', async (req, res) => {
     }
     
     if (campaignId) {
-        // The campaignIds in scope can be numbers or strings.
-        // The @> operator checks if the JSON array on the left contains the element on the right.
-        // We cast the campaignId parameter to JSONB to handle either type.
-        // e.g., '{"campaignIds": [123, "456"]}' @> '123'::jsonb -> true
         params.push(campaignId);
         conditions.push(`r.scope->'campaignIds' @> to_jsonb($${params.length}::text)`);
     }
@@ -108,6 +104,33 @@ router.get('/automation/logs', async (req, res) => {
     queryText += ' ORDER BY l.run_at DESC LIMIT 200';
 
     const { rows } = await pool.query(queryText, params);
+    
+    // If a campaignId is specified, we must filter the details of each log
+    // to ensure only actions for THAT campaign are shown. This fixes the bug.
+    if (campaignId) {
+        const campaignSpecificLogs = rows.map(log => {
+            const campaignActions = log.details?.actions_by_campaign?.[campaignId];
+            
+            // If the log entry contains specific actions for this campaign,
+            // create a new log object with only those details.
+            if (campaignActions && (campaignActions.changes?.length > 0 || campaignActions.newNegatives?.length > 0)) {
+                const changeCount = campaignActions.changes?.length || 0;
+                const negativeCount = campaignActions.newNegatives?.length || 0;
+                
+                return {
+                    ...log,
+                    // Create a more specific summary for the frontend
+                    summary: `Performed ${changeCount} bid adjustment(s) and created ${negativeCount} negative keyword(s).`,
+                    details: campaignActions 
+                };
+            }
+            // If this log entry had no actions for the specified campaign, discard it.
+            return null;
+        }).filter(Boolean); // Filter out the nulls
+
+        return res.json(campaignSpecificLogs);
+    }
+
     res.json(rows);
   } catch (err) {
     console.error('Failed to fetch automation logs', err);

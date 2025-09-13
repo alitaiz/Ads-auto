@@ -482,10 +482,13 @@ const evaluateBidAdjustmentRule = async (rule, performanceData, throttledEntitie
 };
 
 const evaluateSearchTermAutomationRule = async (rule, performanceData, throttledEntities) => {
-    const negativesToCreate = [];
+    const negativeKeywordsToCreate = [];
+    const negativeTargetsToCreate = [];
     const actionsByCampaign = {};
     const referenceDate = new Date(getLocalDateString(REPORTING_TIMEZONE));
-    referenceDate.setDate(referenceDate.getDate() - 2); 
+    referenceDate.setDate(referenceDate.getDate() - 2);
+
+    const asinRegex = /^b0[a-z0-9]{8}$/i;
 
     for (const entity of performanceData.values()) {
         if (throttledEntities.has(entity.entityText)) continue;
@@ -494,7 +497,7 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData, throttled
             let allConditionsMet = true;
             for (const condition of group.conditions) {
                 const metrics = calculateMetricsForWindow(entity.dailyData, condition.timeWindow, referenceDate);
-                 if (!checkCondition(metrics[condition.metric], condition.operator, condition.value)) {
+                if (!checkCondition(metrics[condition.metric], condition.operator, condition.value)) {
                     allConditionsMet = false;
                     break;
                 }
@@ -503,6 +506,9 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData, throttled
             if (allConditionsMet) {
                 const { type, matchType } = group.action;
                 if (type === 'negateSearchTerm') {
+                    const searchTerm = entity.entityText;
+                    const isAsin = asinRegex.test(searchTerm);
+
                     const campaignId = entity.campaignId;
                     if (!actionsByCampaign[campaignId]) {
                         actionsByCampaign[campaignId] = { changes: [], newNegatives: [] };
@@ -512,30 +518,39 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData, throttled
                         const metrics = calculateMetricsForWindow(entity.dailyData, c.timeWindow, referenceDate);
                         return { metric: c.metric, timeWindow: c.timeWindow, value: metrics[c.metric], condition: `${c.operator} ${c.value}` };
                     });
-                    
+
                     actionsByCampaign[campaignId].newNegatives.push({
-                        searchTerm: entity.entityText, campaignId, adGroupId: entity.adGroupId, matchType, triggeringMetrics
+                        searchTerm: searchTerm,
+                        campaignId,
+                        adGroupId: entity.adGroupId,
+                        matchType: isAsin ? 'NEGATIVE_PRODUCT_TARGET' : matchType,
+                        triggeringMetrics
                     });
 
-                    negativesToCreate.push({
-                        campaignId: entity.campaignId,
-                        adGroupId: entity.adGroupId,
-                        keywordText: entity.entityText,
-                        matchType: matchType
-                    });
+                    if (isAsin) {
+                        negativeTargetsToCreate.push({
+                            campaignId: entity.campaignId,
+                            adGroupId: entity.adGroupId,
+                            expression: [{ type: 'ASIN_SAME_AS', value: searchTerm }]
+                        });
+                    } else {
+                        negativeKeywordsToCreate.push({
+                            campaignId: entity.campaignId,
+                            adGroupId: entity.adGroupId,
+                            keywordText: entity.entityText,
+                            matchType: matchType
+                        });
+                    }
                 }
                 break;
             }
         }
     }
 
-    if (negativesToCreate.length > 0) {
-        const apiPayload = negativesToCreate.map(kw => ({
-            campaignId: kw.campaignId,
-            adGroupId: kw.adGroupId,
-            keywordText: kw.keywordText,
-            state: 'ENABLED',
-            matchType: kw.matchType
+    if (negativeKeywordsToCreate.length > 0) {
+        const apiPayload = negativeKeywordsToCreate.map(kw => ({
+            ...kw,
+            state: 'ENABLED'
         }));
 
         await amazonAdsApiRequest({
@@ -548,13 +563,36 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData, throttled
         });
     }
 
-    const totalNegatives = Object.values(actionsByCampaign).reduce((sum, campaign) => sum + campaign.newNegatives.length, 0);
+    if (negativeTargetsToCreate.length > 0) {
+        const apiPayload = negativeTargetsToCreate.map(target => ({
+            ...target,
+            state: 'ENABLED'
+        }));
+        await amazonAdsApiRequest({
+            method: 'post',
+            url: '/sp/negativeTargets',
+            profileId: rule.profile_id,
+            data: { negativeTargets: apiPayload },
+            headers: {
+                'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json',
+                'Accept': 'application/vnd.spNegativeTargetingClause.v3+json',
+            }
+        });
+    }
+
+    const totalKeywords = negativeKeywordsToCreate.length;
+    const totalTargets = negativeTargetsToCreate.length;
+    const summaryParts = [];
+    if (totalKeywords > 0) summaryParts.push(`Created ${totalKeywords} new negative keyword(s)`);
+    if (totalTargets > 0) summaryParts.push(`Created ${totalTargets} new negative product target(s)`);
+    
     return {
-        summary: `Created ${totalNegatives} new negative keyword(s).`,
+        summary: summaryParts.length > 0 ? summaryParts.join(' and ') + '.' : 'No search terms met the criteria for negation.',
         details: { actions_by_campaign: actionsByCampaign },
-        actedOnEntities: negativesToCreate.map(n => n.keywordText)
+        actedOnEntities: [...negativeKeywordsToCreate.map(n => n.keywordText), ...negativeTargetsToCreate.map(n => n.expression[0].value)]
     };
 };
+
 // --- Main Orchestration ---
 
 const isRuleDue = (rule) => {

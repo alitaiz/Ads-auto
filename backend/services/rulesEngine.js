@@ -572,7 +572,7 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData, throttled
             method: 'post',
             url: '/sp/negativeTargets',
             profileId: rule.profile_id,
-            data: { negativeTargets: apiPayload },
+            data: { negativeTargetingClauses: apiPayload },
             headers: {
                 'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json',
                 'Accept': 'application/vnd.spNegativeTargetingClause.v3+json',

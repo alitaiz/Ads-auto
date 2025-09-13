@@ -94,7 +94,11 @@ router.get('/automation/logs', async (req, res) => {
     
     if (campaignId) {
         params.push(campaignId);
-        conditions.push(`r.scope->'campaignIds' @> to_jsonb($${params.length}::text)`);
+        // FIX: This is the critical change. Instead of checking the rule's current scope,
+        // we check if the campaignId exists as a key within the 'actions_by_campaign' object
+        // in the historical log's `details` column. This decouples the log history from
+        // the current rule configuration.
+        conditions.push(`l.details->'actions_by_campaign' ? $${params.length}`);
     }
     
     if (conditions.length > 0) {
@@ -105,14 +109,16 @@ router.get('/automation/logs', async (req, res) => {
 
     const { rows } = await pool.query(queryText, params);
     
-    // If a campaignId is specified, we must filter the details of each log
-    // to ensure only actions for THAT campaign are shown. This fixes the bug.
+    // This post-processing is still necessary to extract only the relevant parts for the specific campaign.
     if (campaignId) {
         const campaignSpecificLogs = rows.map(log => {
-            const campaignActions = log.details?.actions_by_campaign?.[campaignId];
+            // Check if the log details and the specific campaign actions exist
+            if (!log.details || !log.details.actions_by_campaign || !log.details.actions_by_campaign[campaignId]) {
+                return null;
+            }
             
-            // If the log entry contains specific actions for this campaign,
-            // create a new log object with only those details.
+            const campaignActions = log.details.actions_by_campaign[campaignId];
+            
             if (campaignActions && (campaignActions.changes?.length > 0 || campaignActions.newNegatives?.length > 0)) {
                 const changeCount = campaignActions.changes?.length || 0;
                 const negativeCount = campaignActions.newNegatives?.length || 0;
@@ -121,10 +127,10 @@ router.get('/automation/logs', async (req, res) => {
                     ...log,
                     // Create a more specific summary for the frontend
                     summary: `Performed ${changeCount} bid adjustment(s) and created ${negativeCount} negative keyword(s).`,
+                    // The details should now ONLY contain the actions for this campaign
                     details: campaignActions 
                 };
             }
-            // If this log entry had no actions for the specified campaign, discard it.
             return null;
         }).filter(Boolean); // Filter out the nulls
 

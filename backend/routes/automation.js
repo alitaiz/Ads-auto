@@ -39,19 +39,34 @@ router.post('/automation/rules', async (req, res) => {
 // PUT (update) an existing rule
 router.put('/automation/rules/:id', async (req, res) => {
   const { id } = req.params;
-  const { name, config, scope, is_active } = req.body;
+  const updates = req.body;
 
   try {
+    // 1. Fetch the current rule from the database to prevent accidental data loss from partial updates.
+    const existingResult = await pool.query('SELECT * FROM automation_rules WHERE id = $1', [id]);
+    if (existingResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Rule not found' });
+    }
+    const existingRule = existingResult.rows[0];
+
+    // 2. Merge the provided updates onto the existing rule data.
+    //    This ensures that any fields not sent in the request body are not overwritten.
+    const mergedRule = {
+      name: updates.name ?? existingRule.name,
+      config: updates.config ?? existingRule.config,
+      scope: updates.scope ?? existingRule.scope,
+      is_active: typeof updates.is_active === 'boolean' ? updates.is_active : existingRule.is_active,
+    };
+
+    // 3. Perform the update using the complete, merged data.
     const { rows } = await pool.query(
       `UPDATE automation_rules
        SET name = $1, config = $2, scope = $3, is_active = $4
        WHERE id = $5
        RETURNING *`,
-      [name, config, scope, is_active, id]
+      [mergedRule.name, mergedRule.config, mergedRule.scope, mergedRule.is_active, id]
     );
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Rule not found' });
-    }
+    
     res.json(rows[0]);
   } catch (err) {
     console.error(`Failed to update automation rule ${id}`, err);
@@ -94,10 +109,6 @@ router.get('/automation/logs', async (req, res) => {
     
     if (campaignId) {
         params.push(campaignId);
-        // FIX: This is the critical change. Instead of checking the rule's current scope,
-        // we check if the campaignId exists as a key within the 'actions_by_campaign' object
-        // in the historical log's `details` column. This decouples the log history from
-        // the current rule configuration.
         conditions.push(`l.details->'actions_by_campaign' ? $${params.length}`);
     }
     
@@ -109,30 +120,36 @@ router.get('/automation/logs', async (req, res) => {
 
     const { rows } = await pool.query(queryText, params);
     
-    // This post-processing is still necessary to extract only the relevant parts for the specific campaign.
     if (campaignId) {
         const campaignSpecificLogs = rows.map(log => {
-            // Check if the log details and the specific campaign actions exist
             if (!log.details || !log.details.actions_by_campaign || !log.details.actions_by_campaign[campaignId]) {
                 return null;
             }
             
             const campaignActions = log.details.actions_by_campaign[campaignId];
             
-            if (campaignActions && (campaignActions.changes?.length > 0 || campaignActions.newNegatives?.length > 0)) {
+            if (campaignActions) {
                 const changeCount = campaignActions.changes?.length || 0;
                 const negativeCount = campaignActions.newNegatives?.length || 0;
                 
+                let summary;
+                if (log.status === 'NO_ACTION') {
+                    summary = log.summary; // Use the summary from the log entry itself
+                } else {
+                    const summaryParts = [];
+                    if (changeCount > 0) summaryParts.push(`Performed ${changeCount} bid adjustment(s)`);
+                    if (negativeCount > 0) summaryParts.push(`Created ${negativeCount} new negative keyword(s)`);
+                    summary = summaryParts.length > 0 ? summaryParts.join(' and ') + '.' : 'No changes were made for this campaign.';
+                }
+
                 return {
                     ...log,
-                    // Create a more specific summary for the frontend
-                    summary: `Performed ${changeCount} bid adjustment(s) and created ${negativeCount} negative keyword(s).`,
-                    // The details should now ONLY contain the actions for this campaign
+                    summary,
                     details: campaignActions 
                 };
             }
             return null;
-        }).filter(Boolean); // Filter out the nulls
+        }).filter(Boolean);
 
         return res.json(campaignSpecificLogs);
     }

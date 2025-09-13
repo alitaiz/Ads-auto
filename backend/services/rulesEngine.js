@@ -574,7 +574,13 @@ const processRule = async (rule) => {
         
         // If performanceData is empty (e.g., due to an empty scope), we can stop early.
         if (performanceData.size === 0) {
-            await logAction(rule, 'NO_ACTION', 'No entities to process; scope may be empty or no data found.');
+            const emptyActionsDetails = {
+                actions_by_campaign: campaignIds.reduce((acc, id) => {
+                    acc[id] = { changes: [], newNegatives: [] };
+                    return acc;
+                }, {})
+            };
+            await logAction(rule, 'NO_ACTION', 'No entities to process; scope may be empty or no data found.', emptyActionsDetails);
             await pool.query('UPDATE automation_rules SET last_run_at = NOW() WHERE id = $1', [rule.id]);
             return;
         }
@@ -592,7 +598,15 @@ const processRule = async (rule) => {
         if (hasActions) {
             await logAction(rule, 'SUCCESS', result.summary, result.details);
         } else {
-            await logAction(rule, 'NO_ACTION', 'No entities met the rule criteria.');
+            // For NO_ACTION, we still create a shell 'actions_by_campaign' object
+            // so the log can be correctly associated with all campaigns in its scope.
+            const emptyActionsDetails = {
+                actions_by_campaign: campaignIds.reduce((acc, id) => {
+                    acc[id] = { changes: [], newNegatives: [] };
+                    return acc;
+                }, {})
+            };
+            await logAction(rule, 'NO_ACTION', 'No entities met the rule criteria.', emptyActionsDetails);
         }
 
     } catch (error) {

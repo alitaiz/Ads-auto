@@ -219,6 +219,10 @@ export function CampaignTable({
         const changes = details.changes || [];
         const newNegatives = details.newNegatives || [];
         
+        if (changes.length === 0 && newNegatives.length === 0) {
+            return <span>{log.summary}</span>;
+        }
+        
         return (
             <ul style={styles.detailsList}>
                 {changes.map((change, index) => (

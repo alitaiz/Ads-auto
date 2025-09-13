@@ -151,6 +151,10 @@ interface CampaignTableProps {
     logsError: string | null;
     automationRules: AutomationRule[];
     onUpdateRuleAssignment: (campaignId: number, ruleType: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION', newRuleId: string) => void;
+    selectedCampaignIds: Set<number>;
+    onSelectCampaign: (campaignId: number, isSelected: boolean) => void;
+    onSelectAll: (isSelected: boolean) => void;
+    isAllSelected: boolean;
 }
 
 const SortableHeader = ({
@@ -172,7 +176,8 @@ const SortableHeader = ({
 export function CampaignTable({
     campaigns, onUpdateCampaign, sortConfig, onRequestSort,
     expandedCampaignId, onToggleExpand, automationLogs, loadingLogs, logsError,
-    automationRules, onUpdateRuleAssignment
+    automationRules, onUpdateRuleAssignment,
+    selectedCampaignIds, onSelectCampaign, onSelectAll, isAllSelected
 }: CampaignTableProps) {
     const [editingCell, setEditingCell] = useState<{ id: number; field: 'state' | 'budget' } | null>(null);
     const [tempValue, setTempValue] = useState<string | number>('');
@@ -290,12 +295,13 @@ export function CampaignTable({
         );
     };
     
-    const totalColumns = 12;
+    const totalColumns = 13;
     
     return (
         <div style={styles.tableContainer}>
             <table style={styles.table}>
                  <colgroup>
+                    <col style={{ width: '40px' }} />
                     <col style={{ width: '20%' }} />
                     <col style={{ width: '7%' }} />
                     <col style={{ width: '8%' }} />
@@ -311,6 +317,14 @@ export function CampaignTable({
                 </colgroup>
                 <thead>
                     <tr>
+                        <th style={styles.th}>
+                            <input
+                                type="checkbox"
+                                onChange={(e) => onSelectAll(e.target.checked)}
+                                checked={isAllSelected}
+                                aria-label="Select all campaigns"
+                            />
+                        </th>
                         <SortableHeader label="Campaign Name" sortKey="name" sortConfig={sortConfig} onRequestSort={onRequestSort} />
                         <SortableHeader label="Status" sortKey="state" sortConfig={sortConfig} onRequestSort={onRequestSort} />
                         <SortableHeader label="Daily Budget" sortKey="dailyBudget" sortConfig={sortConfig} onRequestSort={onRequestSort} />
@@ -333,6 +347,15 @@ export function CampaignTable({
                         return (
                         <React.Fragment key={campaign.campaignId}>
                             <tr>
+                                <td style={styles.td}>
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedCampaignIds.has(campaign.campaignId)}
+                                        onChange={(e) => onSelectCampaign(campaign.campaignId, e.target.checked)}
+                                        onClick={e => e.stopPropagation()}
+                                        aria-label={`Select campaign ${campaign.name}`}
+                                    />
+                                </td>
                                 <td style={styles.td} title={campaign.name}>
                                     <div style={styles.expandCell} onClick={() => onToggleExpand(campaign.campaignId)}>
                                         <span style={{...styles.expandIcon, transform: expandedCampaignId === campaign.campaignId ? 'rotate(90deg)' : 'rotate(0deg)'}}>►</span>

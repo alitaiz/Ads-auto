@@ -75,6 +75,23 @@ const styles: { [key: string]: React.CSSProperties } = {
         borderRadius: 'var(--border-radius)',
         marginBottom: '20px',
     },
+    bulkActionContainer: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '15px',
+        paddingLeft: '20px',
+        marginLeft: 'auto',
+        borderLeft: '2px solid var(--border-color)',
+    },
+    bulkActionButton: {
+        padding: '8px 16px',
+        backgroundColor: 'var(--primary-color)',
+        color: 'white',
+        border: 'none',
+        borderRadius: '4px',
+        cursor: 'pointer',
+        fontWeight: '500'
+    },
 };
 
 const ITEMS_PER_PAGE = 20;
@@ -132,6 +149,11 @@ export function PPCManagementView() {
     const [loadingLogs, setLoadingLogs] = useState<number | null>(null);
     const [logsError, setLogsError] = useState<string | null>(null);
 
+    // State for bulk actions
+    const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<number>>(new Set());
+    const [selectedBulkBidRule, setSelectedBulkBidRule] = useState<string>('none');
+    const [selectedBulkSearchTermRule, setSelectedBulkSearchTermRule] = useState<string>('none');
+
 
     useEffect(() => {
         const fetchProfiles = async () => {
@@ -184,6 +206,7 @@ export function PPCManagementView() {
         setLoading(prev => ({ ...prev, data: true }));
         setError(null);
         setCurrentPage(1);
+        setSelectedCampaignIds(new Set()); // Clear selection on data reload
 
         const formattedStartDate = formatDateForQuery(dateRange.start);
         const formattedEndDate = formatDateForQuery(dateRange.end);
@@ -384,7 +407,6 @@ export function PPCManagementView() {
         }
     }, [automationRules, fetchRules]);
 
-
     const combinedCampaignData: CampaignWithMetrics[] = useMemo(() => {
         const enrichedCampaigns = campaigns.map(campaign => {
             const metrics = performanceMetrics[campaign.campaignId] || {
@@ -478,6 +500,96 @@ export function PPCManagementView() {
         }
         setSortConfig({ key, direction });
     };
+    
+    const handleSelectCampaign = (campaignId: number, isSelected: boolean) => {
+        setSelectedCampaignIds(prev => {
+            const newSet = new Set(prev);
+            if (isSelected) newSet.add(campaignId);
+            else newSet.delete(campaignId);
+            return newSet;
+        });
+    };
+
+    const handleSelectAllCampaigns = (isSelected: boolean) => {
+        if (isSelected) {
+            setSelectedCampaignIds(new Set(finalDisplayData.map(c => c.campaignId)));
+        } else {
+            setSelectedCampaignIds(new Set());
+        }
+    };
+
+    const isAllSelected = finalDisplayData.length > 0 && selectedCampaignIds.size === finalDisplayData.length;
+    
+    const profileFilteredRules = useMemo(() => {
+        return automationRules.filter(r => r.profile_id === selectedProfileId);
+    }, [automationRules, selectedProfileId]);
+    
+    const bidAdjustmentRules = useMemo(() => profileFilteredRules.filter(r => r.rule_type === 'BID_ADJUSTMENT'), [profileFilteredRules]);
+    const searchTermRules = useMemo(() => profileFilteredRules.filter(r => r.rule_type === 'SEARCH_TERM_AUTOMATION'), [profileFilteredRules]);
+
+    const handleBulkApplyRules = async () => {
+        if (selectedCampaignIds.size === 0) return;
+        if (selectedBulkBidRule === 'none' && selectedBulkSearchTermRule === 'none') {
+            alert('Please select a rule to apply.');
+            return;
+        }
+
+        setLoading(prev => ({...prev, rules: true}));
+        const campaignsToUpdate = Array.from(selectedCampaignIds);
+        const updates: Promise<Response>[] = [];
+
+        const applyRule = (ruleType: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION', newRuleIdStr: string) => {
+            const newRuleId = newRuleIdStr === 'none' ? null : parseInt(newRuleIdStr, 10);
+            if (newRuleId === null) return;
+            
+            const rulesOfType = ruleType === 'BID_ADJUSTMENT' ? bidAdjustmentRules : searchTermRules;
+            
+            const oldRules = rulesOfType.filter(r => 
+                campaignsToUpdate.some(campaignId => (r.scope.campaignIds || []).includes(campaignId))
+            );
+            
+            for (const oldRule of oldRules) {
+                const updatedScope = { 
+                    campaignIds: (oldRule.scope.campaignIds || []).filter(id => !campaignsToUpdate.includes(id as number)) 
+                };
+                updates.push(fetch(`/api/automation/rules/${oldRule.id}`, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...oldRule, scope: updatedScope }),
+                }));
+            }
+
+            const newRule = rulesOfType.find(r => r.id === newRuleId);
+            if (newRule) {
+                 const updatedScope = { 
+                    campaignIds: [...new Set([...(newRule.scope.campaignIds || []).map(Number), ...campaignsToUpdate])] 
+                };
+                 updates.push(fetch(`/api/automation/rules/${newRule.id}`, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...newRule, scope: updatedScope }),
+                }));
+            }
+        };
+
+        if (selectedBulkBidRule !== 'none') applyRule('BID_ADJUSTMENT', selectedBulkBidRule);
+        if (selectedBulkSearchTermRule !== 'none') applyRule('SEARCH_TERM_AUTOMATION', selectedBulkSearchTermRule);
+
+        try {
+            const responses = await Promise.all(updates);
+            const failed = responses.find(res => !res.ok);
+            if (failed) throw new Error('One or more API calls failed during bulk update.');
+            
+            await fetchRules();
+            setSelectedCampaignIds(new Set());
+            setSelectedBulkBidRule('none');
+            setSelectedBulkSearchTermRule('none');
+        } catch (err) {
+            setError('Failed to apply rules in bulk.');
+            fetchRules(); // Re-fetch to revert UI
+        } finally {
+            setLoading(prev => ({...prev, rules: false}));
+        }
+    };
+
 
     return (
         <div style={styles.container}>
@@ -515,6 +627,7 @@ export function PPCManagementView() {
                         onChange={e => {
                             setStatusFilter(e.target.value as any);
                             setCurrentPage(1);
+                            setSelectedCampaignIds(new Set());
                         }}
                         disabled={loading.data}
                     >
@@ -530,11 +643,45 @@ export function PPCManagementView() {
                         placeholder="Search by campaign name..."
                         style={styles.searchInput}
                         value={searchTerm}
-                        onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+                        onChange={e => { 
+                            setSearchTerm(e.target.value); 
+                            setCurrentPage(1);
+                            setSelectedCampaignIds(new Set());
+                        }}
                         disabled={loading.data}
                     />
                 </div>
-                <div style={{...styles.controlGroup, marginLeft: 'auto'}}>
+                {selectedCampaignIds.size > 0 && (
+                    <div style={styles.bulkActionContainer}>
+                        <span style={{fontWeight: 600}}>{selectedCampaignIds.size} selected</span>
+                        <select
+                            value={selectedBulkBidRule}
+                            onChange={e => setSelectedBulkBidRule(e.target.value)}
+                            style={styles.profileSelector}
+                            disabled={loading.rules}
+                        >
+                            <option value="none">-- Assign Bid Rule --</option>
+                            {bidAdjustmentRules.map(rule => (
+                                <option key={rule.id} value={rule.id}>{rule.name}</option>
+                            ))}
+                        </select>
+                         <select
+                            value={selectedBulkSearchTermRule}
+                            onChange={e => setSelectedBulkSearchTermRule(e.target.value)}
+                            style={styles.profileSelector}
+                            disabled={loading.rules}
+                        >
+                            <option value="none">-- Assign Search Term Rule --</option>
+                            {searchTermRules.map(rule => (
+                                <option key={rule.id} value={rule.id}>{rule.name}</option>
+                            ))}
+                        </select>
+                        <button onClick={handleBulkApplyRules} style={styles.bulkActionButton} disabled={loading.rules}>
+                            {loading.rules ? 'Applying...' : 'Apply'}
+                        </button>
+                    </div>
+                )}
+                <div style={{...styles.controlGroup, marginLeft: selectedCampaignIds.size > 0 ? '0' : 'auto'}}>
                      <div style={{ position: 'relative' }}>
                          <button style={styles.dateButton} onClick={() => setDatePickerOpen(o => !o)}>
                            {formatDateRangeDisplay(dateRange.start, dateRange.end)}
@@ -566,8 +713,12 @@ export function PPCManagementView() {
                         automationLogs={automationLogs}
                         loadingLogs={loadingLogs}
                         logsError={logsError}
-                        automationRules={automationRules}
+                        automationRules={profileFilteredRules}
                         onUpdateRuleAssignment={handleRuleAssignmentChange}
+                        selectedCampaignIds={selectedCampaignIds}
+                        onSelectCampaign={handleSelectCampaign}
+                        onSelectAll={handleSelectAllCampaigns}
+                        isAllSelected={isAllSelected}
                     />
                     <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
                 </>

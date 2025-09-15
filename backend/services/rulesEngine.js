@@ -220,7 +220,7 @@ const executePauseAction = async (rule) => {
             await amazonAdsApiRequest({
                 method: 'put', url: '/sp/campaigns', profileId: rule.profile_id,
                 data: { campaigns: campaignsToPause.map(id => ({ campaignId: id, state: 'PAUSED' })) },
-                headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json' }
+                headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' }
             });
             await logAction(rule, 'SUCCESS', `Paused ${campaignsToPause.length} campaign(s).`, { pausedCampaignIds: campaignsToPause });
         } else {
@@ -249,7 +249,7 @@ const executeActivateAction = async (rule) => {
             await amazonAdsApiRequest({
                 method: 'put', url: '/sp/campaigns', profileId: rule.profile_id,
                 data: { campaigns: campaignsToEnable.map(id => ({ campaignId: id, state: 'ENABLED' })) },
-                headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json' }
+                headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' }
             });
             await logAction(rule, 'SUCCESS', `Re-enabled ${campaignsToEnable.length} campaign(s).`, { enabledCampaignIds: campaignsToEnable });
         } else {

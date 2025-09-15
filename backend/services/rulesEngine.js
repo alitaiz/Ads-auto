@@ -178,8 +178,6 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData, throttled
 const executePauseAction = async (rule) => {
     console.log(`[RulesEngine] Executing PAUSE action for rule "${rule.name}"`);
     try {
-        // FIX: Fetch currently enabled campaigns directly from the Amazon API
-        // to ensure we are evaluating the correct and complete set of campaigns for the profile.
         const enabledCampaignsResponse = await amazonAdsApiRequest({
             method: 'post',
             url: '/sp/campaigns/list',
@@ -211,20 +209,31 @@ const executePauseAction = async (rule) => {
             GROUP BY 1;
         `;
         const { rows: perfData } = await pool.query(perfQuery, [rule.config.timezone, allCampaignIds]);
-
+        
+        // ** FIX START **
+        // Create a Map for efficient lookup of performance data.
+        const perfMap = new Map(perfData.map(p => [p.campaign_id_text, p]));
+        
         const campaignsToPause = [];
         const { impressions: impCond, acos: acosCond } = rule.config.conditions;
 
-        for (const campaignPerf of perfData) {
+        // Iterate over ALL enabled campaigns, not just those with performance data.
+        for (const campaignId of allCampaignIds) {
+            // Get performance data from the map, or use default zero values if no events were found.
+            const campaignPerf = perfMap.get(campaignId) || { impressions: '0', spend: '0.00', sales: '0.00' };
+
             const impressions = parseInt(campaignPerf.impressions, 10);
             const spend = parseFloat(campaignPerf.spend);
             const sales = parseFloat(campaignPerf.sales);
+            // ACOS is Infinity if there's spend but no sales, correctly meeting the "> 30%" condition.
             const acos = sales > 0 ? spend / sales : (spend > 0 ? Infinity : 0);
             
+            // Check if the campaign meets the pause criteria.
             if (impressions > impCond.value && acos > acosCond.value) {
-                campaignsToPause.push(campaignPerf.campaign_id_text);
+                campaignsToPause.push(campaignId);
             }
         }
+        // ** FIX END **
 
         if (campaignsToPause.length > 0) {
             await amazonAdsApiRequest({

@@ -178,13 +178,24 @@ const evaluateSearchTermAutomationRule = async (rule, performanceData, throttled
 const executePauseAction = async (rule) => {
     console.log(`[RulesEngine] Executing PAUSE action for rule "${rule.name}"`);
     try {
-        const { rows: enabledCampaignsResult } = await pool.query(
-            "SELECT campaign_id FROM sponsored_products_search_term_report GROUP BY campaign_id"
-        );
-        const allCampaignIds = enabledCampaignsResult.map(r => r.campaign_id.toString());
-        
+        // FIX: Fetch currently enabled campaigns directly from the Amazon API
+        // to ensure we are evaluating the correct and complete set of campaigns for the profile.
+        const enabledCampaignsResponse = await amazonAdsApiRequest({
+            method: 'post',
+            url: '/sp/campaigns/list',
+            profileId: rule.profile_id,
+            data: {
+                stateFilter: { include: ["ENABLED"] },
+                maxResults: 1000,
+            },
+            headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
+        });
+
+        // The API returns campaignId as a number, but the DB queries expect strings.
+        const allCampaignIds = (enabledCampaignsResponse.campaigns || []).map(c => c.campaignId.toString());
+
         if (allCampaignIds.length === 0) {
-            await logAction(rule, 'NO_ACTION', 'No active campaigns found to evaluate.', {});
+            await logAction(rule, 'NO_ACTION', 'No enabled campaigns found for this profile to evaluate.', {});
             return;
         }
 

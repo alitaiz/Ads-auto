@@ -452,4 +452,4 @@ process.on('SIGINT', () => {
     console.log('[RulesEngine] PostgreSQL pool has been closed.');
     process.exit(0);
   });
-}); 
+});

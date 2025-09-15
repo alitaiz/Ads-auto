@@ -97,7 +97,7 @@ export interface AutomationConditionGroup {
 export interface AutomationRule {
     id: number;
     name: string;
-    rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'CAMPAIGN_SCHEDULING';
+    rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'CAMPAIGN_SCHEDULING' | 'PRICE_ADJUSTMENT';
     config: {
         // For BID_ADJUSTMENT and SEARCH_TERM_AUTOMATION
         conditionGroups?: AutomationConditionGroup[];
@@ -116,7 +116,11 @@ export interface AutomationRule {
         conditions?: {
             impressions: { operator: '>', value: number };
             acos: { operator: '>', value: number };
-        }
+        };
+        // For PRICE_ADJUSTMENT
+        asin?: string;
+        priceStep?: number;
+        priceLimit?: number;
     };
     scope: {
         campaignIds?: (number | string)[];

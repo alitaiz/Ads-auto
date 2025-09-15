@@ -2,6 +2,7 @@
 import cron from 'node-cron';
 import pool from '../db.js';
 import { amazonAdsApiRequest } from '../helpers/amazon-api.js';
+import * as spApi from '../helpers/spApiHelper.js';
 
 // Define a constant for Amazon's reporting timezone to ensure consistency.
 const REPORTING_TIMEZONE = 'America/Phoenix'; // UTC-7, no daylight saving
@@ -260,6 +261,56 @@ const executeActivateAction = async (rule) => {
     }
 };
 
+// --- Price Adjustment Logic ---
+const processPriceAdjustmentRules = async () => {
+    const { rows: priceRules } = await pool.query(
+        "SELECT * FROM automation_rules WHERE is_active = TRUE AND rule_type = 'PRICE_ADJUSTMENT'"
+    );
+    if (priceRules.length === 0) return;
+    
+    console.log(`[RulesEngine] Found ${priceRules.length} active price rule(s) to process.`);
+
+    for (const rule of priceRules) {
+        const { asin, priceStep, priceLimit } = rule.config;
+        console.log(`[RulesEngine] ⚙️  Processing price rule for ASIN: ${asin}`);
+
+        try {
+            const listingInfo = await spApi.getListingInfo(asin);
+            if (!listingInfo || typeof listingInfo.price !== 'number') {
+                throw new Error(`Could not get current price for ASIN ${asin}`);
+            }
+
+            const currentPrice = listingInfo.price;
+            let newPrice;
+            const nextPotentialPrice = currentPrice + priceStep;
+            
+            const limitExceeded = (priceStep > 0 && nextPotentialPrice > priceLimit) || (priceStep < 0 && nextPotentialPrice < priceLimit);
+
+            if (limitExceeded) {
+                newPrice = currentPrice - 1.00;
+                console.log(`[RulesEngine] Limit of ${priceLimit} exceeded. Resetting price by -$1.00.`);
+            } else {
+                newPrice = nextPotentialPrice;
+            }
+
+            // Basic validation
+            if (newPrice <= 0.01) {
+                throw new Error(`Calculated new price ${newPrice.toFixed(2)} is invalid.`);
+            }
+
+            await spApi.updatePrice(listingInfo.sku, newPrice.toFixed(2), rule.profile_id);
+            
+            const summary = `Price for ${asin} changed from $${currentPrice.toFixed(2)} to $${newPrice.toFixed(2)}.`;
+            await logAction(rule, 'SUCCESS', summary, { asin, oldPrice: currentPrice, newPrice });
+
+        } catch (e) {
+            console.error(`[RulesEngine] ❌ Error processing price rule for ASIN ${asin}:`, e);
+            await logAction(rule, 'FAILURE', `Failed to change price for ${asin}.`, { error: e.message });
+        }
+    }
+};
+
+
 const processSchedulingRules = async () => {
     try {
         const { rows: schedulingRules } = await pool.query(
@@ -362,7 +413,15 @@ const cronTask = async () => {
 export const startRulesEngine = () => {
     if (mainTask) return console.warn('[RulesEngine] Engine is already running.');
     console.log('[RulesEngine] 🚀 Starting the automation rules engine...');
+    
+    // Main task for bid/search term adjustments (every minute check)
     mainTask = cron.schedule('* * * * *', cronTask, { scheduled: true, timezone: "UTC" });
+    
+    // New, separate task for precise price adjustments at midnight
+    cron.schedule('0 0 * * *', processPriceAdjustmentRules, {
+        scheduled: true,
+        timezone: "America/Phoenix"
+    });
 };
 
 export const stopRulesEngine = () => {
@@ -371,6 +430,7 @@ export const stopRulesEngine = () => {
         mainTask.stop();
         mainTask = null;
     }
+    // Note: This does not stop the price adjustment cron, which is fine for most shutdown scenarios.
 };
 
 process.on('SIGINT', () => {

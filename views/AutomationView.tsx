@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { AutomationRule, AutomationRuleCondition, AutomationConditionGroup, AutomationRuleAction } from '../types';
+import { formatPrice } from '../utils';
 
 const styles: { [key: string]: React.CSSProperties } = {
   container: { maxWidth: '1200px', margin: '0 auto', padding: '20px' },
@@ -155,7 +156,7 @@ export function AutomationView() {
     await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload), // FIX: Removed double JSON.stringify
+      body: JSON.stringify(payload),
     });
     setIsModalOpen(false);
     setEditingRule(null);
@@ -181,13 +182,14 @@ export function AutomationView() {
       </header>
 
       <div style={styles.tabs}>
-        <button style={activeTab === 'bidAdjustment' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('bidAdjustment')}>Bid Adjustment Rules</button>
-        <button style={activeTab === 'searchTerm' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('searchTerm')}>Search Term Automation</button>
+        <button style={activeTab === 'bidAdjustment' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('bidAdjustment')}>Bid Adjustment</button>
+        <button style={activeTab === 'searchTerm' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('searchTerm')}>Search Term</button>
         <button style={activeTab === 'onOffCampaign' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('onOffCampaign')}>On/Off Campaign</button>
-        <button style={activeTab === 'history' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('history')}>Automation History</button>
+        <button style={activeTab === 'changePrice' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('changePrice')}>Change Price</button>
+        <button style={activeTab === 'history' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('history')}>History</button>
       </div>
       
-      {activeTab !== 'history' && activeTab !== 'onOffCampaign' && (
+      {['bidAdjustment', 'searchTerm'].includes(activeTab) && (
           <div style={styles.contentHeader}>
               <h2 style={styles.contentTitle}>{activeTab === 'bidAdjustment' ? 'Bid Adjustment Rules' : 'Search Term Automation Rules'}</h2>
               <button style={styles.primaryButton} onClick={() => handleOpenModal()}>+ Create New Rule</button>
@@ -197,6 +199,7 @@ export function AutomationView() {
       {activeTab === 'bidAdjustment' && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} />}
       {activeTab === 'searchTerm' && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} />}
       {activeTab === 'onOffCampaign' && <CampaignScheduler />}
+      {activeTab === 'changePrice' && <PriceChanger rules={rules.filter(r => r.rule_type === 'PRICE_ADJUSTMENT')} onSave={fetchRules} onDelete={fetchRules} />}
       {activeTab === 'history' && <LogsTab logs={logs} loading={loading.logs} />}
       
       {isModalOpen && (
@@ -210,6 +213,117 @@ export function AutomationView() {
     </div>
   );
 }
+
+function PriceChanger({ rules, onSave, onDelete }: { rules: AutomationRule[], onSave: () => void, onDelete: () => void }) {
+    const [newRule, setNewRule] = useState({ asin: '', priceStep: 0.01, priceLimit: 0 });
+    const [isSaving, setIsSaving] = useState(false);
+    const [error, setError] = useState('');
+    const profileId = localStorage.getItem('selectedProfileId');
+
+    const handleSave = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!profileId) {
+            setError("Please select a profile on the PPC Management page first.");
+            return;
+        }
+        if (!newRule.asin || newRule.priceLimit <= 0) {
+            setError("ASIN and a positive Price Limit are required.");
+            return;
+        }
+        setIsSaving(true);
+        setError('');
+
+        const payload: Partial<AutomationRule> = {
+            name: `Price Rule for ${newRule.asin}`,
+            rule_type: 'PRICE_ADJUSTMENT',
+            profile_id: profileId,
+            is_active: true,
+            scope: {},
+            config: {
+                asin: newRule.asin.trim().toUpperCase(),
+                priceStep: newRule.priceStep,
+                priceLimit: newRule.priceLimit,
+            },
+        };
+
+        try {
+            const res = await fetch('/api/automation/rules', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) throw new Error((await res.json()).error || 'Failed to save rule.');
+            setNewRule({ asin: '', priceStep: 0.01, priceLimit: 0 }); // Reset form
+            onSave(); // Refetch rules
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'An unknown error occurred.');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+    
+    const handleDelete = async (id: number) => {
+        if (window.confirm('Are you sure you want to delete this price rule?')) {
+            await fetch(`/api/automation/rules/${id}`, { method: 'DELETE' });
+            onDelete();
+        }
+    };
+    
+    if (!profileId) return <p style={{color: 'var(--danger-color)'}}>Please select a profile on the PPC Management page first to manage price rules.</p>;
+
+    return (
+        <div>
+            <div style={styles.card}>
+                <h2 style={styles.contentTitle}>Create New Price Automation Rule</h2>
+                <p style={{color: '#555', marginTop: 0}}>Automatically adjust an ASIN's price at midnight (UTC-7). When the price reaches the limit, it will be reset by -$1.00 before continuing.</p>
+                <form onSubmit={handleSave} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '20px', alignItems: 'flex-end' }}>
+                    <div style={styles.formGroup}>
+                        <label htmlFor="asin" style={styles.label}>ASIN</label>
+                        <input id="asin" type="text" style={styles.input} placeholder="B0..." value={newRule.asin} onChange={e => setNewRule(s => ({ ...s, asin: e.target.value }))} required />
+                    </div>
+                    <div style={styles.formGroup}>
+                        <label htmlFor="priceStep" style={styles.label}>Daily Price Step ($)</label>
+                        <input id="priceStep" type="number" step="0.01" style={styles.input} value={newRule.priceStep} onChange={e => setNewRule(s => ({ ...s, priceStep: parseFloat(e.target.value) }))} required />
+                    </div>
+                    <div style={styles.formGroup}>
+                        <label htmlFor="priceLimit" style={styles.label}>Price Limit ($)</label>
+                        <input id="priceLimit" type="number" step="0.01" min="0" style={styles.input} value={newRule.priceLimit} onChange={e => setNewRule(s => ({ ...s, priceLimit: parseFloat(e.target.value) }))} required />
+                    </div>
+                    <button type="submit" style={isSaving ? {...styles.primaryButton, opacity: 0.7} : styles.primaryButton} disabled={isSaving}>
+                        {isSaving ? 'Saving...' : '+ Add Rule'}
+                    </button>
+                </form>
+                {error && <p style={{ color: 'var(--danger-color)', marginTop: '10px' }}>{error}</p>}
+            </div>
+
+            <div style={{...styles.rulesGrid, marginTop: '20px'}}>
+                {rules.filter(r => r.profile_id === profileId).map(rule => (
+                    <div key={rule.id} style={styles.ruleCard}>
+                        <div style={styles.ruleCardHeader}>
+                            <h3 style={styles.ruleName}>{rule.config.asin}</h3>
+                             <label style={{display: 'flex', alignItems: 'center', gap: '5px'}}>
+                                <input type="checkbox" checked={rule.is_active} readOnly />
+                                {rule.is_active ? 'Active' : 'Paused'}
+                            </label>
+                        </div>
+                        <div style={styles.ruleDetails}>
+                            <span style={styles.ruleLabel}>Daily Step</span>
+                            <span style={styles.ruleValue}>{formatPrice(rule.config.priceStep, 'USD')}</span>
+                            <span style={styles.ruleLabel}>Price Limit</span>
+                            <span style={styles.ruleValue}>{formatPrice(rule.config.priceLimit, 'USD')}</span>
+                            <span style={styles.ruleLabel}>Schedule</span>
+                            <span style={styles.ruleValue}>Daily at 00:00 (UTC-7)</span>
+                        </div>
+                        <div style={styles.ruleActions}>
+                            <button style={{...styles.button, ...styles.dangerButton}} onClick={() => handleDelete(rule.id)}>Delete</button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 
 function CampaignScheduler() {
     const [schedule, setSchedule] = useState({ pauseTime: '23:00', activeTime: '07:00' });

@@ -276,8 +276,11 @@ const processPriceAdjustmentRules = async () => {
 
         try {
             const listingInfo = await spApi.getListingInfo(asin);
-            if (!listingInfo || typeof listingInfo.price !== 'number') {
-                throw new Error(`Could not get current price for ASIN ${asin}`);
+            if (!listingInfo || typeof listingInfo.price !== 'number' || !listingInfo.sellerId) {
+                let reason = "Could not get complete listing info.";
+                if (!listingInfo.sellerId) reason = `Could not determine Seller ID for ASIN ${asin}.`;
+                else if (typeof listingInfo.price !== 'number') reason = `Could not get current price for ASIN ${asin}.`;
+                throw new Error(reason);
             }
 
             const currentPrice = listingInfo.price;
@@ -293,12 +296,11 @@ const processPriceAdjustmentRules = async () => {
                 newPrice = nextPotentialPrice;
             }
 
-            // Basic validation
             if (newPrice <= 0.01) {
                 throw new Error(`Calculated new price ${newPrice.toFixed(2)} is invalid.`);
             }
 
-            await spApi.updatePrice(listingInfo.sku, newPrice.toFixed(2), rule.profile_id);
+            await spApi.updatePrice(listingInfo.sku, newPrice.toFixed(2), listingInfo.sellerId);
             
             const summary = `Price for ${asin} changed from $${currentPrice.toFixed(2)} to $${newPrice.toFixed(2)}.`;
             await logAction(rule, 'SUCCESS', summary, { asin, oldPrice: currentPrice, newPrice });

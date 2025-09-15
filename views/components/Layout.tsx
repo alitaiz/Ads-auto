@@ -74,6 +74,9 @@ export function Layout() {
                     <NavLink to="/automation" style={getNavLinkStyle}>
                         Automation
                     </NavLink>
+                    <NavLink to="/gemini" style={getNavLinkStyle}>
+                        Gemini
+                    </NavLink>
                 </nav>
             </header>
             <main style={styles.mainContent}>

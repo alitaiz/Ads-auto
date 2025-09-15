@@ -10,6 +10,7 @@ import { SPSearchTermsView } from './views/SPSearchTermsView';
 import { DatabaseView } from './views/DatabaseView';
 import { AutomationView } from './views/AutomationView';
 import { DataCacheProvider } from './contexts/DataCacheContext';
+import { GeminiView } from './views/GeminiView';
 
 // Basic global styles
 const styles = `
@@ -64,6 +65,7 @@ function App() {
           <Route path="sales-and-traffic" element={<SalesAndTrafficView />} />
           <Route path="database" element={<DatabaseView />} />
           <Route path="automation" element={<AutomationView />} />
+          <Route path="gemini" element={<GeminiView />} />
           <Route path="*" element={<Navigate to="/campaigns" replace />} />
         </Route>
       </Routes>

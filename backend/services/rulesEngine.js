@@ -191,7 +191,6 @@ const executePauseAction = async (rule) => {
             headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
         });
 
-        // The API returns campaignId as a number, but the DB queries expect strings.
         const allCampaignIds = (enabledCampaignsResponse.campaigns || []).map(c => c.campaignId.toString());
 
         if (allCampaignIds.length === 0) {
@@ -240,7 +239,7 @@ const executePauseAction = async (rule) => {
 
     } catch (e) {
         console.error(`[RulesEngine] Error during PAUSE action for rule "${rule.name}":`, e);
-        await logAction(rule, 'FAILURE', 'Failed to execute pause action.', { error: e.message });
+        await logAction(rule, 'FAILURE', 'Failed to execute pause action.', { error: e.details || e.message });
     }
 };
 
@@ -268,7 +267,7 @@ const executeActivateAction = async (rule) => {
         }
     } catch (e) {
         console.error(`[RulesEngine] Error during ACTIVATE action for rule "${rule.name}":`, e);
-        await logAction(rule, 'FAILURE', 'Failed to execute activate action.', { error: e.message });
+        await logAction(rule, 'FAILURE', 'Failed to execute activate action.', { error: e.details || e.message });
     }
 };
 

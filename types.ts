@@ -97,21 +97,26 @@ export interface AutomationConditionGroup {
 export interface AutomationRule {
     id: number;
     name: string;
-    rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION';
+    rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'CAMPAIGN_SCHEDULING';
     config: {
-        // A rule is composed of one or more condition groups.
-        // They are evaluated in order ("first match wins").
-        conditionGroups: AutomationConditionGroup[];
-        // Dynamic frequency configuration
-        frequency: {
+        // For BID_ADJUSTMENT and SEARCH_TERM_AUTOMATION
+        conditionGroups?: AutomationConditionGroup[];
+        frequency?: {
             unit: 'minutes' | 'hours' | 'days';
             value: number;
         };
-        // NEW: Cooldown configuration to prevent rapid-fire actions on the same entity.
         cooldown?: {
             unit: 'minutes' | 'hours' | 'days';
             value: number;
         };
+        // For CAMPAIGN_SCHEDULING
+        pauseTime?: string; // "HH:MM" format
+        activeTime?: string; // "HH:MM" format
+        timezone?: string;   // IANA timezone name e.g., 'America/Phoenix'
+        conditions?: {
+            impressions: { operator: '>', value: number };
+            acos: { operator: '>', value: number };
+        }
     };
     scope: {
         campaignIds?: (number | string)[];

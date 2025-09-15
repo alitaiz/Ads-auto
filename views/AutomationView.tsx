@@ -183,10 +183,11 @@ export function AutomationView() {
       <div style={styles.tabs}>
         <button style={activeTab === 'bidAdjustment' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('bidAdjustment')}>Bid Adjustment Rules</button>
         <button style={activeTab === 'searchTerm' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('searchTerm')}>Search Term Automation</button>
+        <button style={activeTab === 'onOffCampaign' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('onOffCampaign')}>On/Off Campaign</button>
         <button style={activeTab === 'history' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('history')}>Automation History</button>
       </div>
       
-      {activeTab !== 'history' && (
+      {activeTab !== 'history' && activeTab !== 'onOffCampaign' && (
           <div style={styles.contentHeader}>
               <h2 style={styles.contentTitle}>{activeTab === 'bidAdjustment' ? 'Bid Adjustment Rules' : 'Search Term Automation Rules'}</h2>
               <button style={styles.primaryButton} onClick={() => handleOpenModal()}>+ Create New Rule</button>
@@ -195,6 +196,7 @@ export function AutomationView() {
 
       {activeTab === 'bidAdjustment' && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} />}
       {activeTab === 'searchTerm' && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} />}
+      {activeTab === 'onOffCampaign' && <CampaignScheduler />}
       {activeTab === 'history' && <LogsTab logs={logs} loading={loading.logs} />}
       
       {isModalOpen && (
@@ -207,6 +209,138 @@ export function AutomationView() {
       )}
     </div>
   );
+}
+
+function CampaignScheduler() {
+    const [schedule, setSchedule] = useState({ pauseTime: '23:00', activeTime: '07:00' });
+    const [rule, setRule] = useState<AutomationRule | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
+    const [isActive, setIsActive] = useState(false);
+
+    const profileId = localStorage.getItem('selectedProfileId');
+
+    useEffect(() => {
+        const fetchScheduleRule = async () => {
+            if (!profileId) {
+                setError("Please select a profile on the PPC Management page first.");
+                setLoading(false);
+                return;
+            }
+            try {
+                setLoading(true);
+                const res = await fetch('/api/automation/rules');
+                if (!res.ok) throw new Error('Failed to load rules.');
+                const allRules: AutomationRule[] = await res.json();
+                const scheduleRule = allRules.find(r => r.rule_type === 'CAMPAIGN_SCHEDULING' && r.profile_id === profileId);
+
+                if (scheduleRule) {
+                    setRule(scheduleRule);
+                    setSchedule({
+                        pauseTime: scheduleRule.config.pauseTime || '23:00',
+                        activeTime: scheduleRule.config.activeTime || '07:00',
+                    });
+                    setIsActive(scheduleRule.is_active);
+                } else {
+                    setIsActive(false); // Default to off if no rule exists
+                }
+            } catch (err) {
+                setError(err instanceof Error ? err.message : "Failed to load schedule.");
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchScheduleRule();
+    }, [profileId]);
+
+    const handleSave = async () => {
+        if (!profileId) return;
+        setIsSaving(true);
+        setError('');
+
+        const payload = {
+            id: rule?.id,
+            name: `Campaign Scheduler for Profile ${profileId}`,
+            rule_type: 'CAMPAIGN_SCHEDULING',
+            profile_id: profileId,
+            is_active: isActive,
+            scope: { campaignIds: [] }, // Applies to all campaigns under profile
+            config: {
+                pauseTime: schedule.pauseTime,
+                activeTime: schedule.activeTime,
+                timezone: 'America/Phoenix', // Fixed UTC-7
+                conditions: {
+                    impressions: { operator: '>', value: 1 },
+                    acos: { operator: '>', value: 0.30 },
+                }
+            }
+        };
+
+        const url = rule ? `/api/automation/rules/${rule.id}` : '/api/automation/rules';
+        const method = rule ? 'PUT' : 'POST';
+
+        try {
+            const res = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) throw new Error('Failed to save schedule.');
+            const savedRule = await res.json();
+            setRule(savedRule);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "An unknown error occurred.");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    if (loading) return <p>Loading scheduler settings...</p>;
+    if (error && !profileId) return <p style={{color: 'var(--danger-color)'}}>{error}</p>;
+
+    return (
+        <div style={{maxWidth: '700px', margin: '0 auto'}}>
+            <div style={styles.card}>
+                <div style={{ ...styles.ruleCardHeader, paddingBottom: '15px', borderBottom: '1px solid var(--border-color)', marginBottom: '15px'}}>
+                    <h2 style={styles.contentTitle}>Campaign On/Off Scheduler</h2>
+                    <label style={{display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer'}}>
+                        <input type="checkbox" style={{transform: 'scale(1.3)'}} checked={isActive} onChange={e => setIsActive(e.target.checked)} />
+                        <strong>{isActive ? 'Active' : 'Inactive'}</strong>
+                    </label>
+                </div>
+                <p style={{color: '#555', marginTop: 0}}>Automatically pause underperforming campaigns during specific hours to save costs. Campaigns will be re-enabled at the specified time. All times are in UTC-7 (America/Phoenix).</p>
+                
+                 <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px'}}>
+                     <div style={styles.formGroup}>
+                        <label htmlFor="pauseTime" style={styles.label}>Pause Campaigns At</label>
+                        <input id="pauseTime" type="time" style={styles.input} value={schedule.pauseTime} onChange={e => setSchedule(s => ({...s, pauseTime: e.target.value}))}/>
+                     </div>
+                      <div style={styles.formGroup}>
+                        <label htmlFor="activeTime" style={styles.label}>Re-enable Campaigns At</label>
+                        <input id="activeTime" type="time" style={styles.input} value={schedule.activeTime} onChange={e => setSchedule(s => ({...s, activeTime: e.target.value}))}/>
+                     </div>
+                 </div>
+
+                <div style={styles.card}>
+                    <h3 style={styles.cardTitle}>Pause Conditions</h3>
+                    <p style={{margin: '0 0 5px 0'}}>A campaign will be paused if it meets ALL of the following criteria for the current day:</p>
+                    <ul style={{margin: 0, paddingLeft: '20px'}}>
+                        <li>Impressions &gt; 1</li>
+                        <li>ACOS &gt; 30% <em style={{color: '#666'}}>(Note: ACOS is considered infinite if there is any spend but no sales)</em></li>
+                    </ul>
+                </div>
+
+                {error && <p style={{color: 'var(--danger-color)'}}>{error}</p>}
+                
+                <div style={{display: 'flex', justifyContent: 'flex-end', marginTop: '10px'}}>
+                    <button onClick={handleSave} style={isSaving ? {...styles.primaryButton, opacity: 0.7} : styles.primaryButton} disabled={isSaving}>
+                        {isSaving ? 'Saving...' : 'Save Schedule'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
 }
 
 const RulesList = ({ rules, onEdit, onDelete }: { rules: AutomationRule[], onEdit: (rule: AutomationRule) => void, onDelete: (id: number) => void}) => (
@@ -306,7 +440,7 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
     const addConditionGroup = () => {
         setFormData(prev => {
             const newGroup = ruleType === 'bidAdjustment' ? getDefaultBidAdjustmentGroup() : getDefaultSearchTermGroup();
-            const newGroups = [...prev.config!.conditionGroups, newGroup];
+            const newGroups = [...(prev.config!.conditionGroups || []), newGroup];
             return { ...prev, config: { ...prev.config!, conditionGroups: newGroups } };
         });
     };
@@ -389,7 +523,7 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                          <h3 style={styles.cardTitle}>Rule Logic (First Match Wins)</h3>
                          <p style={{fontSize: '0.8rem', color: '#666', marginTop: '-10px', marginBottom: '15px'}}>Rules are checked from top to bottom. The first group whose conditions are met will trigger its action, and the engine will stop.</p>
 
-                        {formData.config?.conditionGroups.map((group, groupIndex) => (
+                        {(formData.config?.conditionGroups || []).map((group, groupIndex) => (
                            <React.Fragment key={groupIndex}>
                                 <div style={styles.ifThenBlock}>
                                     <h4 style={styles.ifBlockHeader}>IF</h4>
@@ -471,7 +605,7 @@ const RuleBuilderModal = ({ rule, ruleType, onClose, onSave }: { rule: Automatio
                                         )}
                                     </div>
                                 </div>
-                               {groupIndex < formData.config!.conditionGroups.length - 1 && <div style={{textAlign: 'center', margin: '15px 0', fontWeight: 'bold', color: '#555'}}>OR</div>}
+                               {groupIndex < (formData.config!.conditionGroups || []).length - 1 && <div style={{textAlign: 'center', margin: '15px 0', fontWeight: 'bold', color: '#555'}}>OR</div>}
                            </React.Fragment>
                         ))}
                         <button type="button" onClick={addConditionGroup} style={{...styles.button, marginTop: '15px'}}>+ Add Condition Group (OR)</button>

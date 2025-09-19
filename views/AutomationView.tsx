@@ -199,7 +199,7 @@ export function AutomationView() {
       {activeTab === 'bidAdjustment' && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} />}
       {activeTab === 'searchTerm' && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} />}
       {activeTab === 'onOffCampaign' && <CampaignScheduler />}
-      {activeTab === 'changePrice' && <PriceChanger rules={rules.filter(r => r.rule_type === 'PRICE_ADJUSTMENT')} onSave={fetchRules} onDelete={fetchRules} />}
+      {activeTab === 'changePrice' && <PriceChanger rules={rules.filter(r => r.rule_type === 'PRICE_ADJUSTMENT')} onSaveOrDelete={fetchRules} />}
       {activeTab === 'history' && <LogsTab logs={logs} loading={loading.logs} />}
       
       {isModalOpen && (
@@ -214,68 +214,67 @@ export function AutomationView() {
   );
 }
 
-function PriceChanger({ rules, onSave, onDelete }: { rules: AutomationRule[], onSave: () => void, onDelete: () => void }) {
-    const [newRule, setNewRule] = useState({ 
-        sku: '', 
-        priceStep: 0.01, 
-        priceLimit: 0,
-        frequencyValue: 24,
-        frequencyUnit: 'hours' as 'minutes' | 'hours' | 'days'
-    });
-    const [isSaving, setIsSaving] = useState(false);
-    const [error, setError] = useState('');
+function PriceChanger({ rules, onSaveOrDelete }: { rules: AutomationRule[], onSaveOrDelete: () => void }) {
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [currentRule, setCurrentRule] = useState<Partial<AutomationRule> | null>(null);
     const profileId = localStorage.getItem('selectedProfileId');
 
-    const handleSave = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!profileId) {
-            setError("Please select a profile on the PPC Management page first.");
-            return;
-        }
-        if (!newRule.sku || newRule.priceLimit <= 0) {
-            setError("SKU and a positive Price Limit are required.");
-            return;
-        }
-        setIsSaving(true);
-        setError('');
-
-        const payload: Partial<AutomationRule> = {
-            name: `Price Rule for ${newRule.sku}`,
+    const handleAddNew = () => {
+        setCurrentRule({
+            name: '',
             rule_type: 'PRICE_ADJUSTMENT',
-            profile_id: profileId,
             is_active: true,
             scope: {},
+            profile_id: profileId || '',
             config: {
-                sku: newRule.sku.trim(),
-                priceStep: newRule.priceStep,
-                priceLimit: newRule.priceLimit,
-                frequency: {
-                    value: newRule.frequencyValue,
-                    unit: newRule.frequencyUnit,
-                }
-            },
+                sku: '',
+                priceStep: 0.01,
+                priceLimit: 0,
+                frequency: { value: 1, unit: 'days' },
+                runAtTime: '',
+            }
+        });
+        setIsModalOpen(true);
+    };
+
+    const handleEdit = (rule: AutomationRule) => {
+        setCurrentRule(JSON.parse(JSON.stringify(rule)));
+        setIsModalOpen(true);
+    };
+
+    const handleSave = async (ruleToSave: Partial<AutomationRule>) => {
+        if (!profileId) {
+            alert("Please select a profile on the PPC Management page first.");
+            return;
+        }
+
+        const payload = {
+            ...ruleToSave,
+            name: `Price Rule for ${ruleToSave.config?.sku}`,
+            profile_id: profileId,
         };
+        
+        const url = payload.id ? `/api/automation/rules/${payload.id}` : '/api/automation/rules';
+        const method = payload.id ? 'PUT' : 'POST';
 
         try {
-            const res = await fetch('/api/automation/rules', {
-                method: 'POST',
+            const res = await fetch(url, {
+                method,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
             if (!res.ok) throw new Error((await res.json()).error || 'Failed to save rule.');
-            setNewRule({ sku: '', priceStep: 0.01, priceLimit: 0, frequencyValue: 24, frequencyUnit: 'hours' }); // Reset form
-            onSave(); // Refetch rules
+            onSaveOrDelete();
+            setIsModalOpen(false);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'An unknown error occurred.');
-        } finally {
-            setIsSaving(false);
+            alert(`Error: ${err instanceof Error ? err.message : 'An unknown error occurred.'}`);
         }
     };
-    
+
     const handleDelete = async (id: number) => {
         if (window.confirm('Are you sure you want to delete this price rule?')) {
             await fetch(`/api/automation/rules/${id}`, { method: 'DELETE' });
-            onDelete();
+            onSaveOrDelete();
         }
     };
     
@@ -283,52 +282,11 @@ function PriceChanger({ rules, onSave, onDelete }: { rules: AutomationRule[], on
 
     return (
         <div>
-            <div style={styles.card}>
-                <h2 style={styles.contentTitle}>Create New Price Automation Rule</h2>
-                <p style={{color: '#555', marginTop: 0}}>Automatically adjust a SKU's price at a set frequency. When the price reaches the limit, it will be reset by -$1.00 before continuing.</p>
-                <form onSubmit={handleSave} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1.5fr auto', gap: '20px', alignItems: 'flex-end' }}>
-                    <div style={styles.formGroup}>
-                        <label htmlFor="sku" style={styles.label}>SKU</label>
-                        <input id="sku" type="text" style={styles.input} placeholder="Your-SKU-123" value={newRule.sku} onChange={e => setNewRule(s => ({ ...s, sku: e.target.value }))} required />
-                    </div>
-                    <div style={styles.formGroup}>
-                        <label htmlFor="priceStep" style={styles.label}>Price Step ($)</label>
-                        <input id="priceStep" type="number" step="0.01" style={styles.input} value={newRule.priceStep} onChange={e => setNewRule(s => ({ ...s, priceStep: parseFloat(e.target.value) }))} required />
-                    </div>
-                    <div style={styles.formGroup}>
-                        <label htmlFor="priceLimit" style={styles.label}>Price Limit ($)</label>
-                        <input id="priceLimit" type="number" step="0.01" min="0" style={styles.input} value={newRule.priceLimit} onChange={e => setNewRule(s => ({ ...s, priceLimit: parseFloat(e.target.value) }))} required />
-                    </div>
-                     <div style={styles.formGroup}>
-                        <label htmlFor="frequency" style={styles.label}>Run Every</label>
-                        <div style={{ display: 'flex', gap: '5px' }}>
-                            <input 
-                                id="frequencyValue" 
-                                type="number" 
-                                min="1" 
-                                style={{...styles.input, width: '70px'}} 
-                                value={newRule.frequencyValue} 
-                                onChange={e => setNewRule(s => ({ ...s, frequencyValue: parseInt(e.target.value, 10) || 1 }))} 
-                                required 
-                            />
-                            <select 
-                                id="frequencyUnit" 
-                                style={{...styles.input, flex: 1}} 
-                                value={newRule.frequencyUnit} 
-                                onChange={e => setNewRule(s => ({ ...s, frequencyUnit: e.target.value as any }))}
-                            >
-                                <option value="minutes">Minutes</option>
-                                <option value="hours">Hours</option>
-                                <option value="days">Days</option>
-                            </select>
-                        </div>
-                    </div>
-                    <button type="submit" style={isSaving ? {...styles.primaryButton, opacity: 0.7} : styles.primaryButton} disabled={isSaving}>
-                        {isSaving ? 'Saving...' : '+ Add Rule'}
-                    </button>
-                </form>
-                {error && <p style={{ color: 'var(--danger-color)', marginTop: '10px' }}>{error}</p>}
+            <div style={styles.contentHeader}>
+                <h2 style={styles.contentTitle}>Price Automation Rules</h2>
+                <button style={styles.primaryButton} onClick={handleAddNew}>+ Create New Rule</button>
             </div>
+            <p style={{color: '#555', marginTop: 0}}>Automatically adjust a SKU's price. If a run time is set, it runs daily. Otherwise, it runs on the frequency. When the price reaches the limit, it resets by -$1.00.</p>
 
             <div style={{...styles.rulesGrid, marginTop: '20px'}}>
                 {rules.filter(r => r.profile_id === profileId).map(rule => (
@@ -346,15 +304,87 @@ function PriceChanger({ rules, onSave, onDelete }: { rules: AutomationRule[], on
                             <span style={styles.ruleLabel}>Price Limit</span>
                             <span style={styles.ruleValue}>{formatPrice(rule.config.priceLimit, 'USD')}</span>
                             <span style={styles.ruleLabel}>Schedule</span>
-                            <span style={styles.ruleValue}>
-                                {rule.config.frequency ? `Every ${rule.config.frequency.value} ${rule.config.frequency.unit}` : 'Daily at 00:00 (UTC-7)'}
+                             <span style={styles.ruleValue}>
+                                {rule.config.runAtTime ? `Daily at ${rule.config.runAtTime}` : `Every ${rule.config.frequency?.value} ${rule.config.frequency?.unit}`}
                             </span>
                         </div>
                         <div style={styles.ruleActions}>
+                            <button style={styles.button} onClick={() => handleEdit(rule)}>Edit</button>
                             <button style={{...styles.button, ...styles.dangerButton}} onClick={() => handleDelete(rule.id)}>Delete</button>
                         </div>
                     </div>
                 ))}
+            </div>
+            {isModalOpen && currentRule && (
+                <PriceRuleModal rule={currentRule} onClose={() => setIsModalOpen(false)} onSave={handleSave} />
+            )}
+        </div>
+    );
+}
+
+function PriceRuleModal({ rule, onClose, onSave }: { rule: Partial<AutomationRule>, onClose: () => void, onSave: (rule: Partial<AutomationRule>) => void }) {
+    const [formData, setFormData] = useState(rule);
+    const [isSaving, setIsSaving] = useState(false);
+
+    const handleChange = (field: keyof AutomationRule['config'], value: any) => {
+        setFormData(p => ({ ...p, config: { ...p.config!, [field]: value } }));
+    };
+
+    const handleFrequencyChange = (field: 'unit' | 'value', value: any) => {
+        setFormData(p => ({...p, config: { ...p.config!, frequency: { ...p.config!.frequency!, [field]: value }}}));
+    };
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setIsSaving(true);
+        await onSave(formData);
+        setIsSaving(false);
+    };
+
+    return (
+        <div style={styles.modalBackdrop}>
+            <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
+                <form onSubmit={handleSubmit}>
+                    <h2 style={styles.modalHeader}>{formData.id ? 'Edit' : 'Create'} Price Automation Rule</h2>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+                        <div style={styles.formGroup}>
+                            <label htmlFor="sku" style={styles.label}>SKU</label>
+                            <input id="sku" type="text" style={styles.input} placeholder="Your-SKU-123" value={formData.config?.sku} onChange={e => handleChange('sku', e.target.value)} required />
+                        </div>
+                        <div style={styles.formGroup}>
+                            <label htmlFor="priceStep" style={styles.label}>Price Step ($)</label>
+                            <input id="priceStep" type="number" step="0.01" style={styles.input} value={formData.config?.priceStep} onChange={e => handleChange('priceStep', parseFloat(e.target.value))} required />
+                        </div>
+                        <div style={styles.formGroup}>
+                            <label htmlFor="priceLimit" style={styles.label}>Price Limit ($)</label>
+                            <input id="priceLimit" type="number" step="0.01" min="0" style={styles.input} value={formData.config?.priceLimit} onChange={e => handleChange('priceLimit', parseFloat(e.target.value))} required />
+                        </div>
+                        <div style={styles.formGroup}>
+                            <label htmlFor="runAtTime" style={styles.label}>Run at Time (optional)</label>
+                            <input id="runAtTime" type="time" style={styles.input} value={formData.config?.runAtTime || ''} onChange={e => handleChange('runAtTime', e.target.value)} />
+                             <small style={{color: '#666', marginTop: '4px'}}>If set, runs daily at this time. If empty, uses frequency below.</small>
+                        </div>
+                    </div>
+                     <div style={styles.formGroup}>
+                        <label htmlFor="frequency" style={styles.label}>Run Frequency</label>
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                            <input id="frequencyValue" type="number" min="1" style={{...styles.input, width: '100px'}} value={formData.config?.frequency?.value} onChange={e => handleFrequencyChange('value', parseInt(e.target.value, 10) || 1)} required />
+                            <select id="frequencyUnit" style={styles.input} value={formData.config?.frequency?.unit} onChange={e => handleFrequencyChange('unit', e.target.value as any)}>
+                                <option value="minutes">Minutes</option><option value="hours">Hours</option><option value="days">Days</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style={styles.modalFooter}>
+                         <div style={styles.activeCheckboxContainer}>
+                           <input type="checkbox" id="price-rule-is-active" style={{ transform: 'scale(1.2)' }} checked={formData.is_active} onChange={e => setFormData(p => ({...p, is_active: e.target.checked!}))} />
+                           <label htmlFor="price-rule-is-active" style={{...styles.label, cursor: 'pointer'}}>Rule is Active</label>
+                        </div>
+                        <button type="button" style={{...styles.button, ...styles.dangerButton}} onClick={onClose}>Cancel</button>
+                        <button type="submit" style={isSaving ? {...styles.primaryButton, opacity: 0.7} : styles.primaryButton} disabled={isSaving}>
+                            {isSaving ? 'Saving...' : 'Save Rule'}
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     );

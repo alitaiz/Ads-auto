@@ -210,30 +210,23 @@ const executePauseAction = async (rule) => {
         `;
         const { rows: perfData } = await pool.query(perfQuery, [rule.config.timezone, allCampaignIds]);
         
-        // ** FIX START **
-        // Create a Map for efficient lookup of performance data.
         const perfMap = new Map(perfData.map(p => [p.campaign_id_text, p]));
         
         const campaignsToPause = [];
         const { impressions: impCond, acos: acosCond } = rule.config.conditions;
 
-        // Iterate over ALL enabled campaigns, not just those with performance data.
         for (const campaignId of allCampaignIds) {
-            // Get performance data from the map, or use default zero values if no events were found.
             const campaignPerf = perfMap.get(campaignId) || { impressions: '0', spend: '0.00', sales: '0.00' };
 
             const impressions = parseInt(campaignPerf.impressions, 10);
             const spend = parseFloat(campaignPerf.spend);
             const sales = parseFloat(campaignPerf.sales);
-            // ACOS is Infinity if there's spend but no sales, correctly meeting the "> 30%" condition.
             const acos = sales > 0 ? spend / sales : (spend > 0 ? Infinity : 0);
             
-            // Check if the campaign meets the pause criteria.
             if (impressions > impCond.value && acos > acosCond.value) {
                 campaignsToPause.push(campaignId);
             }
         }
-        // ** FIX END **
 
         if (campaignsToPause.length > 0) {
             await amazonAdsApiRequest({
@@ -279,6 +272,31 @@ const executeActivateAction = async (rule) => {
         await logAction(rule, 'FAILURE', 'Failed to execute activate action.', { error: e.details || e.message });
     }
 };
+
+const processSchedulingRules = async () => {
+    try {
+        const { rows: schedulingRules } = await pool.query(
+            "SELECT * FROM automation_rules WHERE is_active = TRUE AND rule_type = 'CAMPAIGN_SCHEDULING'"
+        );
+        if (schedulingRules.length === 0) return;
+
+        for (const rule of schedulingRules) {
+            const { pauseTime, activeTime, timezone } = rule.config;
+            const nowInZone = new Date(new Date().toLocaleString('en-US', { timeZone: timezone }));
+            const currentHHMM = nowInZone.toTimeString().substring(0, 5);
+            
+            if (currentHHMM === pauseTime) {
+                await executePauseAction(rule);
+            }
+            if (currentHHMM === activeTime) {
+                await executeActivateAction(rule);
+            }
+        }
+    } catch (e) {
+        console.error('[RulesEngine] Error processing scheduling rules:', e);
+    }
+};
+
 
 // --- Price Adjustment Logic ---
 const processSinglePriceRule = async (rule) => {
@@ -329,27 +347,35 @@ const processSinglePriceRule = async (rule) => {
     }
 };
 
-const processSchedulingRules = async () => {
+const processTimedPriceAdjustmentRules = async () => {
     try {
-        const { rows: schedulingRules } = await pool.query(
-            "SELECT * FROM automation_rules WHERE is_active = TRUE AND rule_type = 'CAMPAIGN_SCHEDULING'"
+        const { rows: timedRules } = await pool.query(
+            "SELECT * FROM automation_rules WHERE is_active = TRUE AND rule_type = 'PRICE_ADJUSTMENT' AND config->>'runAtTime' IS NOT NULL AND config->>'runAtTime' != ''"
         );
-        if (schedulingRules.length === 0) return;
+        if (timedRules.length === 0) return;
 
-        for (const rule of schedulingRules) {
-            const { pauseTime, activeTime, timezone } = rule.config;
-            const nowInZone = new Date(new Date().toLocaleString('en-US', { timeZone: timezone }));
+        console.log(`[RulesEngine] Found ${timedRules.length} timed price adjustment rule(s) to check.`);
+        
+        for (const rule of timedRules) {
+            const { runAtTime } = rule.config;
+            const nowInZone = new Date(new Date().toLocaleString('en-US', { timeZone: REPORTING_TIMEZONE }));
             const currentHHMM = nowInZone.toTimeString().substring(0, 5);
-            
-            if (currentHHMM === pauseTime) {
-                await executePauseAction(rule);
-            }
-            if (currentHHMM === activeTime) {
-                await executeActivateAction(rule);
+
+            if (currentHHMM === runAtTime) {
+                if (rule.last_run_at) {
+                    const diffMinutes = (new Date().getTime() - new Date(rule.last_run_at).getTime()) / 60000;
+                    if (diffMinutes < 5) { // Cooldown to prevent double-runs
+                        console.log(`[RulesEngine] Skipping timed rule "${rule.name}" as it ran recently.`);
+                        continue;
+                    }
+                }
+                console.log(`[RulesEngine] ⏰ Time match for rule "${rule.name}". Executing...`);
+                await processSinglePriceRule(rule);
+                await pool.query('UPDATE automation_rules SET last_run_at = NOW() WHERE id = $1', [rule.id]);
             }
         }
     } catch (e) {
-        console.error('[RulesEngine] Error processing scheduling rules:', e);
+        console.error('[RulesEngine] Error processing timed price adjustment rules:', e);
     }
 };
 
@@ -414,12 +440,16 @@ const processFrequencyRule = async (rule) => {
 const cronTask = async () => {
     console.log(`[RulesEngine] ⏰ Cron tick: Running scheduled tasks at ${new Date().toISOString()}`);
     await processSchedulingRules();
+    await processTimedPriceAdjustmentRules();
     
     try {
         const { rows: activeRules } = await pool.query(
             "SELECT * FROM automation_rules WHERE is_active = TRUE AND rule_type IN ('BID_ADJUSTMENT', 'SEARCH_TERM_AUTOMATION', 'PRICE_ADJUSTMENT')"
         );
-        const dueRules = activeRules.filter(isRuleDue);
+        const dueRules = activeRules
+            .filter(isRuleDue)
+            .filter(rule => !(rule.rule_type === 'PRICE_ADJUSTMENT' && rule.config.runAtTime && rule.config.runAtTime !== ''));
+        
         if (dueRules.length > 0) {
             console.log(`[RulesEngine] Found ${dueRules.length} frequency-based rule(s) to run.`);
             for (const rule of dueRules) {

@@ -118,10 +118,10 @@ export interface AutomationRule {
             acos: { operator: '>', value: number };
         };
         // For PRICE_ADJUSTMENT
-        // FIX: Changed 'asin' to 'sku' to match backend and component implementation.
         sku?: string;
         priceStep?: number;
         priceLimit?: number;
+        runAtTime?: string; // "HH:MM" format, optional
     };
     scope: {
         campaignIds?: (number | string)[];

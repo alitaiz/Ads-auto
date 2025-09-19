@@ -74,23 +74,21 @@ async function spApiRequest({ method, url, data, params }) {
 
 /**
  * Fetches listing information for a given SKU, including sellerId and current price.
- * This version uses the Listings API which is more likely to be authorized than the Pricing API.
+ * This version uses the Listings API and the correct SP_API_SELLER_ID.
  * @param {string} sku The Seller SKU of the product.
  * @returns {Promise<{price: number | null, sellerId: string | null}>}
  */
 export async function getListingInfoBySku(sku) {
-    const { SP_API_MARKETPLACE_ID, ADS_API_PROFILE_ID } = process.env;
+    const { SP_API_MARKETPLACE_ID, SP_API_SELLER_ID } = process.env;
 
-    // The ADS_API_PROFILE_ID serves as the sellerId for SP-API calls.
-    const sellerId = ADS_API_PROFILE_ID;
+    // The SP_API_SELLER_ID is the alphanumeric ID from Seller Central (starts with 'A').
+    const sellerId = SP_API_SELLER_ID;
     
-    if (!sellerId) {
-        throw new Error("Could not determine a valid sellerId from the configured ADS_API_PROFILE_ID.");
+    // Validate that the correct Seller ID is configured. This prevents malformed API calls.
+    if (!sellerId || !sellerId.startsWith('A')) {
+        throw new Error("Invalid or missing SP_API_SELLER_ID in .env file. It should be the alphanumeric ID from Seller Central (often called Merchant Token).");
     }
 
-    // Use the more general-purpose Listings API to get product attributes, including price.
-    // This requires the "Listings Items" role, which is also needed for updating the price,
-    // making it a more robust choice than relying on the separate "Pricing" role.
     const listingData = await spApiRequest({
         method: 'get',
         url: `/listings/2021-08-01/items/${sellerId}/${sku}`,
@@ -107,7 +105,7 @@ export async function getListingInfoBySku(sku) {
 
     return { 
         price: typeof price === 'number' ? price : null, 
-        sellerId 
+        sellerId // Return the validated sellerId for use in the updatePrice function
     };
 }
 

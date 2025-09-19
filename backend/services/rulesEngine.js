@@ -282,22 +282,23 @@ const executeActivateAction = async (rule) => {
 
 // --- Price Adjustment Logic ---
 const processSinglePriceRule = async (rule) => {
-    const { asin, priceStep, priceLimit } = rule.config;
-    if (!asin || typeof priceStep !== 'number' || typeof priceLimit !== 'number') {
-        console.error(`[RulesEngine] ❌ Invalid config for price rule ID ${rule.id}. Missing asin, priceStep, or priceLimit.`);
+    const { sku, priceStep, priceLimit } = rule.config;
+    if (!sku || typeof priceStep !== 'number' || typeof priceLimit !== 'number') {
+        console.error(`[RulesEngine] ❌ Invalid config for price rule ID ${rule.id}. Missing sku, priceStep, or priceLimit.`);
         await logAction(rule, 'FAILURE', `Invalid rule configuration.`, { config: rule.config });
         return;
     }
 
-    console.log(`[RulesEngine] ⚙️  Processing price rule for ASIN: ${asin}`);
+    console.log(`[RulesEngine] ⚙️  Processing price rule for SKU: ${sku}`);
 
     try {
-        const listingInfo = await spApi.getListingInfo(asin);
-        if (!listingInfo || typeof listingInfo.price !== 'number' || !listingInfo.sellerId) {
-            let reason = "Could not get complete listing info from SP-API.";
-            if (!listingInfo.sellerId) reason = `Could not determine Seller ID for ASIN ${asin}.`;
-            else if (typeof listingInfo.price !== 'number') reason = `Could not get current price for ASIN ${asin}.`;
-            throw new Error(reason);
+        const listingInfo = await spApi.getListingInfoBySku(sku);
+        
+        if (typeof listingInfo.price !== 'number') {
+            throw new Error(`Could not get current price for SKU ${sku}.`);
+        }
+        if (!listingInfo.sellerId) {
+            throw new Error(`Could not determine Seller ID for SKU ${sku}.`);
         }
 
         const currentPrice = listingInfo.price;
@@ -308,7 +309,7 @@ const processSinglePriceRule = async (rule) => {
 
         if (limitExceeded) {
             newPrice = currentPrice - 1.00;
-            console.log(`[RulesEngine] Price limit of ${priceLimit} was exceeded for ASIN ${asin}. Resetting price by -$1.00.`);
+            console.log(`[RulesEngine] Price limit of ${priceLimit} was exceeded for SKU ${sku}. Resetting price by -$1.00.`);
         } else {
             newPrice = nextPotentialPrice;
         }
@@ -317,14 +318,14 @@ const processSinglePriceRule = async (rule) => {
             throw new Error(`Calculated new price ${newPrice.toFixed(2)} is invalid (<= 0.01).`);
         }
 
-        await spApi.updatePrice(listingInfo.sku, newPrice.toFixed(2), listingInfo.sellerId);
+        await spApi.updatePrice(sku, newPrice.toFixed(2), listingInfo.sellerId);
         
-        const summary = `Price for ${asin} (SKU: ${listingInfo.sku}) changed from $${currentPrice.toFixed(2)} to $${newPrice.toFixed(2)}.`;
-        await logAction(rule, 'SUCCESS', summary, { asin, sku: listingInfo.sku, oldPrice: currentPrice, newPrice });
+        const summary = `Price for SKU ${sku} changed from $${currentPrice.toFixed(2)} to $${newPrice.toFixed(2)}.`;
+        await logAction(rule, 'SUCCESS', summary, { sku, oldPrice: currentPrice, newPrice });
 
     } catch (e) {
-        console.error(`[RulesEngine] ❌ Error processing price rule for ASIN ${asin}:`, e);
-        await logAction(rule, 'FAILURE', `Failed to change price for ${asin}.`, { error: e.message });
+        console.error(`[RulesEngine] ❌ Error processing price rule for SKU ${sku}:`, e);
+        await logAction(rule, 'FAILURE', `Failed to change price for ${sku}.`, { error: e.message });
     }
 };
 

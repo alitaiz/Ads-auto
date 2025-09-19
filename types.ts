@@ -118,7 +118,8 @@ export interface AutomationRule {
             acos: { operator: '>', value: number };
         };
         // For PRICE_ADJUSTMENT
-        asin?: string;
+        // FIX: Changed 'asin' to 'sku' to match backend and component implementation.
+        sku?: string;
         priceStep?: number;
         priceLimit?: number;
     };

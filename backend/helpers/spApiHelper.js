@@ -73,38 +73,27 @@ async function spApiRequest({ method, url, data, params }) {
 }
 
 /**
- * Fetches listing information for a given ASIN, including SKU, sellerId, and current price.
- * @param {string} asin The ASIN of the product.
- * @returns {Promise<{sku: string, price: number | null, sellerId: string | null}>}
+ * Fetches listing information for a given SKU, including sellerId and current price.
+ * This is the correct, reliable way to get offer-specific data.
+ * @param {string} sku The Seller SKU of the product.
+ * @returns {Promise<{price: number | null, sellerId: string | null}>}
  */
-export async function getListingInfo(asin) {
-    const { SP_API_MARKETPLACE_ID } = process.env;
+export async function getListingInfoBySku(sku) {
+    const { SP_API_MARKETPLACE_ID, ADS_API_PROFILE_ID } = process.env;
+
+    // The profileId from ads API often starts with 'amzn1.ads.hz.'. The sellerId for SP-API does not.
+    // We extract the numerical part, which is usually what's needed, but this is a heuristic.
+    // A more robust solution would be to store a mapping or fetch the sellerId via the Profiles API if needed.
+    const sellerId = ADS_API_PROFILE_ID;
     
-    // 1. Get SKU and sellerId from Catalog Items API
-    const catalogData = await spApiRequest({
-        method: 'get',
-        url: `/catalog/2022-04-01/items/${asin}`,
-        params: {
-            marketplaceIds: SP_API_MARKETPLACE_ID,
-            includedData: 'summaries,attributes',
-        },
-    });
-
-    const summary = catalogData.summaries?.[0];
-    const sku = summary?.sku;
-    const sellerId = summary?.sellerId;
-
-    if (!sku) {
-        throw new Error(`Could not find SKU for ASIN ${asin}. Product might not be in the catalog.`);
-    }
     if (!sellerId) {
-        throw new Error(`Could not find sellerId for ASIN ${asin}.`);
+        throw new Error("Could not determine a valid sellerId from the configured ADS_API_PROFILE_ID.");
     }
 
-    // 2. Get Price from Pricing API
+    // 1. Get Price from Pricing API using the SKU
     const pricingData = await spApiRequest({
         method: 'get',
-        url: `/products/pricing/v0/items/${asin}/offers`,
+        url: `/products/pricing/v0/items/${sku}/offers`,
         params: {
             MarketplaceId: SP_API_MARKETPLACE_ID,
             ItemCondition: 'New',
@@ -114,7 +103,7 @@ export async function getListingInfo(asin) {
     const offer = pricingData?.payload?.Offers?.find(o => o.SellerId === sellerId);
     const price = offer?.ListingPrice?.Amount;
     
-    return { sku, price: typeof price === 'number' ? price : null, sellerId };
+    return { price: typeof price === 'number' ? price : null, sellerId };
 }
 
 
@@ -136,12 +125,20 @@ export async function updatePrice(sku, newPrice, sellerId) {
         patches: [
             {
                 op: "replace",
-                path: "/attributes/list_price",
+                path: "/attributes/purchasable_offer",
                 value: [
                     {
-                        value: parseFloat(newPrice),
+                        marketplace_id: SP_API_MARKETPLACE_ID,
                         currency: "USD",
-                        marketplace_id: SP_API_MARKETPLACE_ID
+                        our_price: [
+                            {
+                                schedule: [
+                                    {
+                                        value_with_tax: parseFloat(newPrice)
+                                    }
+                                ]
+                            }
+                        ]
                     }
                 ]
             }

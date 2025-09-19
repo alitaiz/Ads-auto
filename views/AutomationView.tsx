@@ -216,7 +216,7 @@ export function AutomationView() {
 
 function PriceChanger({ rules, onSave, onDelete }: { rules: AutomationRule[], onSave: () => void, onDelete: () => void }) {
     const [newRule, setNewRule] = useState({ 
-        asin: '', 
+        sku: '', 
         priceStep: 0.01, 
         priceLimit: 0,
         frequencyValue: 24,
@@ -232,21 +232,21 @@ function PriceChanger({ rules, onSave, onDelete }: { rules: AutomationRule[], on
             setError("Please select a profile on the PPC Management page first.");
             return;
         }
-        if (!newRule.asin || newRule.priceLimit <= 0) {
-            setError("ASIN and a positive Price Limit are required.");
+        if (!newRule.sku || newRule.priceLimit <= 0) {
+            setError("SKU and a positive Price Limit are required.");
             return;
         }
         setIsSaving(true);
         setError('');
 
         const payload: Partial<AutomationRule> = {
-            name: `Price Rule for ${newRule.asin}`,
+            name: `Price Rule for ${newRule.sku}`,
             rule_type: 'PRICE_ADJUSTMENT',
             profile_id: profileId,
             is_active: true,
             scope: {},
             config: {
-                asin: newRule.asin.trim().toUpperCase(),
+                sku: newRule.sku.trim(),
                 priceStep: newRule.priceStep,
                 priceLimit: newRule.priceLimit,
                 frequency: {
@@ -263,7 +263,7 @@ function PriceChanger({ rules, onSave, onDelete }: { rules: AutomationRule[], on
                 body: JSON.stringify(payload)
             });
             if (!res.ok) throw new Error((await res.json()).error || 'Failed to save rule.');
-            setNewRule({ asin: '', priceStep: 0.01, priceLimit: 0, frequencyValue: 24, frequencyUnit: 'hours' }); // Reset form
+            setNewRule({ sku: '', priceStep: 0.01, priceLimit: 0, frequencyValue: 24, frequencyUnit: 'hours' }); // Reset form
             onSave(); // Refetch rules
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An unknown error occurred.');
@@ -285,11 +285,11 @@ function PriceChanger({ rules, onSave, onDelete }: { rules: AutomationRule[], on
         <div>
             <div style={styles.card}>
                 <h2 style={styles.contentTitle}>Create New Price Automation Rule</h2>
-                <p style={{color: '#555', marginTop: 0}}>Automatically adjust an ASIN's price at a set frequency. When the price reaches the limit, it will be reset by -$1.00 before continuing.</p>
+                <p style={{color: '#555', marginTop: 0}}>Automatically adjust a SKU's price at a set frequency. When the price reaches the limit, it will be reset by -$1.00 before continuing.</p>
                 <form onSubmit={handleSave} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1.5fr auto', gap: '20px', alignItems: 'flex-end' }}>
                     <div style={styles.formGroup}>
-                        <label htmlFor="asin" style={styles.label}>ASIN</label>
-                        <input id="asin" type="text" style={styles.input} placeholder="B0..." value={newRule.asin} onChange={e => setNewRule(s => ({ ...s, asin: e.target.value }))} required />
+                        <label htmlFor="sku" style={styles.label}>SKU</label>
+                        <input id="sku" type="text" style={styles.input} placeholder="Your-SKU-123" value={newRule.sku} onChange={e => setNewRule(s => ({ ...s, sku: e.target.value }))} required />
                     </div>
                     <div style={styles.formGroup}>
                         <label htmlFor="priceStep" style={styles.label}>Price Step ($)</label>
@@ -334,7 +334,7 @@ function PriceChanger({ rules, onSave, onDelete }: { rules: AutomationRule[], on
                 {rules.filter(r => r.profile_id === profileId).map(rule => (
                     <div key={rule.id} style={styles.ruleCard}>
                         <div style={styles.ruleCardHeader}>
-                            <h3 style={styles.ruleName}>{rule.config.asin}</h3>
+                            <h3 style={styles.ruleName}>{rule.config.sku}</h3>
                              <label style={{display: 'flex', alignItems: 'center', gap: '5px'}}>
                                 <input type="checkbox" checked={rule.is_active} readOnly />
                                 {rule.is_active ? 'Active' : 'Paused'}

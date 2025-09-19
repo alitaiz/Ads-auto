@@ -74,44 +74,41 @@ async function spApiRequest({ method, url, data, params }) {
 
 /**
  * Fetches listing information for a given SKU, including sellerId and current price.
- * This is the correct, reliable way to get offer-specific data.
+ * This version uses the Listings API which is more likely to be authorized than the Pricing API.
  * @param {string} sku The Seller SKU of the product.
  * @returns {Promise<{price: number | null, sellerId: string | null}>}
  */
 export async function getListingInfoBySku(sku) {
     const { SP_API_MARKETPLACE_ID, ADS_API_PROFILE_ID } = process.env;
 
+    // The ADS_API_PROFILE_ID serves as the sellerId for SP-API calls.
     const sellerId = ADS_API_PROFILE_ID;
     
     if (!sellerId) {
         throw new Error("Could not determine a valid sellerId from the configured ADS_API_PROFILE_ID.");
     }
 
-    // 1. Get Price from the correct Pricing API endpoint using SKU
-    const pricingData = await spApiRequest({
+    // Use the more general-purpose Listings API to get product attributes, including price.
+    // This requires the "Listings Items" role, which is also needed for updating the price,
+    // making it a more robust choice than relying on the separate "Pricing" role.
+    const listingData = await spApiRequest({
         method: 'get',
-        url: '/products/pricing/v0/pricing', // Correct endpoint for SKU-based pricing
+        url: `/listings/2021-08-01/items/${sellerId}/${sku}`,
         params: {
-            MarketplaceId: SP_API_MARKETPLACE_ID,
-            ItemType: 'Sku',
-            Skus: sku, // The parameter is plural 'Skus'
+            marketplaceIds: SP_API_MARKETPLACE_ID,
+            includedData: 'attributes', // Specifically request the attributes which contain the price.
         }
     });
-
-    // The response for this endpoint is structured differently.
-    const result = pricingData?.payload?.[0];
-
-    if (!result || result.status !== 'Success') {
-         const errorDetail = result?.errors?.[0]?.message || 'Pricing data not found for SKU.';
-         throw new Error(`Could not get pricing data for SKU ${sku}. Reason: ${errorDetail}`);
-    }
-
-    // The sellerId in the pricing response may not match the ads profileId exactly.
-    // It's safer to assume the first 'New' condition offer is the one we want to manage.
-    const offer = result.product?.offers?.find(o => o.condition === 'New');
-    const price = offer?.listingPrice?.amount;
     
-    return { price: typeof price === 'number' ? price : null, sellerId };
+    // The price is nested deep within the 'attributes' JSON blob.
+    const attributes = listingData?.attributes;
+    const offer = attributes?.purchasable_offer?.[0];
+    const price = offer?.our_price?.[0]?.schedule?.[0]?.value_with_tax;
+
+    return { 
+        price: typeof price === 'number' ? price : null, 
+        sellerId 
+    };
 }
 
 

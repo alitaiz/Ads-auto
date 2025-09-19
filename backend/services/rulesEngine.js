@@ -281,56 +281,52 @@ const executeActivateAction = async (rule) => {
 };
 
 // --- Price Adjustment Logic ---
-const processPriceAdjustmentRules = async () => {
-    const { rows: priceRules } = await pool.query(
-        "SELECT * FROM automation_rules WHERE is_active = TRUE AND rule_type = 'PRICE_ADJUSTMENT'"
-    );
-    if (priceRules.length === 0) return;
-    
-    console.log(`[RulesEngine] Found ${priceRules.length} active price rule(s) to process.`);
+const processSinglePriceRule = async (rule) => {
+    const { asin, priceStep, priceLimit } = rule.config;
+    if (!asin || typeof priceStep !== 'number' || typeof priceLimit !== 'number') {
+        console.error(`[RulesEngine] ❌ Invalid config for price rule ID ${rule.id}. Missing asin, priceStep, or priceLimit.`);
+        await logAction(rule, 'FAILURE', `Invalid rule configuration.`, { config: rule.config });
+        return;
+    }
 
-    for (const rule of priceRules) {
-        const { asin, priceStep, priceLimit } = rule.config;
-        console.log(`[RulesEngine] ⚙️  Processing price rule for ASIN: ${asin}`);
+    console.log(`[RulesEngine] ⚙️  Processing price rule for ASIN: ${asin}`);
 
-        try {
-            const listingInfo = await spApi.getListingInfo(asin);
-            if (!listingInfo || typeof listingInfo.price !== 'number' || !listingInfo.sellerId) {
-                let reason = "Could not get complete listing info.";
-                if (!listingInfo.sellerId) reason = `Could not determine Seller ID for ASIN ${asin}.`;
-                else if (typeof listingInfo.price !== 'number') reason = `Could not get current price for ASIN ${asin}.`;
-                throw new Error(reason);
-            }
-
-            const currentPrice = listingInfo.price;
-            let newPrice;
-            const nextPotentialPrice = currentPrice + priceStep;
-            
-            const limitExceeded = (priceStep > 0 && nextPotentialPrice > priceLimit) || (priceStep < 0 && nextPotentialPrice < priceLimit);
-
-            if (limitExceeded) {
-                newPrice = currentPrice - 1.00;
-                console.log(`[RulesEngine] Limit of ${priceLimit} exceeded. Resetting price by -$1.00.`);
-            } else {
-                newPrice = nextPotentialPrice;
-            }
-
-            if (newPrice <= 0.01) {
-                throw new Error(`Calculated new price ${newPrice.toFixed(2)} is invalid.`);
-            }
-
-            await spApi.updatePrice(listingInfo.sku, newPrice.toFixed(2), listingInfo.sellerId);
-            
-            const summary = `Price for ${asin} changed from $${currentPrice.toFixed(2)} to $${newPrice.toFixed(2)}.`;
-            await logAction(rule, 'SUCCESS', summary, { asin, oldPrice: currentPrice, newPrice });
-
-        } catch (e) {
-            console.error(`[RulesEngine] ❌ Error processing price rule for ASIN ${asin}:`, e);
-            await logAction(rule, 'FAILURE', `Failed to change price for ${asin}.`, { error: e.message });
+    try {
+        const listingInfo = await spApi.getListingInfo(asin);
+        if (!listingInfo || typeof listingInfo.price !== 'number' || !listingInfo.sellerId) {
+            let reason = "Could not get complete listing info from SP-API.";
+            if (!listingInfo.sellerId) reason = `Could not determine Seller ID for ASIN ${asin}.`;
+            else if (typeof listingInfo.price !== 'number') reason = `Could not get current price for ASIN ${asin}.`;
+            throw new Error(reason);
         }
+
+        const currentPrice = listingInfo.price;
+        let newPrice;
+        const nextPotentialPrice = currentPrice + priceStep;
+        
+        const limitExceeded = (priceStep > 0 && nextPotentialPrice > priceLimit) || (priceStep < 0 && nextPotentialPrice < priceLimit);
+
+        if (limitExceeded) {
+            newPrice = currentPrice - 1.00;
+            console.log(`[RulesEngine] Price limit of ${priceLimit} was exceeded for ASIN ${asin}. Resetting price by -$1.00.`);
+        } else {
+            newPrice = nextPotentialPrice;
+        }
+
+        if (newPrice <= 0.01) {
+            throw new Error(`Calculated new price ${newPrice.toFixed(2)} is invalid (<= 0.01).`);
+        }
+
+        await spApi.updatePrice(listingInfo.sku, newPrice.toFixed(2), listingInfo.sellerId);
+        
+        const summary = `Price for ${asin} (SKU: ${listingInfo.sku}) changed from $${currentPrice.toFixed(2)} to $${newPrice.toFixed(2)}.`;
+        await logAction(rule, 'SUCCESS', summary, { asin, sku: listingInfo.sku, oldPrice: currentPrice, newPrice });
+
+    } catch (e) {
+        console.error(`[RulesEngine] ❌ Error processing price rule for ASIN ${asin}:`, e);
+        await logAction(rule, 'FAILURE', `Failed to change price for ${asin}.`, { error: e.message });
     }
 };
-
 
 const processSchedulingRules = async () => {
     try {
@@ -372,37 +368,40 @@ const isRuleDue = (rule) => {
 const processFrequencyRule = async (rule) => {
     console.log(`[RulesEngine] ⚙️  Processing rule "${rule.name}" (ID: ${rule.id}).`);
     try {
-        const campaignIds = rule.scope?.campaignIds || [];
-        const { rows } = await pool.query('SELECT entity_id FROM automation_action_throttle WHERE rule_id = $1 AND throttle_until > NOW()', [rule.id]);
-        const throttledEntities = new Set(rows.map(r => r.entity_id));
-        const performanceData = await getPerformanceData(rule, campaignIds);
+        if (rule.rule_type === 'PRICE_ADJUSTMENT') {
+            await processSinglePriceRule(rule);
+        } else if (rule.rule_type === 'BID_ADJUSTMENT' || rule.rule_type === 'SEARCH_TERM_AUTOMATION') {
+            const campaignIds = rule.scope?.campaignIds || [];
+            const { rows } = await pool.query('SELECT entity_id FROM automation_action_throttle WHERE rule_id = $1 AND throttle_until > NOW()', [rule.id]);
+            const throttledEntities = new Set(rows.map(r => r.entity_id));
+            const performanceData = await getPerformanceData(rule, campaignIds);
 
-        if (performanceData.size === 0) {
-            await logAction(rule, 'NO_ACTION', 'No entities to process; scope may be empty or no data found.', {});
-            await pool.query('UPDATE automation_rules SET last_run_at = NOW() WHERE id = $1', [rule.id]);
-            return;
+            if (performanceData.size === 0) {
+                await logAction(rule, 'NO_ACTION', 'No entities to process; scope may be empty or no data found.', {});
+                return;
+            }
+
+            let result;
+            if (rule.rule_type === 'BID_ADJUSTMENT') {
+                result = await evaluateBidAdjustmentRule(rule, performanceData, throttledEntities);
+            } else {
+                result = await evaluateSearchTermAutomationRule(rule, performanceData, throttledEntities);
+            }
+
+            const { value, unit } = rule.config.cooldown || { value: 0 };
+            if (result?.actedOnEntities?.length > 0 && value > 0) {
+                const interval = `${value} ${unit}`;
+                await pool.query(
+                    `INSERT INTO automation_action_throttle (rule_id, entity_id, throttle_until)
+                     SELECT $1, unnest($2::text[]), NOW() + $3::interval
+                     ON CONFLICT (rule_id, entity_id) DO UPDATE SET throttle_until = EXCLUDED.throttle_until;`,
+                    [rule.id, result.actedOnEntities, interval]
+                );
+            }
+
+            const hasActions = result && result.details && Object.values(result.details).length > 0;
+            await logAction(rule, hasActions ? 'SUCCESS' : 'NO_ACTION', result.summary, result.details);
         }
-
-        let result;
-        if (rule.rule_type === 'BID_ADJUSTMENT') {
-            result = await evaluateBidAdjustmentRule(rule, performanceData, throttledEntities);
-        } else if (rule.rule_type === 'SEARCH_TERM_AUTOMATION') {
-            result = await evaluateSearchTermAutomationRule(rule, performanceData, throttledEntities);
-        }
-
-        const { value, unit } = rule.config.cooldown || { value: 0 };
-        if (result?.actedOnEntities?.length > 0 && value > 0) {
-            const interval = `${value} ${unit}`;
-            await pool.query(
-                `INSERT INTO automation_action_throttle (rule_id, entity_id, throttle_until)
-                 SELECT $1, unnest($2::text[]), NOW() + $3::interval
-                 ON CONFLICT (rule_id, entity_id) DO UPDATE SET throttle_until = EXCLUDED.throttle_until;`,
-                [rule.id, result.actedOnEntities, interval]
-            );
-        }
-
-        const hasActions = result && result.details && Object.values(result.details).length > 0;
-        await logAction(rule, hasActions ? 'SUCCESS' : 'NO_ACTION', result.summary, result.details);
     } catch (error) {
         console.error(`[RulesEngine] ❌ Error processing rule ${rule.id}:`, error);
         await logAction(rule, 'FAILURE', 'Rule processing failed.', { error: error.message });
@@ -413,12 +412,12 @@ const processFrequencyRule = async (rule) => {
 
 const cronTask = async () => {
     console.log(`[RulesEngine] ⏰ Cron tick: Running scheduled tasks at ${new Date().toISOString()}`);
-    // Process time-based rules
     await processSchedulingRules();
     
-    // Process frequency-based rules
     try {
-        const { rows: activeRules } = await pool.query("SELECT * FROM automation_rules WHERE is_active = TRUE AND rule_type IN ('BID_ADJUSTMENT', 'SEARCH_TERM_AUTOMATION')");
+        const { rows: activeRules } = await pool.query(
+            "SELECT * FROM automation_rules WHERE is_active = TRUE AND rule_type IN ('BID_ADJUSTMENT', 'SEARCH_TERM_AUTOMATION', 'PRICE_ADJUSTMENT')"
+        );
         const dueRules = activeRules.filter(isRuleDue);
         if (dueRules.length > 0) {
             console.log(`[RulesEngine] Found ${dueRules.length} frequency-based rule(s) to run.`);
@@ -435,14 +434,7 @@ export const startRulesEngine = () => {
     if (mainTask) return console.warn('[RulesEngine] Engine is already running.');
     console.log('[RulesEngine] 🚀 Starting the automation rules engine...');
     
-    // Main task for bid/search term adjustments (every minute check)
     mainTask = cron.schedule('* * * * *', cronTask, { scheduled: true, timezone: "UTC" });
-    
-    // New, separate task for precise price adjustments at midnight
-    cron.schedule('0 0 * * *', processPriceAdjustmentRules, {
-        scheduled: true,
-        timezone: "America/Phoenix"
-    });
 };
 
 export const stopRulesEngine = () => {
@@ -451,7 +443,6 @@ export const stopRulesEngine = () => {
         mainTask.stop();
         mainTask = null;
     }
-    // Note: This does not stop the price adjustment cron, which is fine for most shutdown scenarios.
 };
 
 process.on('SIGINT', () => {

@@ -215,7 +215,13 @@ export function AutomationView() {
 }
 
 function PriceChanger({ rules, onSave, onDelete }: { rules: AutomationRule[], onSave: () => void, onDelete: () => void }) {
-    const [newRule, setNewRule] = useState({ asin: '', priceStep: 0.01, priceLimit: 0 });
+    const [newRule, setNewRule] = useState({ 
+        asin: '', 
+        priceStep: 0.01, 
+        priceLimit: 0,
+        frequencyValue: 24,
+        frequencyUnit: 'hours' as 'minutes' | 'hours' | 'days'
+    });
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
     const profileId = localStorage.getItem('selectedProfileId');
@@ -243,6 +249,10 @@ function PriceChanger({ rules, onSave, onDelete }: { rules: AutomationRule[], on
                 asin: newRule.asin.trim().toUpperCase(),
                 priceStep: newRule.priceStep,
                 priceLimit: newRule.priceLimit,
+                frequency: {
+                    value: newRule.frequencyValue,
+                    unit: newRule.frequencyUnit,
+                }
             },
         };
 
@@ -253,7 +263,7 @@ function PriceChanger({ rules, onSave, onDelete }: { rules: AutomationRule[], on
                 body: JSON.stringify(payload)
             });
             if (!res.ok) throw new Error((await res.json()).error || 'Failed to save rule.');
-            setNewRule({ asin: '', priceStep: 0.01, priceLimit: 0 }); // Reset form
+            setNewRule({ asin: '', priceStep: 0.01, priceLimit: 0, frequencyValue: 24, frequencyUnit: 'hours' }); // Reset form
             onSave(); // Refetch rules
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An unknown error occurred.');
@@ -275,19 +285,43 @@ function PriceChanger({ rules, onSave, onDelete }: { rules: AutomationRule[], on
         <div>
             <div style={styles.card}>
                 <h2 style={styles.contentTitle}>Create New Price Automation Rule</h2>
-                <p style={{color: '#555', marginTop: 0}}>Automatically adjust an ASIN's price at midnight (UTC-7). When the price reaches the limit, it will be reset by -$1.00 before continuing.</p>
-                <form onSubmit={handleSave} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '20px', alignItems: 'flex-end' }}>
+                <p style={{color: '#555', marginTop: 0}}>Automatically adjust an ASIN's price at a set frequency. When the price reaches the limit, it will be reset by -$1.00 before continuing.</p>
+                <form onSubmit={handleSave} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1.5fr auto', gap: '20px', alignItems: 'flex-end' }}>
                     <div style={styles.formGroup}>
                         <label htmlFor="asin" style={styles.label}>ASIN</label>
                         <input id="asin" type="text" style={styles.input} placeholder="B0..." value={newRule.asin} onChange={e => setNewRule(s => ({ ...s, asin: e.target.value }))} required />
                     </div>
                     <div style={styles.formGroup}>
-                        <label htmlFor="priceStep" style={styles.label}>Daily Price Step ($)</label>
+                        <label htmlFor="priceStep" style={styles.label}>Price Step ($)</label>
                         <input id="priceStep" type="number" step="0.01" style={styles.input} value={newRule.priceStep} onChange={e => setNewRule(s => ({ ...s, priceStep: parseFloat(e.target.value) }))} required />
                     </div>
                     <div style={styles.formGroup}>
                         <label htmlFor="priceLimit" style={styles.label}>Price Limit ($)</label>
                         <input id="priceLimit" type="number" step="0.01" min="0" style={styles.input} value={newRule.priceLimit} onChange={e => setNewRule(s => ({ ...s, priceLimit: parseFloat(e.target.value) }))} required />
+                    </div>
+                     <div style={styles.formGroup}>
+                        <label htmlFor="frequency" style={styles.label}>Run Every</label>
+                        <div style={{ display: 'flex', gap: '5px' }}>
+                            <input 
+                                id="frequencyValue" 
+                                type="number" 
+                                min="1" 
+                                style={{...styles.input, width: '70px'}} 
+                                value={newRule.frequencyValue} 
+                                onChange={e => setNewRule(s => ({ ...s, frequencyValue: parseInt(e.target.value, 10) || 1 }))} 
+                                required 
+                            />
+                            <select 
+                                id="frequencyUnit" 
+                                style={{...styles.input, flex: 1}} 
+                                value={newRule.frequencyUnit} 
+                                onChange={e => setNewRule(s => ({ ...s, frequencyUnit: e.target.value as any }))}
+                            >
+                                <option value="minutes">Minutes</option>
+                                <option value="hours">Hours</option>
+                                <option value="days">Days</option>
+                            </select>
+                        </div>
                     </div>
                     <button type="submit" style={isSaving ? {...styles.primaryButton, opacity: 0.7} : styles.primaryButton} disabled={isSaving}>
                         {isSaving ? 'Saving...' : '+ Add Rule'}
@@ -307,12 +341,14 @@ function PriceChanger({ rules, onSave, onDelete }: { rules: AutomationRule[], on
                             </label>
                         </div>
                         <div style={styles.ruleDetails}>
-                            <span style={styles.ruleLabel}>Daily Step</span>
+                            <span style={styles.ruleLabel}>Price Step</span>
                             <span style={styles.ruleValue}>{formatPrice(rule.config.priceStep, 'USD')}</span>
                             <span style={styles.ruleLabel}>Price Limit</span>
                             <span style={styles.ruleValue}>{formatPrice(rule.config.priceLimit, 'USD')}</span>
                             <span style={styles.ruleLabel}>Schedule</span>
-                            <span style={styles.ruleValue}>Daily at 00:00 (UTC-7)</span>
+                            <span style={styles.ruleValue}>
+                                {rule.config.frequency ? `Every ${rule.config.frequency.value} ${rule.config.frequency.unit}` : 'Daily at 00:00 (UTC-7)'}
+                            </span>
                         </div>
                         <div style={styles.ruleActions}>
                             <button style={{...styles.button, ...styles.dangerButton}} onClick={() => handleDelete(rule.id)}>Delete</button>

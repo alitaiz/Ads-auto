@@ -248,9 +248,29 @@ function PriceChanger({ rules, onSaveOrDelete }: { rules: AutomationRule[], onSa
             return;
         }
 
+        const skuToSave = ruleToSave.config?.sku?.trim();
+        if (!skuToSave) {
+            alert('SKU cannot be empty.');
+            return;
+        }
+
+        const isDuplicate = rules.some(
+            (existingRule) =>
+                existingRule.rule_type === 'PRICE_ADJUSTMENT' &&
+                existingRule.id !== ruleToSave.id && // Exclude the rule being edited
+                existingRule.config.sku?.trim().toLowerCase() === skuToSave.toLowerCase()
+        );
+
+        if (isDuplicate) {
+            alert(`A price rule for SKU "${skuToSave}" already exists. Each SKU can only have one price rule.`);
+            return;
+        }
+
+        const normalizedSku = skuToSave.toUpperCase();
         const payload = {
             ...ruleToSave,
-            name: `Price Rule for ${ruleToSave.config?.sku}`,
+            config: { ...ruleToSave.config, sku: normalizedSku },
+            name: `Price Rule for ${normalizedSku}`,
             profile_id: profileId,
         };
         
@@ -362,7 +382,7 @@ function PriceRuleModal({ rule, onClose, onSave }: { rule: Partial<AutomationRul
                         <div style={styles.formGroup}>
                             <label htmlFor="runAtTime" style={styles.label}>Run at Time (optional)</label>
                             <input id="runAtTime" type="time" style={styles.input} value={formData.config?.runAtTime || ''} onChange={e => handleChange('runAtTime', e.target.value)} />
-                             <small style={{color: '#666', marginTop: '4px'}}>If set, runs daily at this time. If empty, uses frequency below.</small>
+                             <small style={{color: '#666', marginTop: '4px'}}>All times are in UTC-7 (America/Phoenix). If set, runs daily at this time. If empty, uses frequency below.</small>
                         </div>
                     </div>
                      <div style={styles.formGroup}>

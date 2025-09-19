@@ -81,27 +81,35 @@ async function spApiRequest({ method, url, data, params }) {
 export async function getListingInfoBySku(sku) {
     const { SP_API_MARKETPLACE_ID, ADS_API_PROFILE_ID } = process.env;
 
-    // The profileId from ads API often starts with 'amzn1.ads.hz.'. The sellerId for SP-API does not.
-    // We extract the numerical part, which is usually what's needed, but this is a heuristic.
-    // A more robust solution would be to store a mapping or fetch the sellerId via the Profiles API if needed.
     const sellerId = ADS_API_PROFILE_ID;
     
     if (!sellerId) {
         throw new Error("Could not determine a valid sellerId from the configured ADS_API_PROFILE_ID.");
     }
 
-    // 1. Get Price from Pricing API using the SKU
+    // 1. Get Price from the correct Pricing API endpoint using SKU
     const pricingData = await spApiRequest({
         method: 'get',
-        url: `/products/pricing/v0/items/${sku}/offers`,
+        url: '/products/pricing/v0/pricing', // Correct endpoint for SKU-based pricing
         params: {
             MarketplaceId: SP_API_MARKETPLACE_ID,
-            ItemCondition: 'New',
+            ItemType: 'Sku',
+            Skus: sku, // The parameter is plural 'Skus'
         }
     });
 
-    const offer = pricingData?.payload?.Offers?.find(o => o.SellerId === sellerId);
-    const price = offer?.ListingPrice?.Amount;
+    // The response for this endpoint is structured differently.
+    const result = pricingData?.payload?.[0];
+
+    if (!result || result.status !== 'Success') {
+         const errorDetail = result?.errors?.[0]?.message || 'Pricing data not found for SKU.';
+         throw new Error(`Could not get pricing data for SKU ${sku}. Reason: ${errorDetail}`);
+    }
+
+    // The sellerId in the pricing response may not match the ads profileId exactly.
+    // It's safer to assume the first 'New' condition offer is the one we want to manage.
+    const offer = result.product?.offers?.find(o => o.condition === 'New');
+    const price = offer?.listingPrice?.amount;
     
     return { price: typeof price === 'number' ? price : null, sellerId };
 }

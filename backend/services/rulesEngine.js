@@ -283,8 +283,6 @@ const processSchedulingRules = async () => {
         for (const rule of schedulingRules) {
             const { pauseTime, activeTime, timezone } = rule.config;
             
-            // FIX: Use Intl.DateTimeFormat with a 24-hour locale for robust timezone-specific time checking.
-            // This resolves a bug where time comparison was based on the server's locale, not the target timezone.
             const formatter = new Intl.DateTimeFormat('en-GB', {
                 timeZone: timezone,
                 hour: '2-digit',
@@ -307,7 +305,13 @@ const processSchedulingRules = async () => {
 
 // --- Price Adjustment Logic ---
 const processSinglePriceRule = async (rule) => {
-    const { sku, priceStep, priceLimit } = rule.config;
+    let { sku, priceStep, priceLimit } = rule.config;
+
+    // Defensive Normalization: Ensure SKU is trimmed and uppercased.
+    if (typeof sku === 'string') {
+        sku = sku.trim().toUpperCase();
+    }
+    
     if (!sku || typeof priceStep !== 'number' || typeof priceLimit !== 'number') {
         console.error(`[RulesEngine] ❌ Invalid config for price rule ID ${rule.id}. Missing sku, priceStep, or priceLimit.`);
         await logAction(rule, 'FAILURE', `Invalid rule configuration.`, { config: rule.config });
@@ -317,10 +321,25 @@ const processSinglePriceRule = async (rule) => {
     console.log(`[RulesEngine] ⚙️  Processing price rule for SKU: ${sku}`);
 
     try {
-        const listingInfo = await spApi.getListingInfoBySku(sku);
+        let listingInfo;
+        try {
+            // First attempt to get listing info
+            listingInfo = await spApi.getListingInfoBySku(sku);
+        } catch (e) {
+            // Check if it's the specific 'NOT_FOUND' error we want to retry
+            const errorMessage = e.message || '{}';
+            const errorDetails = JSON.parse(errorMessage);
+            if (errorDetails?.[0]?.code === 'NOT_FOUND') {
+                console.warn(`[RulesEngine] Initial call failed for SKU ${sku} (NOT_FOUND). Retrying in 60 seconds...`);
+                await new Promise(resolve => setTimeout(resolve, 60000)); // Wait 60 seconds
+                listingInfo = await spApi.getListingInfoBySku(sku); // Second and final attempt
+            } else {
+                throw e; // Re-throw any other errors immediately
+            }
+        }
         
         if (typeof listingInfo.price !== 'number') {
-            throw new Error(`Could not get current price for SKU ${sku}.`);
+            throw new Error(`Could not get current price for SKU ${sku} after retry.`);
         }
         if (!listingInfo.sellerId) {
             throw new Error(`Could not determine Seller ID for SKU ${sku}.`);
@@ -350,7 +369,8 @@ const processSinglePriceRule = async (rule) => {
 
     } catch (e) {
         console.error(`[RulesEngine] ❌ Error processing price rule for SKU ${sku}:`, e);
-        await logAction(rule, 'FAILURE', `Failed to change price for ${sku}.`, { error: e.message });
+        const errorMessage = e.message.includes("{") ? JSON.parse(e.message)?.[0]?.message : e.message;
+        await logAction(rule, 'FAILURE', `Failed to change price for ${sku}.`, { error: errorMessage });
     }
 };
 
@@ -366,8 +386,6 @@ const processTimedPriceAdjustmentRules = async () => {
         for (const rule of timedRules) {
             const { runAtTime } = rule.config;
             
-            // FIX: Use Intl.DateTimeFormat with a 24-hour locale for robust timezone-specific time checking.
-            // This resolves a bug where time comparison was based on the server's locale, not the target timezone.
             const formatter = new Intl.DateTimeFormat('en-GB', {
                 timeZone: REPORTING_TIMEZONE,
                 hour: '2-digit',

@@ -8,7 +8,20 @@ import * as spApi from '../helpers/spApiHelper.js';
 const REPORTING_TIMEZONE = 'America/Phoenix'; // UTC-7, no daylight saving
 let mainTask = null;
 
-// --- Logging Helper ---
+// --- Helper Functions ---
+
+const getApiErrorMessage = (e) => {
+    try {
+        const parsed = JSON.parse(e.message);
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].message) {
+            return parsed[0].message;
+        }
+        return e.message;
+    } catch {
+        return e.message;
+    }
+};
+
 const logAction = async (rule, status, summary, details = {}) => {
   try {
     const replacer = (key, value) => (typeof value === 'bigint' ? value.toString() : value);
@@ -307,9 +320,9 @@ const processSchedulingRules = async () => {
 const processSinglePriceRule = async (rule) => {
     let { sku, priceStep, priceLimit } = rule.config;
 
-    // Defensive Normalization: Ensure SKU is trimmed and uppercased.
+    // Preserve the SKU's case, only trim whitespace.
     if (typeof sku === 'string') {
-        sku = sku.trim().toUpperCase();
+        sku = sku.trim();
     }
     
     if (!sku || typeof priceStep !== 'number' || typeof priceLimit !== 'number') {
@@ -321,22 +334,8 @@ const processSinglePriceRule = async (rule) => {
     console.log(`[RulesEngine] ⚙️  Processing price rule for SKU: ${sku}`);
 
     try {
-        let listingInfo;
-        try {
-            // First attempt to get listing info
-            listingInfo = await spApi.getListingInfoBySku(sku);
-        } catch (e) {
-            // Check if it's the specific 'NOT_FOUND' error we want to retry
-            const errorMessage = e.message || '{}';
-            const errorDetails = JSON.parse(errorMessage);
-            if (errorDetails?.[0]?.code === 'NOT_FOUND') {
-                console.warn(`[RulesEngine] Initial call failed for SKU ${sku} (NOT_FOUND). Retrying in 60 seconds...`);
-                await new Promise(resolve => setTimeout(resolve, 60000)); // Wait 60 seconds
-                listingInfo = await spApi.getListingInfoBySku(sku); // Second and final attempt
-            } else {
-                throw e; // Re-throw any other errors immediately
-            }
-        }
+        // The retry logic is now handled inside getListingInfoBySku
+        const listingInfo = await spApi.getListingInfoBySku(sku);
         
         if (typeof listingInfo.price !== 'number') {
             throw new Error(`Could not get current price for SKU ${sku} after retry.`);
@@ -369,7 +368,7 @@ const processSinglePriceRule = async (rule) => {
 
     } catch (e) {
         console.error(`[RulesEngine] ❌ Error processing price rule for SKU ${sku}:`, e);
-        const errorMessage = e.message.includes("{") ? JSON.parse(e.message)?.[0]?.message : e.message;
+        const errorMessage = getApiErrorMessage(e);
         await logAction(rule, 'FAILURE', `Failed to change price for ${sku}.`, { error: errorMessage });
     }
 };

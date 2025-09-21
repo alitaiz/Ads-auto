@@ -266,11 +266,12 @@ function PriceChanger({ rules, onSaveOrDelete }: { rules: AutomationRule[], onSa
             return;
         }
 
-        const normalizedSku = skuToSave.toUpperCase();
+        // Preserve the case of the SKU, do not force uppercase.
+        const casePreservedSku = skuToSave;
         const payload = {
             ...ruleToSave,
-            config: { ...ruleToSave.config, sku: normalizedSku },
-            name: `Price Rule for ${normalizedSku}`,
+            config: { ...ruleToSave.config, sku: casePreservedSku },
+            name: `Price Rule for ${casePreservedSku}`,
             profile_id: profileId,
         };
         

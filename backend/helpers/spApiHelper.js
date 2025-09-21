@@ -75,37 +75,53 @@ async function spApiRequest({ method, url, data, params }) {
 /**
  * Fetches listing information for a given SKU, including sellerId and current price.
  * This version uses the Listings API and the correct SP_API_SELLER_ID.
+ * It also includes a smart retry mechanism for transient 'NOT_FOUND' errors.
  * @param {string} sku The Seller SKU of the product.
  * @returns {Promise<{price: number | null, sellerId: string | null}>}
  */
 export async function getListingInfoBySku(sku) {
     const { SP_API_MARKETPLACE_ID, SP_API_SELLER_ID } = process.env;
-
-    // The SP_API_SELLER_ID is the alphanumeric ID from Seller Central (starts with 'A').
     const sellerId = SP_API_SELLER_ID;
     
-    // Validate that the correct Seller ID is configured. This prevents malformed API calls.
     if (!sellerId || !sellerId.startsWith('A')) {
         throw new Error("Invalid or missing SP_API_SELLER_ID in .env file. It should be the alphanumeric ID from Seller Central (often called Merchant Token).");
     }
 
-    const listingData = await spApiRequest({
+    const makeRequest = () => spApiRequest({
         method: 'get',
         url: `/listings/2021-08-01/items/${sellerId}/${sku}`,
         params: {
             marketplaceIds: SP_API_MARKETPLACE_ID,
-            includedData: 'attributes', // Specifically request the attributes which contain the price.
+            includedData: 'attributes',
         }
     });
+
+    let listingData;
+    try {
+        listingData = await makeRequest();
+    } catch (e) {
+        const errorMessage = e.message || '{}';
+        try {
+            const errorDetails = JSON.parse(errorMessage);
+            if (errorDetails?.[0]?.code === 'NOT_FOUND') {
+                console.warn(`[SP-API Helper] Initial call failed for SKU ${sku} (NOT_FOUND). Retrying in 60 seconds...`);
+                await new Promise(resolve => setTimeout(resolve, 60000));
+                listingData = await makeRequest(); // Second attempt
+            } else {
+                throw e; // Re-throw other errors
+            }
+        } catch (parseError) {
+             throw e; // If parsing fails, it's not the error we're looking for. Re-throw original.
+        }
+    }
     
-    // The price is nested deep within the 'attributes' JSON blob.
     const attributes = listingData?.attributes;
     const offer = attributes?.purchasable_offer?.[0];
     const price = offer?.our_price?.[0]?.schedule?.[0]?.value_with_tax;
 
     return { 
         price: typeof price === 'number' ? price : null, 
-        sellerId // Return the validated sellerId for use in the updatePrice function
+        sellerId
     };
 }
 

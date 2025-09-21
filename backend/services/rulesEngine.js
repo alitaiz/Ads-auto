@@ -282,8 +282,15 @@ const processSchedulingRules = async () => {
 
         for (const rule of schedulingRules) {
             const { pauseTime, activeTime, timezone } = rule.config;
-            const nowInZone = new Date(new Date().toLocaleString('en-US', { timeZone: timezone }));
-            const currentHHMM = nowInZone.toTimeString().substring(0, 5);
+            
+            // FIX: Use Intl.DateTimeFormat with a 24-hour locale for robust timezone-specific time checking.
+            // This resolves a bug where time comparison was based on the server's locale, not the target timezone.
+            const formatter = new Intl.DateTimeFormat('en-GB', {
+                timeZone: timezone,
+                hour: '2-digit',
+                minute: '2-digit',
+            });
+            const currentHHMM = formatter.format(new Date());
             
             if (currentHHMM === pauseTime) {
                 await executePauseAction(rule);
@@ -358,8 +365,15 @@ const processTimedPriceAdjustmentRules = async () => {
         
         for (const rule of timedRules) {
             const { runAtTime } = rule.config;
-            const nowInZone = new Date(new Date().toLocaleString('en-US', { timeZone: REPORTING_TIMEZONE }));
-            const currentHHMM = nowInZone.toTimeString().substring(0, 5);
+            
+            // FIX: Use Intl.DateTimeFormat with a 24-hour locale for robust timezone-specific time checking.
+            // This resolves a bug where time comparison was based on the server's locale, not the target timezone.
+            const formatter = new Intl.DateTimeFormat('en-GB', {
+                timeZone: REPORTING_TIMEZONE,
+                hour: '2-digit',
+                minute: '2-digit',
+            });
+            const currentHHMM = formatter.format(new Date());
 
             if (currentHHMM === runAtTime) {
                 if (rule.last_run_at) {

@@ -53,8 +53,8 @@ app.use((err, req, res, next) => {
 app.listen(port, () => {
     console.log(`🚀 Backend server is listening at http://localhost:${port}`);
     // A simple check on startup to warn if essential environment variables are missing
-    if (!process.env.DB_USER || !process.env.ADS_API_CLIENT_ID) {
-        console.warn('⚠️ WARNING: Essential environment variables (e.g., DB_USER, ADS_API_CLIENT_ID) are not set. The application may not function correctly.');
+    if (!process.env.DB_USER || !process.env.ADS_API_CLIENT_ID || !process.env.SP_API_CLIENT_ID) {
+        console.warn('⚠️ WARNING: Essential environment variables (e.g., DB_USER, ADS_API_CLIENT_ID, SP_API_CLIENT_ID) are not set. The application may not function correctly.');
     }
     startRulesEngine();
 });

@@ -1,7 +1,7 @@
 // backend/services/rulesEngine.js
 import cron from 'node-cron';
 import { checkAndRunDueRules, resetBudgets } from './automation/ruleProcessor.js';
-import pool from '../../db.js';
+import pool from '../db.js';
 
 // Define a constant for Amazon's reporting timezone to ensure consistency.
 const REPORTING_TIMEZONE = 'America/Los_Angeles';

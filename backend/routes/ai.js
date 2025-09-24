@@ -81,7 +81,11 @@ router.post('/ai/suggest-rule', async (req, res) => {
         const prompt = `
             You are a world-class Amazon PPC expert AI assistant. Your task is to analyze the provided product financial data and performance metrics to suggest a single, effective BID_ADJUSTMENT automation rule.
 
-            Product Financials:
+            **Rule Engine Logic - CRITICAL INSTRUCTION:**
+            The automation system processes a rule's "conditionGroups" sequentially from top to bottom. This is a "First Match Wins" system. When a keyword or target meets all conditions in a group, the action for THAT group is executed, and the system immediately stops processing that keyword/target. It will NOT evaluate any subsequent groups for that keyword.
+            THEREFORE, you MUST structure your suggested rule with the most specific, highest-priority, or most aggressive cost-saving conditions FIRST. More general or profit-taking conditions should be placed in later groups.
+
+            **Product Financials:**
             - Sale Price: $${sp.toFixed(2)}
             - Cost of Goods: $${cogs.toFixed(2)}
             - FBA Fee: $${fba.toFixed(2)}
@@ -90,20 +94,20 @@ router.post('/ai/suggest-rule', async (req, res) => {
             - Break-Even ACoS: ${(breakEvenAcos * 100).toFixed(2)}%
             - Target ACoS: ${(targetAcos * 100).toFixed(2)}%
 
-            Performance Data (${startDate} to ${endDate}):
+            **Performance Data (${startDate} to ${endDate}):**
             - Overall PPC ACoS: ${(overallAcos * 100).toFixed(2)}%
             - Overall PPC Conversion Rate: ${(overallCvr * 100).toFixed(2)}%
             - Organic Conversion Rate: ${organicCvr ? (organicCvr * 100).toFixed(2) + '%' : 'N/A'}
             - Total Spend: $${totalSpend.toFixed(2)}
             - Total Sales: $${totalSales.toFixed(2)}
 
-            Underperforming Search Terms (High Spend, 0 Sales):
+            **Underperforming Search Terms (High Spend, 0 Sales):**
             ${underperformingTerms.map(t => `- "${t.customer_search_term}": $${parseFloat(t.total_spend).toFixed(2)} spend`).join('\n') || 'None'}
 
-            Profitable Search Terms (High Sales, ACoS < Target):
+            **Profitable Search Terms (High Sales, ACoS < Target):**
             ${profitableTerms.map(t => `- "${t.customer_search_term}": $${parseFloat(t.total_sales).toFixed(2)} sales at ${(t.acos * 100).toFixed(2)}% ACoS`).join('\n') || 'None'}
 
-            Based on this data, provide a JSON object for a single automation rule that would be most impactful. The rule should contain one or two condition groups targeting either waste reduction or scaling profitable terms. Provide a brief 'reasoning' for your choice.
+            Based on ALL the data and the "First Match Wins" logic, provide a JSON object for a single automation rule that would be most impactful. The rule should contain one or two condition groups targeting either waste reduction or scaling profitable terms, ordered correctly. Provide a brief 'reasoning' for your choice and structure.
         `;
         
         const schema = {

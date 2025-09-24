@@ -62,3 +62,8 @@ export function RuleGuideContent() {
                 <li style={guideStyles.li}><strong>Dừng lại khi tìm thấy:</strong> Ngay khi một từ khóa/mục tiêu thỏa mãn tất cả các điều kiện trong một nhóm, hệ thống sẽ thực hiện hành động của <strong>chỉ nhóm đó</strong> và <strong>ngừng xử lý</strong> thực thể đó. Nó sẽ không xét đến các nhóm bên dưới nữa.</li>
             </ol>
             <blockquote style={guideStyles.blockquote}>
+                <strong>Quy tắc vàng:</strong> Đặt các luật <strong>cụ thể nhất</strong> và có mức độ ưu tiên cao nhất (ví dụ: giảm bid mạnh nhất) ở trên cùng. Các luật chung chung hơn nên được đặt ở dưới.
+            </blockquote>
+        </div>
+    );
+}

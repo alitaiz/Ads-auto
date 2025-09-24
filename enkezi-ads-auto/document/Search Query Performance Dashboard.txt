@@ -1,0 +1,96 @@
+Search Query Performance Dashboard
+The Search Query Performance dashboard provides visibility into your search term's performance based on shoppers' search behavior. For the selected timeframe, it shows metrics of the top terms of your brand catalog or ASIN (e.g., search displays, clicks, adds to shopping cart and purchases). The purchases and sales totals may not match the total count from your sales reports as these metrics include only those originated from Search results. Search Queries are selected based on the number of ASIN impressions and clicks for the selected period. Not all queries qualify to be part of this dashboard.
+-------------------
+Search Query : The Search Query Performance dashboard provides visibility into your search term's performance based on shoppers' search behavior. For the selected timeframe, it shows metrics of the top terms of your brand catalog or ASIN (e.g., search displays, clicks, adds to shopping cart and purchases). The purchases and sales totals may not match the total count from your sales reports as these metrics include only those originated from Search results. Search Queries are selected based on the number of ASIN impressions and clicks for the selected period. Not all queries qualify to be part of this dashboard.
+The query searched by the customers. This column cannot be hidden.
+We do not group the queries into topics. What you see is what has been typed by the customer.
+We will include queries associated with the selected Brand. If suppose you introduce a totally new category, say “coffee mugs” in the future, we will include queries related to coffee mugs as well.
+The queries include both “broad shopping intent” and spearfishing or “specific shopping intent” queries.
+------------------
+Search Query Score
+The rank of each search query from top performance to bottom performance. We share top 1000 ranked queries at this point. This column cannot be hidden.
+We use a combination of search funnel impressions, clicks, cart adds and purchases of queries and your own brand performance to compute a score for all the queries and rank them. By default, the list is sorted by query rank, starting from top rank.
+-----------------
+Search Query Volume
+The number of times this query was searched during the selected time period.
+IMPORTANT: We include all queries issued within a day. For example, if the same query is issued by the same customer session in a 24 hour time period more than once, we will include all of those instances in the total query volume. Also, clicking on the next page of search results will increment search volume.
+-------------------
+Search Funnel - Impressions
+Total Count
+The total number of impressions for all ASINs that originated from the search result.
+When an ASIN is displayed for a query, it means it received one impression.
+It includes both organic and sponsored products but excludes ASINS displayed in a widget such as "Editorial recommendations", "Top rated", "Highly rated".
+It includes products displayed to the customers irrespective of whether the product is in the scrollable view or below the fold. Suppose your product is displayed at position 16 for a query "coffee pod" and customers can see the product only if they scroll down the list. We will count the product as one impression.
+It includes ASINs from pages rendered to the customer and not the secondary pages that did not get views. For example, if the ASIN is rendered in the second page for the query then it will be included. If the ASIN is suppose to appear in the tenth page but never rendered to the customer because no customers clicked page 10 then that ASIN count is not included.
+It includes counts from refinements. For example, if an ASIN is displayed for "coffee pod", we count it as one impression for that query. If the customer refines the query by selecting "Medium roast" and the product gets displayed again, then it is counted again.
+Brand Count
+The total number of impressions for ASINs for the selected brand that originated from the search result.
+The Brand Count is calculated at the brand level and includes all offers on a listing during the selected time frame.
+Brand Share
+Percentage share of impressions from the brand's catalog compared to the total count for the query.
+Brand Share is the Brand Count divided by Total Count.
+ASIN Count
+The total number of impressions for the selected ASIN for this query.
+ASIN Share
+Percentage share of impressions attributed to the ASIN compared to the total count for the query.
+ASIN Share is the ASIN Count divided by Total Count.
+---------------------
+Search Funnel - Clicks
+Total Count
+The number of Clicks for the query originated from the search result.
+Brand Count
+Total number of clicks from the brand's catalog for this query.
+The Brand Count is calculated at the brand level and includes all offers on a listing during the selected time frame.
+Brand Share
+Percentage share of clicks from the brand's catalog compared to the total count for the query.
+Brand Share is the Brand Count divided by Total Count.
+Click-Through Rate (CTR)
+The total number of clicks over search query volume count
+It can be used to gauge how well customers engage with your products for the relevant queries.
+ASIN Count
+The total number of Clicks for the selected ASIN for this query.
+ASIN Share
+Percentage share of clicks attributed to the ASIN compared to the total count for the query.
+ASIN Share is the ASIN Count divided by Total Count.
+---------------------
+Search Funnel - Cart Adds
+Total Count
+The number of Cart-adds for the query originated from the search result.
+Customers can add to their shopping cart from pages like the details page. We attribute the cart-add count to all the ASINs that were displayed in Search.
+There are other cart-add possibilities such as customers directed to the product's detail page from external sites. We do not count these cart-adds since it is not originated from Search.
+Brand Count
+Total number of cart-adds from the brand's catalog for this query. Brand count is organic/non-ads based sales data only. The number of Brand purchases is all child ASINs within that Brand.
+The Brand Count is calculated at the brand level and includes all offers on a listing during the selected time frame.
+Brand Share
+Percentage share of cart-adds from the brand's catalog compared to the total count for the query.
+Brand Share is the Brand Count divided by Total Count.
+Cart Add Rate
+The total number of Cart-adds divided by Search Query Volume.
+This metric is important to track, since it shows the strong purchase intent towards your product. By comparing cart add rate and purchase rate, you will get more details on cart adds that converted successfully and those that were abandoned.
+ASIN Count
+The total number of Cart-adds for the selected ASIN for this query.
+ASIN Share
+Percentage share of cart adds attributed to the ASIN compared to the total count for the query.
+ASIN Share is the ASIN Count divided by Total Count.
+-------------------------
+Search Funnel - Purchases
+Total Count
+Total count of purchase actions that occurred across all brands on Amazon within the selected marketplace, originating from the search results for the query.
+It counts only when the purchase action happened for the query.
+If a customer purchased 5 quantity of the same ASIN in a single purchase action, we consider that as a single purchase.
+We do not exclude purchases that are cancelled and returned.
+It includes purchase actions that occurred in a day. For example, starting from the query and all funnel metrics such as impressions, clicks, cart adds and purchases, all actions should have occurred within the 24 hour period (i.e. attribution time period is 24 hours). If a customer queried, added to cart but purchased the following day, then that purchase will remain unattributed.
+Purchase Rate
+The total number of Purchases divided by Search Query Volume count
+PurchaseRate is a metric that measures the conversion efficiency of search queries into actual purchases on Amazon. It is calculated as follows: PurchaseRate = Total Count / Search Query Volume
+Brand Count
+The total number of Purchases from the selected brand's catalog for this query.
+The Brand Count is calculated at the brand level and includes all offers on a listing during the selected time frame.
+Brand Share
+Percentage share of Purchases from the brand's catalog divided by the total count for the query.
+Brand Share is the Brand Count divided by Total Count.
+ASIN Count
+The total number of Purchases for the selected ASIN for this query.
+ASIN Share
+Percentage share of purchase actions attributed to the ASIN compared to the total count for the query.
+ASIN Share is the ASIN Count divided by Total Count.

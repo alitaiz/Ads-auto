@@ -1,0 +1,52 @@
+-- =============================================================================
+-- Migration: Create/Update Sponsored Display Targeting Report Table
+-- =============================================================================
+-- This script creates the table for storing daily Sponsored Display Targeting
+-- report data. It is designed to be idempotent and safe to re-run.
+--
+
+-- Create the table with a minimal structure if it doesn't already exist.
+CREATE TABLE IF NOT EXISTS sponsored_display_targeting_report (
+    id SERIAL PRIMARY KEY,
+    report_date DATE NOT NULL,
+    campaign_id BIGINT,
+    ad_group_id BIGINT,
+    target_id BIGINT
+);
+
+-- Add all required columns using the IF NOT EXISTS syntax to avoid errors on re-run.
+ALTER TABLE sponsored_display_targeting_report
+    ADD COLUMN IF NOT EXISTS campaign_name TEXT,
+    ADD COLUMN IF NOT EXISTS ad_group_name TEXT,
+    ADD COLUMN IF NOT EXISTS targeting_expression TEXT,
+    ADD COLUMN IF NOT EXISTS targeting_text TEXT,
+    ADD COLUMN IF NOT EXISTS impressions BIGINT,
+    ADD COLUMN IF NOT EXISTS clicks BIGINT,
+    ADD COLUMN IF NOT EXISTS cost NUMERIC(12, 2),
+    ADD COLUMN IF NOT EXISTS purchases BIGINT,
+    ADD COLUMN IF NOT EXISTS sales NUMERIC(12, 2),
+    ADD COLUMN IF NOT EXISTS units_sold BIGINT,
+    ADD COLUMN IF NOT EXISTS asin VARCHAR(50);
+
+
+-- Add indexes for performance
+CREATE INDEX IF NOT EXISTS idx_sdtr_report_date ON sponsored_display_targeting_report(report_date);
+CREATE INDEX IF NOT EXISTS idx_sdtr_campaign_id ON sponsored_display_targeting_report(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_sdtr_ad_group_id ON sponsored_display_targeting_report(ad_group_id);
+CREATE INDEX IF NOT EXISTS idx_sdtr_target_id ON sponsored_display_targeting_report(target_id);
+CREATE INDEX IF NOT EXISTS idx_sdtr_asin ON sponsored_display_targeting_report(asin);
+
+-- Define a unique constraint to prevent duplicate rows.
+ALTER TABLE sponsored_display_targeting_report
+DROP CONSTRAINT IF EXISTS unique_sd_targeting_entry;
+
+ALTER TABLE sponsored_display_targeting_report
+ADD CONSTRAINT unique_sd_targeting_entry
+UNIQUE (report_date, campaign_id, ad_group_id, target_id);
+
+-- =============================================================================
+-- Grant Permissions to Application User
+-- =============================================================================
+-- IMPORTANT: Replace 'enkezi' with the actual DB_USER from your .env file.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE sponsored_display_targeting_report TO enkezi;
+GRANT USAGE, SELECT ON SEQUENCE sponsored_display_targeting_report_id_seq TO enkezi;

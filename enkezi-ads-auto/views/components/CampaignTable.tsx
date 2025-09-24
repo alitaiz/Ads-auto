@@ -179,6 +179,7 @@ const resizerStyles: { [key: string]: React.CSSProperties } = {
 
 function useResizableColumns(initialWidths: number[]) {
     const [widths, setWidths] = useState(initialWidths);
+    // FIX: Add state to track which column is being resized, so the component can re-render to apply styles.
     const [resizingColumnIndex, setResizingColumnIndex] = useState<number | null>(null);
     const currentColumnIndex = useRef<number | null>(null);
     const startX = useRef(0);
@@ -224,18 +225,9 @@ function useResizableColumns(initialWidths: number[]) {
         };
     }, [handleMouseMove, handleMouseUp]);
 
+    // FIX: The hook was returning an undefined function 'getHeaderProps'. It should return `handleMouseDown` aliased as `getHeaderProps`.
     return { widths, getHeaderProps: handleMouseDown, resizingColumnIndex };
 }
-
-const ResizableTh = ({ children, index, getHeaderProps, resizingColumnIndex }: { children: React.ReactNode, index: number, getHeaderProps: (index: number, e: React.MouseEvent<HTMLDivElement>) => void, resizingColumnIndex: number | null }) => (
-    <th style={styles.th}>
-        {children}
-        <div
-            style={{...resizerStyles.resizer, ...(resizingColumnIndex === index ? resizerStyles.resizing : {})}}
-            onMouseDown={(e) => getHeaderProps(index, e)}
-        />
-    </th>
-);
 
 
 // Interfaces for the new, structured log details
@@ -557,7 +549,7 @@ export function CampaignTable({
                             const isSorted = sortConfig?.key === col.id;
                             const directionIcon = sortConfig?.direction === 'ascending' ? '▲' : '▼';
                             return (
-                                <ResizableTh key={col.id} index={index} getHeaderProps={getHeaderProps} resizingColumnIndex={resizingColumnIndex}>
+                                <th key={col.id} style={styles.th}>
                                     <div
                                         onClick={() => col.isSortable && onRequestSort(col.id as SortableKeys)}
                                         style={{ display: 'flex', alignItems: 'center', cursor: col.isSortable ? 'pointer' : 'default' }}
@@ -565,7 +557,11 @@ export function CampaignTable({
                                         {col.label}
                                         {isSorted && <span style={styles.sortIcon}>{directionIcon}</span>}
                                     </div>
-                                </ResizableTh>
+                                    <div
+                                        style={{...resizerStyles.resizer, ...(resizingColumnIndex === index ? resizerStyles.resizing : {})}}
+                                        onMouseDown={(e) => getHeaderProps(index, e)}
+                                    />
+                                </th>
                             )
                         })}
                     </tr>

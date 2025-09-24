@@ -1,0 +1,338 @@
+// Load environment variables from .env file
+require('dotenv').config();
+
+const express = require('express');
+const cors = require('cors');
+const fetch = require('node-fetch');
+const zlib = require('zlib');
+const util = require('util');
+
+const app = express();
+const port = 4001;
+
+const gunzip = util.promisify(zlib.gunzip);
+
+app.use(cors());
+app.use(express.json());
+
+// --- CONFIGURATION - IMPORTANT! ---
+// These variables are loaded from your .env file
+const CLIENT_ID = process.env.AMAZON_CLIENT_ID;
+const REFRESH_TOKEN = process.env.AMAZON_REFRESH_TOKEN;
+const CLIENT_SECRET = process.env.AMAZON_CLIENT_SECRET;
+
+const AMAZON_API_ENDPOINT = 'https://advertising-api.amazon.com';
+const TOKEN_URL = 'https://api.amazon.com/auth/o2/token';
+
+// A simple in-memory cache for the access token
+let accessTokenCache = {
+    token: null,
+    expiresAt: 0,
+};
+
+// Helper function to get a valid Access Token (from cache or refresh)
+async function getAccessToken() {
+    if (!CLIENT_ID || !REFRESH_TOKEN || !CLIENT_SECRET) {
+        throw new Error('Missing Amazon API credentials in .env file.');
+    }
+
+    if (accessTokenCache.token && Date.now() < accessTokenCache.expiresAt) {
+        console.log("Using cached access token.");
+        return accessTokenCache.token;
+    }
+
+    console.log("Requesting new access token...");
+    const response = await fetch(TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: new URLSearchParams({
+            'grant_type': 'refresh_token',
+            'refresh_token': REFRESH_TOKEN,
+            'client_id': CLIENT_ID,
+            'client_secret': CLIENT_SECRET,
+        }),
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        console.error("Error getting access token:", error);
+        throw new Error('Could not refresh access token. Please check your credentials in the .env file.');
+    }
+
+    const data = await response.json();
+    accessTokenCache = {
+        token: data.access_token.trim(), // Trim whitespace from the token
+        // Cache token for 55 minutes (it expires in 60)
+        expiresAt: Date.now() + 55 * 60 * 1000,
+    };
+    console.log("Successfully obtained and cached new access token.");
+    return accessTokenCache.token;
+}
+
+// --- PROFILES & CAMPAIGNS API ENDPOINTS ---
+
+app.get('/api/profiles', async (req, res) => {
+    try {
+        const accessToken = await getAccessToken();
+        console.log("Fetching profiles from Amazon API...");
+        const response = await fetch(`${AMAZON_API_ENDPOINT}/v2/profiles`, {
+            headers: {
+                'Amazon-Advertising-API-ClientId': CLIENT_ID,
+                'Authorization': `Bearer ${accessToken}`,
+            }
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Amazon API Error on fetching profiles: ${response.status} - ${errorText}`);
+        }
+
+        const profiles = await response.json();
+        console.log(`Successfully fetched ${profiles.length} profiles.`);
+        // The frontend expects the data in a { profiles: [...] } wrapper
+        res.json({ profiles: profiles });
+
+    } catch (error) {
+        console.error(error.message);
+        res.status(500).json({ message: error.message });
+    }
+});
+
+app.get('/api/campaigns/:profileId', async (req, res) => {
+    const { profileId } = req.params;
+    const { stateFilter } = req.query; // e.g., 'enabled', 'paused', 'archived', 'all'
+
+    if (!profileId) {
+        return res.status(400).json({ message: "profileId is required" });
+    }
+
+    try {
+        const accessToken = await getAccessToken();
+        
+        let statesToInclude;
+        switch (stateFilter) {
+            case 'paused':
+                statesToInclude = ["PAUSED"];
+                break;
+            case 'archived':
+                statesToInclude = ["ARCHIVED"];
+                break;
+            case 'all':
+                statesToInclude = ["ENABLED", "PAUSED", "ARCHIVED"];
+                break;
+            case 'enabled':
+            default: // Default to only showing enabled campaigns
+                statesToInclude = ["ENABLED"];
+                break;
+        }
+
+        console.log(`Fetching campaigns for profile ${profileId} with state filter: ${statesToInclude.join(', ')}...`);
+        
+        const campaignRequestBody = {
+            stateFilter: {
+                include: statesToInclude
+            },
+            maxResults: 100 
+        };
+
+        const response = await fetch(`${AMAZON_API_ENDPOINT}/sp/campaigns/list`, {
+            method: 'POST',
+            headers: {
+                'Amazon-Advertising-API-ClientId': CLIENT_ID,
+                'Authorization': `Bearer ${accessToken}`,
+                'Amazon-Advertising-API-Scope': profileId,
+                'Content-Type': 'application/vnd.spCampaign.v3+json',
+                'Accept': 'application/vnd.spCampaign.v3+json',
+            },
+            body: JSON.stringify(campaignRequestBody),
+        });
+
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Amazon API Error on fetching campaigns: ${response.status} - ${errorText}`);
+        }
+
+        const responseData = await response.json();
+        const rawCampaigns = responseData.campaigns || [];
+
+        // Transform the raw API data to match the structure the frontend expects,
+        // with robust safety checks to prevent crashes from malformed data.
+        const transformedCampaigns = rawCampaigns.map(c => {
+            // If the campaign object is invalid, skip it.
+            if (!c || !c.campaignId) {
+                return null;
+            }
+
+            // Safely determine the state, ensuring it's a valid, lowercase string.
+            const rawState = (c.state && typeof c.state === 'string')
+                ? c.state.toLowerCase()
+                : 'archived';
+
+            // Ensure the state matches one of the types expected by the frontend UI.
+            const validStates = ['enabled', 'paused', 'archived', 'ended', 'pendingReview'];
+            const finalState = validStates.includes(rawState) ? rawState : 'archived';
+
+            return {
+                campaignId: c.campaignId,
+                name: c.name || 'Unnamed Campaign',
+                campaignType: 'sponsoredProducts',
+                targetingType: c.targetingType || 'UNKNOWN',
+                state: finalState,
+                // Safely get the budget, defaulting to 0 if it's missing or not a number.
+                dailyBudget: (c.budget && typeof c.budget.amount === 'number') ? c.budget.amount : 0,
+                // Provide a default for required fields like startDate.
+                startDate: c.startDate || 'Date not available',
+                endDate: c.endDate,
+                bidding: c.bidding,
+            };
+        }).filter(Boolean); // Filter out any null entries from invalid campaign data.
+
+        console.log(`Successfully fetched and transformed ${transformedCampaigns.length} campaigns.`);
+        res.json({ campaigns: transformedCampaigns });
+
+    } catch (error) {
+        console.error(error.message);
+        res.status(500).json({ message: error.message });
+    }
+});
+
+
+// --- REPORTING ENDPOINTS ---
+
+/**
+ * STEP 1: Endpoint to request a report.
+ * The frontend calls this to start the process.
+ * This now specifically requests a report for ENABLED campaigns to fix an API error.
+ */
+app.post('/api/reports', async (req, res) => {
+    const { profileId } = req.body;
+    if (!profileId) {
+        return res.status(400).json({ message: "profileId is required" });
+    }
+
+    try {
+        const accessToken = await getAccessToken();
+        const today = new Date().toISOString().split('T')[0];
+
+        const reportRequestBody = {
+            name: `SP Active Campaigns Report for ${today}`,
+            startDate: today,
+            endDate: today,
+            configuration: {
+                adProduct: "SPONSORED_PRODUCTS",
+                groupBy: ["campaign"],
+                columns: ["impressions", "clicks", "cost", "campaignId", "startDate", "endDate"],
+                // According to the API, this is the correct way to filter by status for this report type.
+                filters: [
+                    {
+                        field: "campaignStatus",
+                        values: ["ENABLED"]
+                    }
+                ],
+                reportTypeId: "spCampaigns",
+                timeUnit: "SUMMARY",
+                format: "GZIP_JSON"
+            }
+        };
+
+        console.log(`Requesting report for active campaigns for profile ${profileId}...`);
+        const reportResponse = await fetch(`${AMAZON_API_ENDPOINT}/reporting/reports`, {
+            method: 'POST',
+            headers: {
+                'Amazon-Advertising-API-ClientId': CLIENT_ID,
+                'Authorization': `Bearer ${accessToken}`,
+                'Amazon-Advertising-API-Scope': profileId,
+                'Content-Type': 'application/vnd.createasyncreportrequest.v3+json',
+            },
+            body: JSON.stringify(reportRequestBody),
+        });
+
+        if (!reportResponse.ok) {
+            const errorText = await reportResponse.text();
+            throw new Error(`Amazon API Error on report request: ${reportResponse.status} - ${errorText}`);
+        }
+
+        const data = await reportResponse.json();
+        console.log(`Report successfully requested. Report ID: ${data.reportId}`);
+        res.status(202).json({ reportId: data.reportId });
+
+    } catch (error) {
+        console.error(error.message);
+        res.status(500).json({ message: error.message });
+    }
+});
+
+
+/**
+ * STEPS 2 & 3: Endpoint to check report status, download, and return data.
+ * The frontend calls this after getting a reportId. This endpoint handles the polling logic.
+ */
+app.get('/api/reports/:reportId', async (req, res) => {
+    const { reportId } = req.params;
+    const { profileId } = req.query; // Get profileId from query parameters
+
+    if (!profileId) {
+        return res.status(400).json({ message: "profileId is required as a query parameter." });
+    }
+    
+    try {
+        const accessToken = await getAccessToken();
+        const headers = {
+            'Amazon-Advertising-API-ClientId': CLIENT_ID,
+            'Authorization': `Bearer ${accessToken}`,
+            'Amazon-Advertising-API-Scope': profileId, // Add the profileId to the headers for API scope
+        };
+
+        const checkStatus = async () => {
+            console.log(`Checking status for report ${reportId} with profile ${profileId}...`);
+            const statusResponse = await fetch(`${AMAZON_API_ENDPOINT}/reporting/reports/${reportId}`, { headers });
+            if (!statusResponse.ok) {
+                 const errorText = await statusResponse.text();
+                 throw new Error(`Amazon API Error on status check: ${statusResponse.status} - ${errorText}`);
+            }
+            return await statusResponse.json();
+        };
+
+        let reportStatus = await checkStatus();
+        let retries = 0;
+        const maxRetries = 30; // Poll for a maximum of 5 minutes (30 * 10s)
+        
+        while ((reportStatus.status === 'PENDING' || reportStatus.status === 'PROCESSING') && retries < maxRetries) {
+            console.log(`Status is ${reportStatus.status}. Waiting 10 seconds... (Retry ${retries + 1}/${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
+            reportStatus = await checkStatus();
+            retries++;
+        }
+
+        if (reportStatus.status === 'COMPLETED') {
+            console.log('Report completed! Downloading from:', reportStatus.url);
+            
+            // The download URL doesn't require auth headers.
+            const downloadResponse = await fetch(reportStatus.url);
+            if (!downloadResponse.ok) throw new Error(`Failed to download report file: ${downloadResponse.status}`);
+            
+            const compressedBuffer = await downloadResponse.buffer();
+            const decompressedBuffer = await gunzip(compressedBuffer);
+            const reportData = JSON.parse(decompressedBuffer.toString());
+            
+            console.log('Report downloaded and decompressed successfully.');
+            res.status(200).json(reportData);
+
+        } else {
+             const failureReason = reportStatus.failureReason || 'Unknown reason.';
+             throw new Error(`Report generation failed or timed out. Final status: ${reportStatus.status}. Reason: ${failureReason}`);
+        }
+
+    } catch (error) {
+        console.error(error.message);
+        res.status(500).json({ message: error.message });
+    }
+});
+
+app.listen(port, () => {
+    console.log(`Backend proxy listening at http://localhost:${port}`);
+    if (!CLIENT_ID || !CLIENT_SECRET || !REFRESH_TOKEN) {
+        console.warn('WARNING: Amazon API credentials are not set in the .env file. The application will not work correctly.');
+    }
+});

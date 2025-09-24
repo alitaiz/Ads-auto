@@ -1,0 +1,126 @@
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+    import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
+    import zlib from 'zlib';
+    import { promisify } from 'util';
+    import crypto from 'crypto';
+    
+    const gunzip = promisify(zlib.gunzip);
+    const client = new DynamoDBClient({});
+    const docClient = DynamoDBDocumentClient.from(client);
+
+    const GZIP_MAGIC_BYTES = [0x1f, 0x8b];
+    
+    // A list of all supported traffic and conversion event types.
+    const SUPPORTED_EVENT_TYPES = [
+        'sp-traffic', 'sp-conversion',
+        'sb-traffic', 'sb-conversion',
+        'sd-traffic', 'sd-conversion'
+    ];
+    
+    export const handler = async (event) => {
+        console.log(`[START] Received ${event.records.length} raw records from Firehose.`);
+        const outputRecords = [];
+        let successfulPuts = 0;
+    
+        for (const record of event.records) {
+            try {
+                const payload = Buffer.from(record.data, 'base64');
+                let dataString;
+
+                // Step 1: Decompress if necessary
+                if (payload[0] === GZIP_MAGIC_BYTES[0] && payload[1] === GZIP_MAGIC_BYTES[1]) {
+                    const decompressed = await gunzip(payload);
+                    dataString = decompressed.toString('utf-8');
+                } else {
+                    dataString = payload.toString('utf-8');
+                }
+                
+                console.log('[DEBUG] Decompressed data string (sample):', dataString.substring(0, 500));
+
+                // Step 2: Parse events (a single line from Firehose can contain multiple JSON objects)
+                const events = dataString.split('\n').filter(Boolean).map(JSON.parse);
+                console.log(`[INFO] Parsed ${events.length} event(s) from a single Firehose record.`);
+    
+                for (const eventJson of events) {
+                    const eventType = eventJson.type || eventJson.dataset_id;
+                    
+                    const processInnerRecord = async (innerRecord, type) => {
+                        let timestamp;
+                        // FIX: All standard traffic/conversion events from the stream use a time window start field for the timestamp.
+                        if (SUPPORTED_EVENT_TYPES.includes(type)) {
+                            timestamp = new Date(innerRecord.timeWindowStart || innerRecord.time_window_start).getTime();
+                        } else if (innerRecord.time_window_start) { // Fallback for other potential event types
+                            timestamp = new Date(innerRecord.time_window_start).getTime();
+                        } else {
+                            console.warn(`[WARN] Could not determine timestamp for event type '${type}'. Defaulting to now.`);
+                            timestamp = new Date().getTime();
+                        }
+
+                        if (isNaN(timestamp)) {
+                            console.error(`[ERROR] Failed to parse a valid timestamp from record. Skipping.`, innerRecord);
+                            return; // Skip this record
+                        }
+
+                        const itemToSave = {
+                            event_id: innerRecord.idempotencyId || innerRecord.idempotency_id || `${type}-${crypto.randomUUID()}`,
+                            timestamp: timestamp,
+                            event_type: type,
+                            event_data: innerRecord,
+                        };
+
+                        const command = new PutCommand({
+                            TableName: process.env.DYNAMODB_TABLE_NAME,
+                            Item: itemToSave,
+                        });
+                        await docClient.send(command);
+                        successfulPuts++;
+                    };
+                    
+                    if (SUPPORTED_EVENT_TYPES.includes(eventType) && Array.isArray(eventJson.records)) {
+                        console.log(`[INFO] Processing bulk event type '${eventType}' with ${eventJson.records.length} inner records.`);
+                        for (const innerRecord of eventJson.records) {
+                            await processInnerRecord(innerRecord, eventType);
+                        }
+                    } else if (SUPPORTED_EVENT_TYPES.includes(eventType)) {
+                        console.log(`[INFO] Processing single event type '${eventType}'.`);
+                        await processInnerRecord(eventJson, eventType);
+                    } else if (eventJson.metadata?.messageId) {
+                         const itemToSave = {
+                            event_id: eventJson.metadata.messageId,
+                            timestamp: new Date(eventJson.metadata.timestamp).getTime(),
+                            event_type: eventJson.type,
+                            event_data: eventJson
+                        };
+                        const command = new PutCommand({
+                            TableName: process.env.DYNAMODB_TABLE_NAME,
+                            Item: itemToSave,
+                        });
+                        await docClient.send(command);
+                        successfulPuts++;
+                    } else {
+                        console.warn('[WARN] Skipping malformed/unrecognized event structure:', JSON.stringify(eventJson));
+                    }
+                }
+    
+                outputRecords.push({
+                    recordId: record.recordId,
+                    result: 'Ok',
+                    data: record.data 
+                });
+            } catch (innerError) {
+                console.error('[ERROR] Critical error processing a Firehose record:', { 
+                    recordId: record.recordId, 
+                    error: innerError.message,
+                    stack: innerError.stack,
+                    dataSample: record.data.substring(0, 200) + '...'
+                });
+                outputRecords.push({
+                    recordId: record.recordId,
+                    result: 'ProcessingFailed',
+                    data: record.data
+                });
+            }
+        }
+        console.log(`[END] Successfully processed ${outputRecords.filter(r => r.result === 'Ok').length} of ${event.records.length} records. Total successful DynamoDB puts: ${successfulPuts}.`);
+        return { records: outputRecords };
+    };

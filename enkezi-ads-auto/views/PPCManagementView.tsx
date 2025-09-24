@@ -131,11 +131,13 @@ const formatDateForQuery = (d: Date) => {
     return `${year}-${month}-${day}`;
 };
 
+// FIX: Changed campaign.id to type number to match data model.
 const RuleEditModal = ({ isOpen, onClose, campaign, allRules, onSave }: { isOpen: boolean, onClose: () => void, campaign: {id: number; name: string; type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION'} | null, allRules: AutomationRule[], onSave: (campaignId: number, initialIds: Set<number>, newIds: Set<number>) => void }) => {
     if (!isOpen || !campaign) return null;
 
     const relevantRules = allRules.filter(r => r.rule_type === campaign.type);
     
+    // FIX: Explicitly convert campaign.id to string for comparison with scope IDs, which can be string or number.
     const initialSelectedIds = useMemo(() => new Set(
         relevantRules.filter(r => r.scope.campaignIds?.some(id => String(id) === String(campaign.id))).map(r => r.id)
     ), [relevantRules, campaign.id]);
@@ -197,6 +199,7 @@ export function PPCManagementView() {
         localStorage.getItem('selectedProfileId') || null
     );
     const [campaigns, setCampaigns] = useState<Campaign[]>(cache.ppcManagement.campaigns || []);
+    // FIX: Changed performanceMetrics state key to number to match data model.
     const [performanceMetrics, setPerformanceMetrics] = useState<Record<number, CampaignStreamMetrics>>(cache.ppcManagement.performanceMetrics || {});
     const [automationRules, setAutomationRules] = useState<AutomationRule[]>([]);
     const [loading, setLoading] = useState({ profiles: true, data: true, rules: true });
@@ -215,11 +218,13 @@ export function PPCManagementView() {
         adjustedSpend: {}, sales: {}, orders: {}, impressions: {}, clicks: {}, acos: {}, roas: {},
     });
     
+    // FIX: Changed state types from string to number for campaign IDs.
     const [expandedCampaignId, setExpandedCampaignId] = useState<number | null>(null);
     const [automationLogs, setAutomationLogs] = useState<Record<number, any[]>>({});
     const [loadingLogs, setLoadingLogs] = useState<number | null>(null);
     const [logsError, setLogsError] = useState<string | null>(null);
 
+    // FIX: Changed state types from string to number for campaign IDs.
     const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<number>>(new Set());
     const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
     const [editingCampaign, setEditingCampaign] = useState<{id: number; name: string; type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION'} | null>(null);
@@ -387,6 +392,7 @@ export function PPCManagementView() {
         }
     }, [selectedProfileId]);
     
+    // FIX: Changed campaignId parameter type from string to number.
     const handleToggleExpand = async (campaignId: number) => {
         const currentlyExpanded = expandedCampaignId === campaignId;
         setExpandedCampaignId(currentlyExpanded ? null : campaignId);
@@ -423,6 +429,7 @@ export function PPCManagementView() {
         return startDateStr === endDateStr ? startDateStr : `${startDateStr} - ${endDateStr}`;
     };
     
+    // FIX: Changed campaignId parameter type from string to number to fix comparison error.
     const handleUpdateCampaign = async (campaignId: number, update: any) => {
         const originalCampaigns = [...campaigns];
         setCampaigns(prev => prev.map(c => c.campaignId === campaignId ? { ...c, ...(update.budget ? {dailyBudget: update.budget.amount} : update) } : c));
@@ -588,6 +595,7 @@ export function PPCManagementView() {
         setSortConfig({ key, direction });
     };
     
+    // FIX: Changed campaignId parameter type from string to number.
     const handleSelectCampaign = (campaignId: number, isSelected: boolean) => {
         setSelectedCampaignIds(prev => {
             const newSet = new Set(prev);
@@ -597,10 +605,12 @@ export function PPCManagementView() {
         });
     };
 
+    // FIX: This function now correctly creates a Set of numbers.
     const handleSelectAllCampaigns = (isSelected: boolean) => {
         if (isSelected) {
             setSelectedCampaignIds(new Set(finalDisplayData.map(c => c.campaignId)));
         } else {
+            // FIX: Explicitly create an empty Set of numbers to satisfy TypeScript.
             setSelectedCampaignIds(new Set<number>());
         }
     };
@@ -615,6 +625,7 @@ export function PPCManagementView() {
     const searchTermRules = useMemo(() => profileFilteredRules.filter(r => r.rule_type === 'SEARCH_TERM_AUTOMATION'), [profileFilteredRules]);
     const budgetAccelerationRules = useMemo(() => profileFilteredRules.filter(r => r.rule_type === 'BUDGET_ACCELERATION'), [profileFilteredRules]);
 
+    // FIX: Changed campaignId parameter type from string to number.
     const handleEditCampaignRules = (campaignId: number, ruleType: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION') => {
         const campaign = combinedCampaignData.find(c => c.campaignId === campaignId);
         if (campaign) {
@@ -623,6 +634,7 @@ export function PPCManagementView() {
         }
     };
     
+    // FIX: Changed campaignId parameter type from string to number.
     const handleSaveIndividualRules = async (campaignId: number, initialRuleIds: Set<number>, newRuleIds: Set<number>) => {
         setLoading(prev => ({ ...prev, rules: true }));
         const updates: Promise<any>[] = [];

@@ -11,7 +11,7 @@
     -   Xem chi tiết (drill-down) từ Campaign xuống Ad Group và Keywords/Targets.
 
 -   **Phân tích Dữ liệu Chuyên sâu:**
-    -   **Search Term Report:** Phân tích hiệu suất của các cụm từ tìm kiếm của khách hàng, xác định các cơ hội và những từ khóa lãng phí.
+    -   **Search Term Report:** Phân tích hiệu suất cho Sponsored Products, Sponsored Brands, và Sponsored Display. Xác định các cơ hội và những từ khóa/cibles lãng phí.
     -   **Sales & Traffic Report:** Xem dữ liệu kinh doanh tổng thể, bao gồm cả doanh số organic, để đánh giá tác động thực sự của quảng cáo.
 
 -   **Trung tâm Tự động hóa (Automation Center):**

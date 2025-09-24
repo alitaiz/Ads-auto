@@ -77,10 +77,11 @@ const saveSpDataToDB = async (client, reportData) => {
             ad_group_name, ad_group_id, targeting, match_type, customer_search_term,
             keyword_id, keyword_text, keyword_bid, ad_keyword_status, asin,
             impressions, clicks, cost, cost_per_click, click_through_rate,
-            purchases_7d, sales_7d, units_sold_clicks_7d
+            purchases_7d, sales_7d, units_sold_clicks_7d,
+            sales_1d, purchases_1d
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-            $20, $21, $22, $23, $24, $25
+            $20, $21, $22, $23, $24, $25, $26, $27
         )
         ON CONFLICT (report_date, campaign_id, ad_group_id, keyword_id, customer_search_term, targeting) DO NOTHING;
     `;
@@ -92,7 +93,8 @@ const saveSpDataToDB = async (client, reportData) => {
             item.adGroupName, item.adGroupId, item.targeting, item.matchType, item.searchTerm,
             item.keywordId, item.keyword, item.keywordBid, item.adKeywordStatus, extractAsinFromName(item.campaignName),
             item.impressions, item.clicks, item.cost, item.costPerClick, item.clickThroughRate,
-            item.purchases7d, item.sales7d, item.unitsSoldClicks7d
+            item.purchases7d, item.sales7d, item.unitsSoldClicks7d,
+            item.sales1d, item.purchases1d
         ];
         const res = await client.query(query, values);
         if (res.rowCount > 0) insertedCount++;

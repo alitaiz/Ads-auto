@@ -3,35 +3,6 @@ import pool from '../db.js';
 
 const router = express.Router();
 
-// A safer formatDate that avoids timezone shifts from toISOString()
-const formatDateSafe = (d) => {
-    if (!d) return '';
-    const date = new Date(d);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-};
-
-/**
- * Normalizes a percentage value (e.g., 95.5 for 95.5%) into a decimal ratio (e.g., 0.955).
- * Safely handles numeric values that might be represented as strings from the database driver.
- * @param {any} value - The value to normalize.
- * @returns {number | any} The normalized decimal, or the original value.
- */
-const normalizePercent = (value) => {
-    if (value === null || typeof value === 'undefined') {
-        return value; // Keep null/undefined as is
-    }
-    // The pg driver can return NUMERIC types as strings. Coerce to a number.
-    const num = Number(value);
-    
-    // If the result is a valid number (not NaN), perform the division.
-    // Otherwise, return the original value.
-    return !isNaN(num) ? num / 100 : value;
-};
-
-
 // --- SP Search Term Report Endpoints ---
 
 router.get('/sp-search-terms-filters', async (req, res) => {

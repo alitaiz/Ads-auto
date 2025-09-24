@@ -535,7 +535,46 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
                             <div style={styles.card}>
                                 <h3 style={styles.cardTitle}>Scheduling &amp; Cooldown</h3>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                                    {/* Frequency and Cooldown inputs */}
+                                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                                        <div style={styles.formGroup}>
+                                            <label style={styles.label}>Frequency</label>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                <span>Run every</span>
+                                                <input type="number" min="1" style={{...styles.input, width: '80px'}} value={formData.config.frequency?.value || 1} onChange={e => handleConfigChange('frequency', { ...formData.config.frequency, value: Math.max(1, Number(e.target.value)) })} />
+                                                <select style={{...styles.input, flex: 1}} value={formData.config.frequency?.unit || 'hours'} onChange={e => {
+                                                    const unit = e.target.value as 'minutes' | 'hours' | 'days';
+                                                    const newFreq = { ...formData.config.frequency, unit };
+                                                    if (unit === 'days' && !formData.config.frequency?.startTime) {
+                                                        newFreq.startTime = '01:00'; // Default
+                                                    }
+                                                    handleConfigChange('frequency', newFreq);
+                                                }}>
+                                                    <option value="minutes">Minute(s)</option>
+                                                    <option value="hours">Hour(s)</option>
+                                                    <option value="days">Day(s)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div style={styles.formGroup}>
+                                            <label style={styles.label}>Action Cooldown</label>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                <span>Wait for</span>
+                                                <input type="number" min="0" style={{...styles.input, width: '80px'}} value={formData.config.cooldown?.value ?? 24} onChange={e => handleConfigChange('cooldown', { ...formData.config.cooldown, value: Number(e.target.value) })}/>
+                                                <select style={{...styles.input, flex: 1}} value={formData.config.cooldown?.unit || 'hours'} onChange={e => handleConfigChange('cooldown', { ...formData.config.cooldown, unit: e.target.value as any })}>
+                                                    <option value="minutes">Minute(s)</option>
+                                                    <option value="hours">Hour(s)</option>
+                                                    <option value="days">Day(s)</option>
+                                                </select>
+                                            </div>
+                                             <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>After acting on an item, wait this long before acting on it again. Set to 0 to disable.</p>
+                                        </div>
+                                    </div>
+                                    {formData.config.frequency?.unit === 'days' && (
+                                        <div style={{...styles.formGroup}}>
+                                            <label style={styles.label}>Scheduled Start Time (UTC-7)</label>
+                                            <input type="time" style={{...styles.input, width: '150px'}} value={formData.config.frequency?.startTime || '01:00'} onChange={e => handleConfigChange('frequency', { ...formData.config.frequency, startTime: e.target.value })} required />
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             <div style={styles.card}>

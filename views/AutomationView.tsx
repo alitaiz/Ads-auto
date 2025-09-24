@@ -610,7 +610,59 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
                                              <button type="button" onClick={() => addConditionToGroup(groupIndex)} style={{...styles.button, marginTop: '10px'}}>+ Add Condition (AND)</button>
                                              <div style={styles.thenBlock}>
                                                 <h4 style={styles.thenHeader}>THEN</h4>
-                                                {/* THEN blocks for other rule types */}
+                                                {rule_type === 'BID_ADJUSTMENT' && (
+                                                    <div style={styles.thenGrid}>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Action</label>
+                                                            <select style={styles.conditionInput} value={group.action.type} onChange={e => handleActionChange(groupIndex, 'type', e.target.value)}>
+                                                                <option value="adjustBidPercent">Adjust Bid By %</option>
+                                                            </select>
+                                                        </div>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Value (%)</label>
+                                                            <input type="number" style={styles.conditionInput} placeholder="e.g., -10" value={group.action.value ?? ''} onChange={e => handleActionChange(groupIndex, 'value', Number(e.target.value))} />
+                                                        </div>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Min Bid (Optional)</label>
+                                                            <input type="number" step="0.01" style={styles.conditionInput} placeholder="e.g., 0.15" value={group.action.minBid ?? ''} onChange={e => handleActionChange(groupIndex, 'minBid', e.target.value ? Number(e.target.value) : undefined)} />
+                                                        </div>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Max Bid (Optional)</label>
+                                                            <input type="number" step="0.01" style={styles.conditionInput} placeholder="e.g., 2.50" value={group.action.maxBid ?? ''} onChange={e => handleActionChange(groupIndex, 'maxBid', e.target.value ? Number(e.target.value) : undefined)} />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {rule_type === 'SEARCH_TERM_AUTOMATION' && (
+                                                    <div style={styles.thenGrid}>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Action</label>
+                                                            <select style={styles.conditionInput} value={group.action.type} onChange={e => handleActionChange(groupIndex, 'type', e.target.value)}>
+                                                                <option value="negateSearchTerm">Negate Search Term</option>
+                                                            </select>
+                                                        </div>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Match Type</label>
+                                                            <select style={styles.conditionInput} value={group.action.matchType} onChange={e => handleActionChange(groupIndex, 'matchType', e.target.value)}>
+                                                                <option value="NEGATIVE_EXACT">Negative Exact</option>
+                                                                <option value="NEGATIVE_PHRASE">Negative Phrase</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {rule_type === 'BUDGET_ACCELERATION' && (
+                                                    <div style={styles.thenGrid}>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Action</label>
+                                                            <select style={styles.conditionInput} value={group.action.type} onChange={e => handleActionChange(groupIndex, 'type', e.target.value)}>
+                                                                <option value="increaseBudgetPercent">Increase Budget By %</option>
+                                                            </select>
+                                                        </div>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Value (%)</label>
+                                                            <input type="number" style={styles.conditionInput} placeholder="e.g., 50" value={group.action.value ?? ''} onChange={e => handleActionChange(groupIndex, 'value', Number(e.target.value))} />
+                                                        </div>
+                                                    </div>
+                                                )}
                                              </div>
                                         </div>
                                        {groupIndex < formData.config!.conditionGroups!.length - 1 && <div style={{textAlign: 'center', margin: '15px 0', fontWeight: 'bold', color: '#555'}}>OR</div>}

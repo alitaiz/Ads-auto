@@ -17,6 +17,7 @@
     "fetch:sales-traffic": "node scripts/fetch_sales_and_traffic.js"
   },
   "dependencies": {
+    "@google/genai": "^1.19.0",
     "axios": "^1.11.0",
     "chart.js": "^4.5.0",
     "cors": "^2.8.5",

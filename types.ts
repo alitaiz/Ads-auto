@@ -97,12 +97,12 @@ export interface AutomationConditionGroup {
 export interface AutomationRule {
     id: number;
     name: string;
-    rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION' | 'CAMPAIGN_SCHEDULING' | 'PRICE_ADJUSTMENT';
+    rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION';
     ad_type?: 'SP' | 'SB' | 'SD';
     config: {
         // A rule is composed of one or more condition groups.
         // They are evaluated in order ("first match wins").
-        conditionGroups?: AutomationConditionGroup[];
+        conditionGroups: AutomationConditionGroup[];
         // Dynamic frequency configuration
         frequency: {
             unit: 'minutes' | 'hours' | 'days';
@@ -114,19 +114,6 @@ export interface AutomationRule {
             unit: 'minutes' | 'hours' | 'days';
             value: number;
         };
-        // For CAMPAIGN_SCHEDULING
-        pauseTime?: string; // "HH:MM" format
-        activeTime?: string; // "HH:MM" format
-        timezone?: string;   // IANA timezone name e.g., 'America/Phoenix'
-        conditions?: {
-            impressions: { operator: '>', value: number };
-            acos: { operator: '>', value: number };
-        };
-         // For PRICE_ADJUSTMENT
-        skus?: string[];
-        priceStep?: number;
-        priceLimit?: number;
-        runAtTime?: string; // "HH:MM" format, optional
     };
     scope: {
         campaignIds?: (number | string)[];

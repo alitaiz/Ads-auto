@@ -74,8 +74,6 @@ async function spApiRequest({ method, url, data, params }) {
 
 /**
  * Fetches listing information for a given SKU, including sellerId and current price.
- * This version uses the Listings API and the correct SP_API_SELLER_ID.
- * It also includes a smart retry mechanism for transient 'NOT_FOUND' errors.
  * @param {string} sku The Seller SKU of the product.
  * @returns {Promise<{price: number | null, sellerId: string | null}>}
  */
@@ -87,40 +85,20 @@ export async function getListingInfoBySku(sku) {
         throw new Error("Invalid or missing SP_API_SELLER_ID in .env file. It should be the alphanumeric ID from Seller Central (often called Merchant Token).");
     }
 
-    const makeRequest = () => spApiRequest({
+    const listingData = await spApiRequest({
         method: 'get',
         url: `/listings/2021-08-01/items/${sellerId}/${sku}`,
         params: {
             marketplaceIds: SP_API_MARKETPLACE_ID,
-            includedData: 'attributes',
+            includedData: 'summaries,attributes', // Fetch both to get price
         }
     });
-
-    let listingData;
-    try {
-        listingData = await makeRequest();
-    } catch (e) {
-        const errorMessage = e.message || '{}';
-        try {
-            const errorDetails = JSON.parse(errorMessage);
-            if (errorDetails?.[0]?.code === 'NOT_FOUND') {
-                console.warn(`[SP-API Helper] Initial call failed for SKU ${sku} (NOT_FOUND). Retrying in 60 seconds...`);
-                await new Promise(resolve => setTimeout(resolve, 60000));
-                listingData = await makeRequest(); // Second attempt
-            } else {
-                throw e; // Re-throw other errors
-            }
-        } catch (parseError) {
-             throw e; // If parsing fails, it's not the error we're looking for. Re-throw original.
-        }
-    }
     
-    const attributes = listingData?.attributes;
-    const offer = attributes?.purchasable_offer?.[0];
-    const price = offer?.our_price?.[0]?.schedule?.[0]?.value_with_tax;
+    // The price is often in the 'summaries' part for purchasable offers.
+    const priceFromSummary = listingData?.summaries?.[0]?.purchasableOffer?.ourPrice?.[0]?.schedule?.[0]?.valueWithTax;
 
     return { 
-        price: typeof price === 'number' ? price : null, 
+        price: typeof priceFromSummary === 'number' ? priceFromSummary : null, 
         sellerId
     };
 }
@@ -129,7 +107,7 @@ export async function getListingInfoBySku(sku) {
 /**
  * Updates the price for a given SKU using the Listings Items API.
  * @param {string} sku The seller SKU.
- * @param {string} newPrice The new price as a string (e.g., "24.99").
+ * @param {number} newPrice The new price as a number (e.g., 24.99).
  * @param {string} sellerId The seller ID for the listing.
  */
 export async function updatePrice(sku, newPrice, sellerId) {
@@ -153,7 +131,7 @@ export async function updatePrice(sku, newPrice, sellerId) {
                             {
                                 schedule: [
                                     {
-                                        value_with_tax: parseFloat(newPrice)
+                                        value_with_tax: newPrice
                                     }
                                 ]
                             }
@@ -165,11 +143,12 @@ export async function updatePrice(sku, newPrice, sellerId) {
     };
     
     console.log(`[SP-API] Submitting price update for SKU ${sku} to ${newPrice}`);
-    await spApiRequest({
+    const result = await spApiRequest({
         method: 'patch',
         url: `/listings/2021-08-01/items/${sellerId}/${sku}`,
         params: { marketplaceIds: SP_API_MARKETPLACE_ID },
         data: patchPayload,
     });
-    console.log(`[SP-API] Successfully submitted price update for SKU ${sku}.`);
+    console.log(`[SP-API] Successfully submitted price update for SKU ${sku}. Status: ${result.status}`);
+    return result;
 }

@@ -8,6 +8,8 @@ import { amazonAdsApiRequest } from '../../helpers/amazon-api.js';
 // Define a constant for Amazon's reporting timezone to ensure consistency.
 const REPORTING_TIMEZONE = 'America/Los_Angeles';
 
+let isProcessing = false; // Global lock to prevent overlapping cron jobs
+
 const processRule = async (rule) => {
     console.log(`[RulesEngine] ⚙️  Processing rule "${rule.name}" (ID: ${rule.id}).`);
     
@@ -91,7 +93,14 @@ const processRule = async (rule) => {
 
 
 export const checkAndRunDueRules = async () => {
+    if (isProcessing) {
+        console.log('[RulesEngine] ⚠️  Previous check is still running. Skipping this tick to prevent overlap.');
+        return;
+    }
+    
     console.log(`[RulesEngine] ⏰ Cron tick: Checking for due rules at ${new Date().toISOString()}`);
+    isProcessing = true; // Set the lock
+
     try {
         const { rows: activeRules } = await pool.query('SELECT * FROM automation_rules WHERE is_active = TRUE');
         
@@ -110,16 +119,18 @@ export const checkAndRunDueRules = async () => {
         const dueRules = normalizedRules.filter(isRuleDue);
 
         if (dueRules.length === 0) {
-            console.log('[RulesEngine] No rules are due to run.');
-            return;
-        }
-
-        console.log(`[RulesEngine] Found ${dueRules.length} rule(s) to run: ${dueRules.map(r => r.name).join(', ')}`);
-        for (const rule of dueRules) {
-            await processRule(rule);
+            console.log('[RulesEngine] No rules are due to run at this time.');
+        } else {
+            console.log(`[RulesEngine] Found ${dueRules.length} rule(s) to run: ${dueRules.map(r => r.name).join(', ')}`);
+            for (const rule of dueRules) {
+                await processRule(rule);
+            }
         }
     } catch (e) {
         console.error('[RulesEngine] CRITICAL: Failed to fetch or process rules.', e);
+    } finally {
+        isProcessing = false; // Release the lock
+        console.log(`[RulesEngine] ✅ Cron tick finished processing.`);
     }
 };
 

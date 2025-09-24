@@ -29,6 +29,7 @@ interface TreeNode {
 }
 
 type ViewLevel = 'campaigns' | 'adGroups' | 'keywords' | 'searchTerms';
+type ReportType = 'SP' | 'SB' | 'SD';
 
 // --- Styles ---
 const styles: { [key: string]: React.CSSProperties } = {
@@ -36,11 +37,9 @@ const styles: { [key: string]: React.CSSProperties } = {
     header: { marginBottom: '20px' },
     headerTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' },
     dateDisplay: { fontSize: '1.5rem', fontWeight: '600' },
-    headerTabs: { display: 'flex', gap: '5px', borderBottom: '1px solid var(--border-color)' },
+    headerTabs: { display: 'flex', gap: '5px', borderBottom: '1px solid var(--border-color)', marginBottom: '20px' },
     tabButton: { padding: '10px 15px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '1rem', borderBottom: '3px solid transparent', color: '#555', fontWeight: 500 },
     tabButtonActive: { color: 'var(--primary-color)', borderBottom: '3px solid var(--primary-color)', fontWeight: 600 },
-    actionsBar: { display: 'flex', alignItems: 'center', gap: '15px', padding: '15px 0' },
-    actionButton: { padding: '8px 15px', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' },
     tableContainer: { backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)', overflowX: 'auto' },
     table: { width: '100%', minWidth: '2200px', borderCollapse: 'collapse', tableLayout: 'fixed' },
     th: { padding: '12px 10px', textAlign: 'left', borderBottom: '2px solid var(--border-color)', backgroundColor: '#f8f9fa', fontWeight: 600, whiteSpace: 'nowrap' },
@@ -59,6 +58,57 @@ const styles: { [key: string]: React.CSSProperties } = {
         background: 'white',
         cursor: 'pointer',
     },
+    integrityCheckContainer: {
+        marginTop: '20px',
+        padding: '15px',
+        backgroundColor: '#fffbe6',
+        border: '1px solid #ffe58f',
+        borderRadius: 'var(--border-radius)',
+        marginBottom: '20px',
+    },
+    integrityTitle: {
+        margin: '0 0 10px 0',
+        fontWeight: 600,
+        color: '#d46b08',
+    },
+    missingDateItem: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '8px',
+        borderBottom: '1px solid #ffe58f',
+    },
+    fetchButton: {
+        padding: '6px 12px',
+        border: '1px solid #d46b08',
+        borderRadius: '4px',
+        backgroundColor: 'white',
+        color: '#d46b08',
+        cursor: 'pointer',
+    },
+    reportTypeSelector: {
+        display: 'flex',
+        gap: '10px',
+        marginBottom: '15px',
+        backgroundColor: '#f8f9fa',
+        padding: '8px',
+        borderRadius: '8px'
+    },
+    reportTypeButton: {
+        padding: '8px 16px',
+        border: '1px solid transparent',
+        borderRadius: '6px',
+        background: 'none',
+        cursor: 'pointer',
+        fontSize: '0.9rem',
+        fontWeight: '500'
+    },
+    reportTypeButtonActive: {
+        backgroundColor: 'white',
+        borderColor: 'var(--border-color)',
+        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+        color: 'var(--primary-color)'
+    }
 };
 
 // --- Column Definitions ---
@@ -353,16 +403,9 @@ const TreeNodeRow: React.FC<{
 // --- Main View Component ---
 export function SPSearchTermsView() {
     const { cache, setCache } = useContext(DataCacheContext);
+    const [reportType, setReportType] = useState<ReportType>('SP');
     const [flatData, setFlatData] = useState<SPSearchTermReportData[]>(cache.spSearchTerms.data || []);
-    // Derive the tree structure from flat data instead of storing it in state
-    // to avoid expensive recalculations on every render. Using useMemo ensures
-    // the heavy transformation only runs when the underlying data or view level
-    // changes, which prevents UI freezes when switching tabs.
     const [viewLevel, setViewLevel] = useState<ViewLevel>('campaigns');
-    // Pre-calculate hierarchies for each view level only when the raw data
-    // changes. Switching between tabs then becomes an inexpensive lookup
-    // rather than repeatedly rebuilding large trees which previously caused
-    // the UI to freeze after visiting the "Keywords" tab.
     const campaignsTree = useMemo(() => buildHierarchyByLevel(flatData, 'campaigns'), [flatData]);
     const adGroupsTree = useMemo(() => buildHierarchyByLevel(flatData, 'adGroups'), [flatData]);
     const keywordsTree = useMemo(() => buildHierarchyByLevel(flatData, 'keywords'), [flatData]);
@@ -385,17 +428,58 @@ export function SPSearchTermsView() {
     const [error, setError] = useState<string | null>(null);
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    
+    const [missingDates, setMissingDates] = useState<string[]>([]);
+    const [fetchStatus, setFetchStatus] = useState<Record<string, 'fetching' | 'success' | 'error' | 'idle'>>({});
 
     const [dateRange, setDateRange] = useState(cache.spSearchTerms.filters ? { start: new Date(cache.spSearchTerms.filters.startDate), end: new Date(cache.spSearchTerms.filters.endDate)} : { start: new Date(), end: new Date() });
     const [isDatePickerOpen, setDatePickerOpen] = useState(false);
 
-    // Reset expanded/selected state whenever the view or data changes
+    const formatDateForQuery = (d: Date) => {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+    
+    const checkDataIntegrity = useCallback(async (type: ReportType) => {
+        const today = new Date();
+        const endDate = new Date(today);
+        endDate.setDate(today.getDate() - 2);
+
+        const startDate = new Date(endDate);
+        startDate.setDate(endDate.getDate() - 6);
+
+        const startDateStr = formatDateForQuery(startDate);
+        const endDateStr = formatDateForQuery(endDate);
+        
+        const source = type === 'SP' ? 'searchTermReport' : type === 'SB' ? 'sbSearchTermReport' : 'sdTargetingReport';
+
+        try {
+            const response = await fetch('/api/database/check-missing-dates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source, startDate: startDateStr, endDate: endDateStr }),
+            });
+            const data = await response.json();
+            if (response.ok) {
+                setMissingDates(data.missingDates || []);
+                setFetchStatus({});
+            }
+        } catch (err) {
+            console.error("Failed to run data integrity check:", err);
+        }
+    }, []);
+
+    useEffect(() => {
+        checkDataIntegrity(reportType);
+    }, [reportType, checkDataIntegrity]);
+
     useEffect(() => {
         setExpandedIds(new Set());
         setSelectedIds(new Set());
     }, [flatData, viewLevel]);
 
-    
     const handleToggle = (id: string) => setExpandedIds(prev => { const s = new Set(prev); if(s.has(id)) s.delete(id); else s.add(id); return s; });
     const handleSelect = (id: string, checked: boolean) => setSelectedIds(prev => { const s = new Set(prev); if(checked) s.add(id); else s.delete(id); return s; });
     
@@ -407,23 +491,14 @@ export function SPSearchTermsView() {
         setSelectedIds(allIds);
     };
     
-    // Format a Date object as YYYY-MM-DD using local time to avoid
-    // timezone-related off-by-one errors when converting to ISO strings.
-    const formatDateForQuery = (d: Date) => {
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    };
-
-    const handleApply = useCallback(async (range: {start: Date, end: Date}) => {
+    const handleApply = useCallback(async (range: {start: Date, end: Date}, type: ReportType) => {
         setLoading(true);
         setError(null);
         const startDate = formatDateForQuery(range.start);
         const endDate = formatDateForQuery(range.end);
 
         try {
-            const url = `/api/sp-search-terms?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
+            const url = `/api/sp-search-terms?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}&reportType=${type}`;
             const response = await fetch(url);
             if (!response.ok) throw new Error((await response.json()).error);
             const data: SPSearchTermReportData[] = await response.json();
@@ -436,27 +511,64 @@ export function SPSearchTermsView() {
             setLoading(false);
         }
     }, [setCache]);
+
+    const handleReportTypeChange = (newType: ReportType) => {
+        setReportType(newType);
+        setFlatData([]); // Clear old data
+        handleApply(dateRange, newType);
+        checkDataIntegrity(newType);
+    };
     
     useEffect(() => {
-        // Only load the default 7-day range on initial mount when no filters
-        // have been applied. Previously this effect depended solely on the
-        // cached data length which caused it to re-fetch the default range
-        // whenever a user selected a date range that returned no results. That
-        // behaviour overwrote the empty state with aggregated data from all
-        // days. By also checking for the absence of cached filters we ensure the
-        // default fetch happens only once on first load.
         if (cache.spSearchTerms.data.length === 0 && !cache.spSearchTerms.filters) {
             const end = new Date();
             const start = new Date();
             start.setDate(end.getDate() - 7);
-            handleApply({ start, end });
+            handleApply({ start, end }, reportType);
         }
-    }, [handleApply, cache.spSearchTerms.data.length, cache.spSearchTerms.filters]);
+    }, [handleApply, cache.spSearchTerms.data.length, cache.spSearchTerms.filters, reportType]);
     
     const handleApplyDateRange = (newRange: { start: Date; end: Date }) => {
         setDateRange(newRange);
         setDatePickerOpen(false);
-        handleApply(newRange);
+        handleApply(newRange, reportType);
+    };
+    
+    const handleFetchMissingDay = async (date: string) => {
+        setFetchStatus(prev => ({ ...prev, [date]: 'fetching' }));
+        const source = reportType === 'SP' ? 'searchTermReport' : reportType === 'SB' ? 'sbSearchTermReport' : 'sdTargetingReport';
+        try {
+            const response = await fetch('/api/database/fetch-missing-day', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source, date }),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error);
+            setFetchStatus(prev => ({ ...prev, [date]: 'success' }));
+            // Refresh main table data in case the fetched day is in the current view
+            handleApply(dateRange, reportType);
+             // Remove the date from the missing list upon success
+            setMissingDates(prev => prev.filter(d => d !== date));
+        } catch (err) {
+            setFetchStatus(prev => ({ ...prev, [date]: 'error' }));
+            alert(`Failed to fetch data for ${date}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        }
+    };
+    
+    const renderFetchButton = (date: string) => {
+        const status = fetchStatus[date] || 'idle';
+        let text = 'Fetch';
+        let disabled = false;
+
+        switch (status) {
+            case 'fetching': text = 'Fetching...'; disabled = true; break;
+            case 'success': text = 'Success!'; disabled = true; break;
+            case 'error': text = 'Error - Retry'; disabled = false; break;
+            default: text = 'Fetch'; disabled = false; break;
+        }
+
+        return <button style={styles.fetchButton} onClick={() => handleFetchMissingDay(date)} disabled={disabled}>{text}</button>;
     };
 
     const formatDateRangeDisplay = (start: Date, end: Date) => {
@@ -483,20 +595,47 @@ export function SPSearchTermsView() {
                         {isDatePickerOpen && <DateRangePicker initialRange={dateRange} onApply={handleApplyDateRange} onClose={() => setDatePickerOpen(false)} />}
                     </div>
                  </div>
-                 <div style={styles.headerTabs}>
-                     {tabs.map(tab => (
-                        <button key={tab.id} style={viewLevel === tab.id ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setViewLevel(tab.id)}>
-                            {tab.label}
-                        </button>
-                     ))}
-                 </div>
             </header>
             
-            <div style={styles.actionsBar}>
-                <button style={styles.actionButton}><span>✎</span> Edit</button>
-                <button style={styles.actionButton}><span>✓</span> Accept recommendations</button>
-                <button style={styles.actionButton}><span>⤓</span></button>
-                <button style={styles.actionButton}><span>❐</span></button>
+            {missingDates.length > 0 && (
+                <div style={styles.integrityCheckContainer}>
+                    <h3 style={styles.integrityTitle}>⚠️ Data Integrity Check</h3>
+                    <p>The following dates have missing {reportType === 'SP' ? 'Sponsored Products' : reportType === 'SB' ? 'Sponsored Brands' : 'Sponsored Display'} report data in the last 7 days (ending 2 days ago). You can fetch them individually.</p>
+                    {missingDates.map(date => (
+                        <div key={date} style={styles.missingDateItem}>
+                            <span>Missing data for: <strong>{date}</strong></span>
+                            {renderFetchButton(date)}
+                        </div>
+                    ))}
+                </div>
+            )}
+            
+            <div style={styles.reportTypeSelector}>
+                <button 
+                    style={reportType === 'SP' ? {...styles.reportTypeButton, ...styles.reportTypeButtonActive} : styles.reportTypeButton}
+                    onClick={() => handleReportTypeChange('SP')}
+                >
+                    Sponsored Products
+                </button>
+                <button 
+                    style={reportType === 'SB' ? {...styles.reportTypeButton, ...styles.reportTypeButtonActive} : styles.reportTypeButton}
+                    onClick={() => handleReportTypeChange('SB')}
+                >
+                    Sponsored Brands
+                </button>
+                <button 
+                    style={reportType === 'SD' ? {...styles.reportTypeButton, ...styles.reportTypeButtonActive} : styles.reportTypeButton}
+                    onClick={() => handleReportTypeChange('SD')}
+                >
+                    Sponsored Display
+                </button>
+            </div>
+            <div style={styles.headerTabs}>
+                 {tabs.map(tab => (
+                    <button key={tab.id} style={viewLevel === tab.id ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setViewLevel(tab.id)}>
+                        {tab.label}
+                    </button>
+                 ))}
             </div>
             
             {error && <div style={styles.error}>{error}</div>}

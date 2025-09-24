@@ -1,171 +1,158 @@
-# Hướng dẫn Tích hợp Amazon Marketing Stream với DynamoDB qua AWS
+# Hướng dẫn Tích hợp Amazon Marketing Stream với PostgreSQL (Phương pháp API Endpoint tiết kiệm)
 
 ## Mục tiêu
 
-Tài liệu này hướng dẫn bạn cách thiết lập một pipeline dữ liệu **serverless** hoàn chỉnh trên AWS để nhận, xử lý, và ghi dữ liệu từ Amazon Marketing Stream vào **Amazon DynamoDB**. Sau đó, chúng ta sẽ public dữ liệu này ra internet thông qua **API Gateway** để frontend có thể hiển thị các chỉ số PPC gần như thời gian thực.
+Tài liệu này hướng dẫn bạn cách thiết lập một pipeline dữ liệu **hybrid**, **chi phí cực thấp** để nhận, xử lý và ghi dữ liệu từ Amazon Marketing Stream vào cơ sở dữ liệu **PostgreSQL** đang chạy trên VPS Ubuntu 22.04.
 
-> **Lưu ý về Lựa chọn Dataset:** Hướng dẫn này sử dụng đồng thời hai dataset:
-> - **`sp-traffic`**: Cung cấp các sự kiện về lượt hiển thị (impressions), nhấp chuột (clicks), và chi phí (cost) gần như ngay lập tức.
-> - **`sp-conversion`**: Cung cấp dữ liệu về chuyển đổi (đơn hàng, doanh số) khi chúng xảy ra.
-> Bằng cách kết hợp cả hai, chúng ta có thể xây dựng một dashboard PPC toàn diện với các chỉ số như ACOS và ROAS.
+
+> **Lưu ý về Lựa chọn Dataset:** Hướng dẫn này sử dụng đồng thời hai dataset: `sp-traffic` (impressions, clicks, cost) và `sp-conversion` (orders, sales) để có được một dashboard PPC toàn diện.
 
 ---
 
-## Tổng quan Kiến trúc Serverless
+## Tổng quan Kiến trúc Hybrid (Chi phí thấp)
 
 **Luồng Ghi dữ liệu (Data Ingestion):**
-`Amazon Ads API (sp-traffic & sp-conversion)` → `AWS Kinesis Data Firehose` → `AWS Lambda (process-marketing-stream-to-dynamodb)` → `Amazon DynamoDB (ama_stream_data)`
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;`↘ Amazon S3 (my-amazon-stream-data-backup-1234)`
-
-**Luồng Đọc dữ liệu (Data Retrieval):**
-`Frontend (Tab PPC Management)` → `AWS API Gateway (PPCStreamAPI)` → `AWS Lambda (get-ppc-live-metrics)` → `Amazon DynamoDB (ama_stream_data)`
+`Amazon Ads API` → `AWS Kinesis Data Firehose` → `AWS Lambda (process-and-forward-stream)` → `Internet (HTTPS)` → `Backend API (trên VPS)` → `PostgreSQL (trên VPS)`
 
 ---
 
 ## Phân tích Chi phí (Cost Analysis)
 
-Kiến trúc này hoàn toàn là serverless, có nghĩa là bạn chỉ trả tiền cho những gì bạn sử dụng. Với lượng dữ liệu thông thường, chi phí sẽ rất thấp:
 -   **Kinesis Data Firehose:** Rất thấp, ~$0.029/GB.
 -   **AWS Lambda:** Gói miễn phí lớn, chi phí gần như **$0/tháng**.
--   **Amazon DynamoDB:** Gói miễn phí lớn, chi phí gần như **$0/tháng**.
--   **Amazon S3:** Vài cent mỗi tháng để sao lưu.
--   **API Gateway:** Gói miễn phí lớn.
+-   **VPS Ubuntu:** Chi phí không đổi.
 
-**Tổng chi phí ước tính: ~$1-2/tháng, có khả năng là $0 nếu nằm trong gói miễn phí.**
+**Tổng chi phí ước tính trên AWS: ~$0-2/tháng.**
 
 ---
 
 ## Yêu cầu
 
-1.  **Tài khoản AWS & AWS CLI:** Đã cài đặt và cấu hình.
-2.  **Quyền Admin trên Amazon Ads:** Để đăng ký stream.
+1.  **Tài khoản AWS & AWS CLI.**
+2.  **VPS Ubuntu 22.04** với PostgreSQL và backend Node.js/Express đang chạy.
+3.  **Một tên miền** trỏ đến IP của VPS.
+4.  **Quyền Admin trên Amazon Ads.**
 
 ---
 
-## Phần 1: Thiết lập Pipeline Ghi Dữ liệu
+## Phần 1: Cấu hình VPS và Backend API
 
-### Bước 1: AWS - Tạo Bảng DynamoDB
+### Bước 1: Tạo và Cấp quyền cho Bảng Dữ liệu Stream
+Bảng này sẽ lưu trữ dữ liệu thô nhận được từ Lambda. Chúng ta không chỉ tạo bảng mà còn phải **cấp quyền** cho người dùng của ứng dụng để có thể ghi dữ liệu vào đó. Đây là bước quan trọng để sửa lỗi "Failed to write data to database".
 
-Đây là nơi dữ liệu stream sẽ được lưu trữ.
-1.  Mở dịch vụ **Amazon DynamoDB**.
-2.  Nhấp **"Create table"**.
-3.  **Table name:** `ama_stream_data`.
-4.  **Partition key:** `event_id`, **Type:** `String`.
-5.  **Sort key:** `timestamp`, **Type:** `Number`.
-6.  Để các cài đặt còn lại mặc định và nhấp **"Create table"**.
+1.  **Đăng nhập vào VPS của bạn qua SSH.**
+2.  **Kết nối vào PostgreSQL:** Chạy lệnh sau để kết nối trực tiếp vào database `amazon_data_analyzer` với quyền quản trị:
+    ```bash
+    sudo -u postgres psql -d amazon_data_analyzer
+    ```
+3.  **Chạy lệnh SQL tạo bảng và cấp quyền:** Sau khi vào được giao diện của `psql` (dấu nhắc sẽ đổi thành `amazon_data_analyzer=#`), hãy sao chép (copy) **CHÍNH XÁC** toàn bộ nội dung SQL bên dưới. **Đừng quên thay đổi `yourdbuser`** thành tên người dùng database mà bạn đã cấu hình trong file `backend/.env`.
 
-### Bước 2: AWS - Tạo IAM Role cho Lambda Ghi dữ liệu
+    ```sql
+    -- Bảng lưu trữ dữ liệu stream thô từ Amazon Marketing Stream
+    CREATE TABLE IF NOT EXISTS raw_stream_events (
+        id SERIAL PRIMARY KEY,
+        event_type TEXT,
+        event_data JSONB,
+        received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
 
-Lambda function cần quyền để ghi log và ghi dữ liệu vào DynamoDB.
+    -- Tạo chỉ mục để tăng tốc độ truy vấn
+    CREATE INDEX IF NOT EXISTS idx_rse_received_at ON raw_stream_events (received_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_rse_event_type ON raw_stream_events (event_type);
+
+    -- =========================================================================
+    -- == BƯỚC QUAN TRỌNG: Cấp quyền cho user của ứng dụng                     ==
+    -- == Thay thế 'yourdbuser' bằng DB_USER thực tế từ file .env của bạn.       ==
+    -- =========================================================================
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE raw_stream_events TO yourdbuser;
+    GRANT USAGE, SELECT ON SEQUENCE raw_stream_events_id_seq TO yourdbuser;
+    ```
+    Sau khi dán và chỉnh sửa, nhấn Enter để thực thi các lệnh.
+
+4.  **Thoát khỏi PostgreSQL:** Gõ lệnh `\q` và nhấn Enter để quay lại terminal bình thường.
+
+### Bước 2: Cập nhật Backend để Nhận Dữ liệu Stream
+Chúng ta sẽ cập nhật backend để có thể **nhận** dữ liệu từ Lambda và cung cấp dữ liệu cho frontend.
+
+#### 2A. Cập nhật `backend/routes/stream.js`
+File này là nơi định nghĩa các API endpoint liên quan đến stream. Nó đã được cập nhật để xử lý cả hai nhiệm vụ:
+-   **`POST /api/stream-ingest`**: Đây là một endpoint bảo mật mới, chỉ nhận dữ liệu từ AWS Lambda (được xác thực bằng một API key bí mật). Nó nhận các sự kiện stream và ghi chúng vào bảng `raw_stream_events` trong PostgreSQL.
+-   **`GET /api/stream/metrics`**: Endpoint này dùng để cung cấp các chỉ số tổng hợp cho frontend.
+
+#### 2B. Xác minh `backend/server.js`
+File `backend/server.js` là file "lắp ráp" toàn bộ ứng dụng. Để các endpoint trong `stream.js` có thể được truy cập từ bên ngoài, `server.js` phải "đăng ký" chúng.
+
+**Giải thích:**
+-   **`server.js`** tạo ra ứng dụng `app` chính.
+-   **`stream.js`** tạo ra một `router` (bộ định tuyến) chứa các endpoint chuyên biệt.
+-   Lệnh `app.use('/api', streamRoutes);` trong `server.js` đóng vai trò là "cầu nối", ra lệnh cho ứng dụng chính: "Tất cả các yêu cầu (request) có đường dẫn bắt đầu bằng `/api` hãy chuyển cho `streamRoutes` xử lý".
+
+**Hành động:** Mở file `backend/server.js` và **đảm bảo** rằng các dòng sau đã tồn tại. Nếu chưa, hãy thêm chúng vào đúng vị trí.
+```javascript
+// Gần đầu file server.js, cùng với các import khác
+import streamRoutes from './routes/stream.js';
+
+// ... (code khác của bạn ở giữa) ...
+
+// Gần cuối file, trước dòng app.listen()
+// Dòng này đăng ký tất cả các routes từ stream.js vào ứng dụng chính
+app.use('/api', streamRoutes);
+```
+
+#### 2C. Cập nhật `backend/.env`
+- Mở file `backend/.env` và thêm một biến môi trường mới.
+- **QUAN TRỌNG:** Tự tạo một chuỗi ký tự ngẫu nhiên, dài và phức tạp cho giá trị này (ví dụ: dùng một trình tạo mật khẩu). Đây là "chìa khóa bí mật" để Lambda có thể gửi dữ liệu đến backend của bạn một cách an toàn.
+```dotenv
+# Thêm dòng này vào cuối file backend/.env
+STREAM_INGEST_SECRET_KEY=your_super_long_and_secret_random_string_here
+```
+
+#### 2D. Khởi động lại Backend
+Nếu bạn đang dùng `pm2` trên VPS, hãy khởi động lại ứng dụng backend để áp dụng tất cả các thay đổi:
+```sh
+pm2 restart ppc-auto-backend
+```
+
+---
+
+## Phần 2: Thiết lập Pipeline trên AWS
+
+### Bước 3: AWS - Tạo IAM Role cho Lambda
+Role này chỉ cần quyền cơ bản để chạy và ghi log.
 1.  Mở dịch vụ **IAM** -> **Roles** -> **"Create role"**.
 2.  **Trusted entity type:** Chọn **AWS service**, Use case: **Lambda**.
-3.  **Add permissions:** Tìm và thêm 2 policies sau:
-    - `AWSLambdaBasicExecutionRole` (để ghi logs)
-    - `AmazonDynamoDBFullAccess` (để ghi dữ liệu vào DynamoDB)
-4.  **Role name:** `Lambda-StreamProcessor-DynamoDB-Role`.
+3.  **Add permissions:** Tìm và thêm policy `AWSLambdaBasicExecutionRole`.
+4.  **Role name:** `Lambda-StreamForwarder-Role`.
 5.  Nhấp **"Create role"**.
 
-### Bước 3: AWS - Tạo Lambda Function Ghi dữ liệu
-
-Function này sẽ nhận dữ liệu từ Firehose, xử lý và ghi vào DynamoDB.
+### Bước 4: AWS - Tạo Lambda Function
+Function này sẽ nhận dữ liệu từ Firehose và gửi nó đến API endpoint trên VPS của bạn.
 1.  Mở dịch vụ **Lambda** -> **"Create function"**.
-2.  **Function name:** `process-marketing-stream-to-dynamodb`.
+2.  **Function name:** `process-and-forward-stream`.
 3.  **Runtime:** **Node.js 20.x**.
-4.  **Permissions:** Chọn **"Use an existing role"** và chọn `Lambda-StreamProcessor-DynamoDB-Role` đã tạo ở trên.
+4.  **Permissions:** Chọn **"Use an existing role"** và chọn `Lambda-StreamForwarder-Role`.
 5.  Nhấp **"Create function"**.
-6.  Trong tab **Code source**, dán nội dung từ file `lambda_deployment_package/index.mjs.txt` vào file `index.mjs`.
-7.  Trong tab **Configuration** -> **Environment variables**, thêm biến sau:
-    -   Key: `DYNAMODB_TABLE_NAME`, Value: `ama_stream_data`
+6.  Trong tab **Code source**, dán toàn bộ nội dung từ file `lambda_deployment_package/process-and-forward-stream.mjs.txt` vào file `index.mjs`.
+7.  Trong tab **Configuration** -> **Environment variables**, thêm 2 biến sau:
+    -   Key: `INGEST_API_URL`, Value: `https://ppc.tababyco.com/api/stream-ingest`.
+    -   Key: `INGEST_API_KEY`, Value: Dán chuỗi bí mật bạn đã tạo ở **Bước 2C**.
 8.  Trong **General configuration**, tăng **Timeout** lên `1 minute`.
 9.  Nhấp **"Deploy Changes"**.
 
-### Bước 4: AWS - Cấu hình Firehose
-
-Firehose sẽ nhận dữ liệu từ Amazon và chuyển tiếp đến Lambda của chúng ta.
-1.  Mở **Kinesis** -> **Delivery streams** -> **"Create delivery stream"**.
-2.  **Source:** `Direct PUT`.
-3.  **Destination:** `Amazon S3`.
-4.  **Delivery stream name:** `amazon-ads-firehose-stream`.
-5.  Trong mục **Data transformation**, chọn **Enabled**.
-6.  **Lambda function:** Chọn `process-marketing-stream-to-dynamodb`.
-7.  **Destination settings (S3 Backup):** Chọn S3 bucket bạn muốn dùng để sao lưu dữ liệu thô: `my-amazon-stream-data-backup-1234`.
-8.  Nhấp **"Create delivery stream"** và sao chép **ARN** của stream.
-
-### Bước 5: AWS - Tạo IAM Roles cho Amazon Ads
-
-Bước này cho phép tài khoản Amazon Ads gửi dữ liệu vào tài khoản AWS của bạn. *Bạn chỉ cần làm một lần.*
-(Sử dụng các tên role mà bạn đã cung cấp: `AmazonAds-Firehose-Subscription-Role` và `AmazonAds-Firehose-Subscriber-Role`)
-
-Làm theo hướng dẫn chi tiết của Amazon [tại đây](https://advertising.amazon.com/API/docs/en-us/amazon-marketing-stream-guides/create-iam-resources) để tạo 2 roles này. Đảm bảo:
-- **Subscription Role** có quyền `firehose:PutRecord` trên ARN của Firehose bạn vừa tạo.
-- **Subscriber Role** có quyền `iam:PassRole` trên ARN của Subscription Role.
-- Trust policies được cấu hình để tin tưởng Account ID của Amazon cho khu vực của bạn (NA: `926844853897`).
-
-Sau khi tạo, **sao chép ARN** của cả hai roles.
-
-### Bước 6: Cập nhật `.env` và Đăng ký Stream
-
-1.  Mở file `backend/.env`.
-2.  Điền đầy đủ các giá trị sau:
-    ```dotenv
-    ADS_API_FIREHOSE_ARN=... (ARN từ Bước 4)
-    ADS_API_FIREHOSE_SUBSCRIPTION_ROLE_ARN=... (ARN của Subscription Role)
-    ADS_API_FIREHOSE_SUBSCRIBER_ROLE_ARN=... (ARN của Subscriber Role)
-    ```
-3.  Chạy lệnh sau để đăng ký cả hai stream (`sp-traffic` và `sp-conversion`):
-    ```sh
-    npm run stream:subscribe
-    ```
+### Bước 5: AWS - Cấu hình Firehose
+Làm theo **Bước 4** của hướng dẫn `AMAZON_MARKETING_STREAM_GUIDE.md` cũ, nhưng khi chọn Lambda function, hãy chọn `process-and-forward-stream` bạn vừa tạo.
 
 ---
 
-## Phần 2: Thiết lập API Đọc Dữ liệu
+## Phần 3: Đăng ký Stream và Hoàn tất
 
-### Bước 7: AWS - Tạo IAM Role cho Lambda Đọc dữ liệu
+### Bước 6: Tạo IAM Roles cho Amazon Ads & Đăng ký Stream
+Làm theo **Bước 5 và 6** của hướng dẫn `AMAZON_MARKETING_STREAM_GUIDE.md` cũ để tạo các role cần thiết và chạy script `npm run stream:subscribe`.
 
-1.  Mở **IAM** -> **Roles** -> **"Create role"**.
-2.  **Trusted entity type:** **AWS service**, Use case: **Lambda**.
-3.  **Add permissions:** Thêm 2 policies:
-    - `AWSLambdaBasicExecutionRole`
-    - `AmazonDynamoDBReadOnlyAccess`
-4.  **Role name:** `Lambda-APIGateway-DynamoDB-Role`.
-5.  Nhấp **"Create role"**.
+### Bước 7: Kiểm tra
+Sau khi đăng ký thành công, dữ liệu sẽ bắt đầu chảy.
+- **Trên AWS:** Kiểm tra CloudWatch logs của Lambda `process-and-forward-stream` để xem các thông báo "Successfully forwarded".
+- **Trên VPS:** Kiểm tra logs của ứng dụng backend (ví dụ `pm2 logs your-backend-app-name`) để xem các thông báo "Successfully ingested".
+- **Trong Database:** Truy vấn bảng `raw_stream_events` để thấy dữ liệu mới được thêm vào.
 
-### Bước 8: AWS - Tạo Lambda Function Đọc dữ liệu
-
-Function này sẽ được API Gateway gọi để lấy và tổng hợp dữ liệu từ DynamoDB.
-1.  Mở **Lambda** -> **"Create function"**.
-2.  **Function name:** `get-ppc-live-metrics`.
-3.  **Runtime:** **Node.js 20.x**.
-4.  **Permissions:** Chọn **"Use an existing role"** và chọn `Lambda-APIGateway-DynamoDB-Role`.
-5.  Nhấp **"Create function"**.
-6.  Trong tab **Code source**, dán nội dung từ file `lambda_deployment_package/index2.mjs.txt` vào `index.mjs`.
-7.  Trong **Configuration** -> **Environment variables**, thêm biến sau:
-    -   Key: `DYNAMODB_TABLE_NAME`, Value: `ama_stream_data`
-8.  Nhấp **"Deploy Changes"**.
-
-### Bước 9: AWS - Tạo API Gateway
-
-1.  Mở **API Gateway** -> **Build** một **REST API**.
-2.  **API name:** `PPCStreamAPI`.
-3.  Trong **Actions**, chọn **"Create Resource"**.
-    - **Resource Name:** `metrics`.
-4.  Chọn resource `/metrics` vừa tạo, trong **Actions**, chọn **"Create Method"**.
-    - Chọn **GET** từ dropdown.
-5.  **Integration type:** `Lambda Function`.
-    - Tích vào ô **"Use Lambda Proxy integration"**.
-    - **Lambda Function:** Chọn `get-ppc-live-metrics`.
-6.  Trong **Actions**, chọn **"Enable CORS"**. Xác nhận các cài đặt mặc định.
-7.  Trong **Actions**, chọn **"Deploy API"**.
-    - **Deployment stage:** `[New Stage]`.
-    - **Stage name:** `prod` (hoặc tên bạn muốn).
-8.  Sau khi deploy, bạn sẽ thấy một **Invoke URL**. **Sao chép URL này.**
-
-### Bước 10: Cập nhật Frontend
-
-Bây giờ bạn cần cập nhật code frontend để gọi đến Invoke URL đã sao chép ở trên.
-1.  Mở file `views/PPCManagementView.tsx`.
-2.  Tìm đến hằng số `API_GATEWAY_URL`.
-3.  Thay thế URL placeholder bằng **Invoke URL** của API Gateway của bạn. URL sẽ có dạng `https://xxxxxxxxx.execute-api.us-east-1.amazonaws.com/prod/metrics`.
-
-Sau khi hoàn thành, tab PPC Management sẽ hiển thị dữ liệu live trực tiếp từ DynamoDB.
+Chúc mừng! Bạn đã thiết lập thành công pipeline để đưa dữ liệu Marketing Stream vào PostgreSQL trên VPS của mình một cách hiệu quả và tiết kiệm chi phí.

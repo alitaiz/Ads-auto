@@ -63,7 +63,7 @@ export function Layout() {
                         PPC Management
                     </NavLink>
                     <NavLink to="/sp-search-terms" style={getNavLinkStyle}>
-                        SP Search Terms
+                        Search Terms Report
                     </NavLink>
                     <NavLink to="/sales-and-traffic" style={getNavLinkStyle}>
                         Sales & Traffic

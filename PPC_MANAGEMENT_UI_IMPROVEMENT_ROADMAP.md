@@ -1,102 +1,140 @@
-# Lộ trình Cải tiến Giao diện Quản lý PPC (PPC Management UI/UX Roadmap)
+# Lộ trình Phát triển: Ứng dụng Quản lý & Tự động hóa Amazon PPC (Tự Host)
 
-## 1. Mục tiêu Chính
+## Mục tiêu Chính
 
-Tài liệu này vạch ra lộ trình chi tiết để nâng cấp giao diện "PPC Management" từ một bảng dữ liệu tổng quan thành một trung tâm quản lý chiến dịch phân cấp và đầy đủ chức năng. Mục tiêu là cho phép người dùng xem, phân tích và tối ưu hóa các chiến dịch ở mọi cấp độ (Campaign, Ad Group, Targeting) một cách trực quan và hiệu quả, trực tiếp từ trong ứng dụng.
-
----
-
-## 2. Hiện trạng & Tầm nhìn
-
--   **Hiện trạng:** Giao diện hiện tại là một bảng phẳng, hiển thị danh sách các chiến dịch cùng với các chỉ số hiệu suất tổng hợp. Nó rất tốt cho việc theo dõi ở cấp độ cao nhưng thiếu khả năng đi sâu vào chi tiết để thực hiện các hành động tối ưu hóa cụ thể.
--   **Tầm nhìn:** Xây dựng một cấu trúc "drill-down" (xem chi tiết) mạnh mẽ. Người dùng có thể bắt đầu từ cấp độ chiến dịch, nhấp vào để xem các nhóm quảng cáo bên trong, và tiếp tục nhấp vào để quản lý các từ khóa/mục tiêu cụ thể. Tại mỗi cấp độ, họ sẽ có đầy đủ thông tin và công cụ để thực hiện các thay đổi cần thiết.
+Xây dựng một ứng dụng web toàn diện để quản lý và tự động hóa các chiến dịch quảng cáo Amazon PPC, được triển khai trên một máy chủ riêng ảo (VPS) chạy Ubuntu 22.04, sử dụng PostgreSQL làm cơ sở dữ liệu chính.
 
 ---
 
-## 3. Lộ trình Triển khai Chi tiết
+## Kiến trúc Hệ thống
 
-Lộ trình sẽ được chia thành các giai đoạn hợp lý để đảm bảo việc phát triển có thể kiểm soát và mang lại giá trị nhanh chóng.
+-   **Frontend:** React, Chart.js, giao diện người dùng tương tác.
+-   **Backend:** Node.js / Express chạy trên VPS Ubuntu 22.04.
+-   **Database:** PostgreSQL trên cùng VPS, lưu trữ tất cả dữ liệu báo cáo và cấu hình.
+-   **Luồng Dữ liệu (Amazon Marketing Stream):** `Amazon Ads API` → `AWS Kinesis Data Firehose` → `AWS Lambda (Forwarder)` → `Backend API Endpoint (trên VPS)` → `PostgreSQL`.
+-   **Luồng Quản lý (Campaign Management):** `Frontend` → `Backend API (trên VPS)` → `Amazon Ads API v3`.
 
-### Giai đoạn 1: Nền tảng - Xem chi tiết Ad Group (Ad Group Drill-Down)
+---
 
-**Mục tiêu:** Cho phép người dùng nhấp vào một chiến dịch để xem danh sách các Ad Group (Nhóm quảng cáo) bên trong nó.
+## Lộ trình Phát triển
+
+### Giai đoạn 1: Nền tảng & Cài đặt Ban đầu
+
+**Mục tiêu:** Thiết lập hạ tầng cốt lõi trên VPS và xây dựng cấu trúc ứng dụng cơ bản từ đầu.
+
+#### Nhiệm vụ Hạ tầng (VPS):
+1.  **Cài đặt & Cấu hình VPS:**
+    -   Provision một VPS chạy Ubuntu 22.04.
+    -   Cài đặt Nginx làm reverse proxy.
+    -   Cài đặt Node.js (phiên bản LTS) và một trình quản lý package (npm/yarn).
+    -   Cài đặt và bảo mật PostgreSQL. Tạo database và user cho ứng dụng.
+2.  **Quản lý Tiến trình & Bảo mật:**
+    -   Cài đặt PM2 để quản lý và giữ cho ứng dụng backend luôn chạy.
+    -   Cấu hình tường lửa (UFW) để chỉ cho phép các port cần thiết (SSH, HTTP, HTTPS).
+    -   (Khuyến nghị) Cài đặt SSL miễn phí với Let's Encrypt để kích hoạt HTTPS.
+
+#### Nhiệm vụ Dự án:
+1.  **Khởi tạo Dự án:**
+    -   Thiết lập cấu trúc thư mục cho `frontend` và `backend`.
+    -   Khởi tạo dự án frontend React (sử dụng Vite) và backend Node.js/Express.
+2.  **Kết nối & Xác thực:**
+    -   Thiết lập kết nối từ backend đến database PostgreSQL.
+    -   Triển khai luồng xác thực OAuth 2.0 cho Amazon Ads API & SP-API trong backend để lấy và làm mới access token một cách an toàn.
+    -   Lưu trữ tất cả credentials (DB, Amazon API) trong file `.env`.
+3.  **Xây dựng Giao diện Cơ bản:**
+    -   Tạo layout chính cho ứng dụng (sidebar, header, khu vực nội dung chính) bằng React.
+    -   Thiết lập routing cơ bản cho các trang sau này (ví dụ: Dashboard, Campaigns, Automation).
+
+---
+
+### Giai đoạn 2: Tích hợp Dữ liệu Thời gian thực (Amazon Marketing Stream)
+
+**Mục tiêu:** Tích hợp Amazon Marketing Stream để nhận dữ liệu hiệu suất gần như ngay lập tức. Đây là bước nền tảng để thu thập dữ liệu cho các quyết định tự động hóa sau này.
+
+#### Nhiệm vụ AWS:
+1.  **Cấu hình Pipeline:**
+    -   Tạo một Kinesis Data Firehose delivery stream.
+    -   Tạo một Lambda function (`process-and-forward-stream`) với vai trò nhận dữ liệu từ Firehose và chuyển tiếp đến backend.
+    -   Tạo các IAM Role cần thiết theo hướng dẫn của Amazon để cho phép Ads API ghi vào Firehose.
+
+#### Nhiệm vụ Backend & VPS:
+1.  **Tạo Endpoint Nhận Dữ liệu:**
+    -   Xây dựng một API endpoint bảo mật (`POST /api/stream-ingest`) trên backend, sử dụng một API key bí mật để xác thực.
+    -   Tạo bảng `raw_stream_events` trong PostgreSQL để lưu trữ dữ liệu stream thô.
+2.  **Đăng ký Stream:**
+    -   Cập nhật file `.env` với các ARN của Firehose và IAM roles.
+    -   Chạy script để đăng ký (subscribe) các dataset cần thiết (ví dụ: `sp-traffic`, `sp-conversion`).
+3.  **Tổng hợp Dữ liệu:**
+    -   Tạo các cron job hoặc quy trình trong backend để tổng hợp dữ liệu từ `raw_stream_events` vào các bảng summary để truy vấn nhanh hơn.
 
 #### Nhiệm vụ Frontend:
-1.  **Cập nhật `PPCManagementView`:**
-    -   Biến cột "Campaign Name" trong bảng hiện tại thành một liên kết (link) có thể nhấp được.
-    -   Khi nhấp vào, điều hướng người dùng đến một trang mới, ví dụ: `/campaigns/:campaignId/adgroups`.
-2.  **Tạo View mới - `AdGroupView.tsx`:**
-    -   Xây dựng một component React mới để hiển thị danh sách các Ad Group.
-    -   View này sẽ hiển thị một bảng dữ liệu các Ad Group thuộc về chiến dịch đã chọn.
-    -   Các cột ban đầu bao gồm: Tên Ad Group, Trạng thái (Status), Mức bid mặc định (Default Bid).
-    -   Thêm "breadcrumb" (thanh điều hướng phân cấp) để người dùng dễ dàng quay lại trang danh sách chiến dịch. Ví dụ: `Campaigns > [Tên Campaign]`.
-
-#### Nhiệm-vụ-Backend:
-1.  **Tạo API Endpoint mới:**
-    -   Xây dựng một endpoint `POST /api/amazon/campaigns/:campaignId/adgroups`.
-    -   Endpoint này sẽ nhận `campaignId` từ URL và `profileId` từ body, sau đó gọi đến Amazon Ads API để lấy danh sách tất cả các Ad Group thuộc chiến dịch đó.
-    -   Trả về dữ liệu Ad Group đã được chuẩn hóa cho frontend.
+1.  **Hiển thị Dữ liệu "Live":**
+    -   Cập nhật giao diện để lấy và hiển thị các chỉ số gần thời gian thực (impressions, clicks, spend) từ backend.
+    -   Triển khai cơ chế làm mới dữ liệu tự động (ví dụ: polling mỗi 30 giây).
 
 ---
 
-### Giai đoạn 2: Đi sâu - Xem chi tiết Keyword & Target
+### Giai đoạn 3: Lấy Dữ liệu & Quản lý Thủ công
 
-**Mục tiêu:** Từ màn hình Ad Group, cho phép người dùng xem và quản lý các Keywords (Từ khóa) hoặc Product Targeting (Mục tiêu sản phẩm) bên trong.
+**Mục tiêu:** Xây dựng giao diện để xem dữ liệu đã thu thập và cho phép người dùng thực hiện các hành động quản lý thủ công. Điều này giúp kiểm tra và xác thực dữ liệu stream, đồng thời cung cấp chức năng cơ bản.
+
+#### Nhiệm vụ Backend:
+
+1.  **Tải Dữ liệu Lịch sử (Backfilling):**
+    -   **Mục đích:** Nạp dữ liệu lịch sử vào cơ sở dữ liệu để phân tích sâu hơn và cung cấp ngữ cảnh cho các quyết định tối ưu hóa. Các script này được thiết kế để chạy một lần hoặc định kỳ (ví dụ: hàng tháng) để lấp đầy những khoảng trống dữ liệu.
+    -   **Quan trọng:** Trước khi chạy các script này, bạn cần tạo các bảng tương ứng trong database PostgreSQL bằng cách chạy các file migration SQL (`003_...`, `004_...`).
+    -   **Script 1: Báo cáo Hiệu suất Từ khóa (Sponsored Products Search Term Report)**
+        -   Cung cấp dữ liệu chi tiết về các cụm từ tìm kiếm (search terms) của khách hàng. Đây là dữ liệu **cốt lõi** để tối ưu hóa PPC.
+        -   **File:** `scripts/fetch_sp_search_term_report.js`
+        -   **Cách chạy (từ thư mục gốc của dự án):**
+            ```bash
+            # Ví dụ: Tải dữ liệu từ ngày 1 đến ngày 31 tháng 1 năm 2024
+            node scripts/fetch_sp_search_term_report.js 2024-01-01 2024-01-31
+            ```
+    -   **Script 2: Báo cáo Doanh số & Lưu lượng truy cập (Sales & Traffic Report)**
+        -   Cung cấp cái nhìn tổng quan về hiệu suất kinh doanh, bao gồm cả doanh số tự nhiên (organic).
+        -   **File:** `scripts/fetch_sales_and_traffic.js`
+        -   **Cách chạy (từ thư mục gốc của dự án):**
+            ```bash
+            # Ví dụ: Tải dữ liệu từ ngày 1 đến ngày 7 tháng 2 năm 2024
+            node scripts/fetch_sales_and_traffic.js 2024-02-01 2024-02-07
+            ```
+
+2.  **API cho Dữ liệu Trực tiếp:**
+    -   Tạo các API endpoint để lấy cấu trúc chiến dịch hiện tại từ Amazon (ví dụ: `GET /api/ppc/campaigns`).
+    -   Tạo các API endpoint để thực hiện các thay đổi (ví dụ: `PUT /api/ppc/keywords/:id/bid`, `PUT /api/ppc/campaigns/:id/status`).
 
 #### Nhiệm vụ Frontend:
-1.  **Cập nhật `AdGroupView`:**
-    -   Biến cột "Ad Group Name" thành một liên kết có thể nhấp được, điều hướng đến `/adgroups/:adGroupId/keywords`.
-2.  **Tạo View mới - `KeywordView.tsx`:**
-    -   Xây dựng một component React mới để hiển thị danh sách các từ khóa và mục tiêu.
-    -   **Đây là màn hình tối ưu hóa cốt lõi.** Bảng dữ liệu sẽ bao gồm:
-        -   Keyword Text / Product Target
-        -   Match Type (Loại đối sánh: Broad, Phrase, Exact)
-        -   Status (Trạng thái)
-        -   **Bid (Giá thầu):** Trường này phải có khả năng **chỉnh sửa tại chỗ (in-line editing)**.
-    -   Cập nhật breadcrumb: `Campaigns > [Tên Campaign] > [Tên Ad Group]`.
-
-#### Nhiệm-vụ-Backend:
-1.  **Tạo API Endpoint mới cho Keywords:**
-    -   Xây dựng endpoint `POST /api/amazon/adgroups/:adGroupId/keywords`.
-    -   Endpoint này sẽ lấy danh sách các từ khóa cho một Ad Group cụ thể.
-2.  **Tạo API Endpoint để Cập nhật:**
-    -   Xây dựng endpoint `PUT /api/amazon/keywords` để cho phép cập nhật hàng loạt (thay đổi trạng thái, giá thầu). Frontend sẽ gọi đến endpoint này khi người dùng chỉnh sửa giá thầu.
+1.  **Xây dựng Giao diện Chiến dịch:**
+    -   Tạo một trang để hiển thị bảng dữ liệu các chiến dịch lấy từ backend.
+    -   Triển khai cấu trúc xem chi tiết (drill-down): click vào Campaign để xem Ad Groups, click vào Ad Group để xem Keywords/Targets.
+2.  **Triển khai Chức năng Chỉnh sửa Tại chỗ (In-line Editing):**
+    -   Cho phép người dùng bấm trực tiếp vào các trường như `Status`, `Budget`, `Bid` trong bảng để chỉnh sửa.
+    -   Khi thay đổi, gọi đến API của backend để lưu thay đổi lên Amazon.
+    -   Hiển thị thông báo thành công/thất bại.
 
 ---
 
-### Giai đoạn 3: Tích hợp Dữ liệu Hiệu suất Toàn diện
+### Giai đoạn 4: Xây dựng Bộ máy Tự động hóa Dựa trên Luật
 
-**Mục tiêu:** Đưa các chỉ số hiệu suất (impressions, clicks, spend, sales, ACOS, ROAS) vào tất cả các cấp độ vừa tạo.
+**Mục tiêu:** Xây dựng tính năng tự động hóa cốt lõi, cho phép người dùng tạo các "luật" để hệ thống tự động tối ưu hóa chiến dịch.
+
+#### Nhiệm vụ Backend:
+1.  **Thiết kế Schema Database:**
+    -   Tạo bảng `automation_rules` để lưu trữ các luật (`conditions`, `actions`, `frequency`, `is_active`).
+    -   Tạo bảng `automation_logs` để ghi lại mọi hành động mà hệ thống đã thực hiện.
+2.  **Xây dựng "Rules Engine":**
+    -   Tạo một **cron job** (sử dụng `node-cron`) chạy định kỳ trên server (ví dụ: mỗi 15 phút).
+    -   Script này sẽ:
+        1.  Lấy tất cả các luật đang hoạt động từ `automation_rules`.
+        2.  Với mỗi luật, lấy dữ liệu hiệu suất cần thiết từ PostgreSQL.
+        3.  Đánh giá xem các điều kiện có được thỏa mãn không (ví dụ: `IF ACOS > 40%`).
+        4.  Nếu có, thực thi hành động bằng cách gọi Ads API và ghi lại kết quả vào `automation_logs`.
+3.  **Tạo API CRUD cho Rules:** Xây dựng các endpoint để frontend có thể Tạo, Đọc, Cập nhật, Xóa các luật.
 
 #### Nhiệm vụ Frontend:
-1.  **Cập nhật các View:**
-    -   Thêm các cột chỉ số hiệu suất vào bảng trong `AdGroupView` và `KeywordView`.
-    -   Hiển thị các ô "Summary Metrics" (chỉ số tổng hợp) ở đầu mỗi trang để người dùng có cái nhìn tổng quan về hiệu suất của chiến dịch/nhóm quảng cáo mà họ đang xem.
-
-#### Nhiệm-vụ-Backend:
-1.  **Mở rộng API Dữ liệu Stream:**
-    -   Đây là phần phức tạp nhất. Endpoint `/api/stream/campaign-metrics` hiện tại chỉ tổng hợp dữ liệu ở cấp độ chiến dịch.
-    -   Cần tạo các endpoint mới hoặc mở rộng endpoint hiện có để có thể truy vấn và tổng hợp dữ liệu từ bảng `raw_stream_events` ở các cấp độ chi tiết hơn:
-        -   `GET /api/stream/adgroup-metrics`: Tổng hợp dữ liệu theo `ad_group_id`.
-        -   `GET /api/stream/keyword-metrics`: Tổng hợp dữ liệu theo `keyword_id` hoặc `target_id`.
-    -   Các truy vấn SQL sẽ cần `GROUP BY` theo các ID tương ứng và `SUM()` các chỉ số để đảm bảo tính chính xác (xử lý các giá trị điều chỉnh âm).
-
----
-
-### Giai đoạn 4: Hoàn thiện & Tính năng Nâng cao
-
-**Mục tiêu:** Hoàn thiện luồng quản lý và bổ sung các tính năng quan trọng khác được đề cập trong tầm nhìn.
-
-#### Nhiệm vụ Frontend & Backend:
-1.  **Quản lý Negative Targeting:**
-    -   Thêm các tab/khu vực trong `AdGroupView` và `CampaignView` để người dùng xem và thêm các Negative Keywords / Negative ASINs.
-    -   Tạo các API endpoint tương ứng để đọc và ghi dữ liệu này.
-2.  **Quản lý Ad (Sản phẩm):**
-    -   Trong `AdGroupView`, thêm một khu vực để hiển thị danh sách các sản phẩm (ASIN, hình ảnh, tiêu đề) đang được quảng cáo trong nhóm đó.
-    -   Tạo API để lấy danh sách Ads từ Amazon.
-3.  **Tối ưu hóa Trải nghiệm Người dùng:**
-    -   Triển khai các bộ lọc và chức năng tìm kiếm mạnh mẽ trong tất cả các bảng dữ liệu.
-    -   Thêm chức năng "Tùy chỉnh cột" để người dùng có thể chọn các chỉ số họ muốn xem.
-    -   Cho phép xuất dữ liệu ra file CSV ở mỗi cấp độ.
-4.  **(Tương lai) Hỗ trợ Sponsored Brands & Display:**
-    -   Mở rộng cấu trúc hiện tại để có thể xử lý các loại chiến dịch khác, với các logic và giao diện đặc thù (quản lý headline, creative, audience targeting).
+1.  **Xây dựng Giao diện "Automation Rules":**
+    -   Tạo một trang mới để quản lý các luật.
+    -   Thiết kế một trình tạo luật trực quan, thân thiện với người dùng.
+2.  **Hiển thị Lịch sử Tự động hóa:**
+    -   Tạo một giao diện để người dùng xem lại tất cả các hành động đã được hệ thống tự động thực hiện, giúp họ tin tưởng và kiểm soát quy trình.

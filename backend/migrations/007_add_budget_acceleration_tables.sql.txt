@@ -1,0 +1,21 @@
+-- Table to track campaigns whose budgets have been automatically increased for the day.
+CREATE TABLE IF NOT EXISTS daily_budget_overrides (
+    id SERIAL PRIMARY KEY,
+    campaign_id BIGINT NOT NULL,
+    original_budget NUMERIC(12, 2) NOT NULL,
+    override_date DATE NOT NULL,
+    reverted_at TIMESTAMPTZ, -- Timestamp when the budget was reverted
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    
+    -- Ensures a campaign's budget can only be overridden once per day.
+    CONSTRAINT unique_budget_override_per_day UNIQUE (campaign_id, override_date)
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_dbo_override_date ON daily_budget_overrides(override_date);
+CREATE INDEX IF NOT EXISTS idx_dbo_reverted_at ON daily_budget_overrides(reverted_at);
+
+-- Grant Permissions to Application User
+-- IMPORTANT: Replace 'yourdbuser' with the actual DB_USER from your .env file.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE daily_budget_overrides TO yourdbuser;
+GRANT USAGE, SELECT ON SEQUENCE daily_budget_overrides_id_seq TO yourdbuser;

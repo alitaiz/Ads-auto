@@ -20,25 +20,25 @@ Tài liệu này mô tả chi tiết luồng hoạt động từ đầu đến c
 
 ### Bước 2: Tổng hợp Dữ liệu Hiệu suất (Data Aggregation)
 
-Đây là bước cốt lõi, nơi logic đã được cập nhật để xử lý hai loại rule một cách riêng biệt, đảm bảo tính chính xác của dữ liệu.
+Đây là bước cốt lõi, nơi logic đã được cập nhật để xử lý các loại rule một cách riêng biệt, đảm bảo tính chính xác của dữ liệu.
 
-#### Đối với Rule `BID_ADJUSTMENT` (Hybrid Model - Dữ liệu hỗn hợp)
--   **Mục tiêu:** Có được bộ dữ liệu đầy đủ và mới nhất có thể, kéo dài đến tận ngày hiện tại.
--   **Nguồn dữ liệu Hybrid:**
-    1.  **Dữ liệu Lịch sử (cho các ngày > 2 ngày trước):** Lấy từ bảng `sponsored_products_search_term_report`. Nguồn này ổn định nhưng có độ trễ.
-    2.  **Dữ liệu Gần thời gian thực (cho 2 ngày gần nhất):** Lấy từ bảng `raw_stream_events` (Amazon Marketing Stream). Nguồn này nhanh nhưng dữ liệu có thể được điều chỉnh.
--   **Truy vấn SQL `UNION ALL`:** Hàm `getPerformanceData` xây dựng một câu lệnh SQL phức tạp sử dụng `UNION ALL` để kết hợp dữ liệu từ cả hai bảng trên vào một tập kết quả duy nhất.
--   **Ví dụ:** Nếu một rule chạy vào ngày **12 tháng 9** với lookback là **7 ngày**:
-    -   Hệ thống sẽ lấy dữ liệu từ ngày **5/9 đến 10/9** từ bảng **lịch sử**.
-    -   Hệ thống sẽ lấy dữ liệu từ ngày **11/9 đến 12/9** từ bảng **stream**.
-    -   Kết quả là một bộ dữ liệu đầy đủ 7 ngày, từ 5/9 đến 12/9.
+#### 2.1. Đối với Rule `BID_ADJUSTMENT` (Mô hình Dữ liệu Bền bỉ - Robust Data Model)
+-   **Mục tiêu:** Giải quyết tình trạng trễ dữ liệu từ báo cáo, hệ thống áp dụng một quy trình tra soát và bổ sung thông minh:
+    1.  **Kiểm tra Toàn vẹn Dữ liệu:** Trước khi tính toán, hệ thống xác định tất cả các ngày cần thiết trong khoảng thời gian phân tích (ví dụ: 7 ngày qua). Sau đó, nó kiểm tra bảng `sponsored_products_search_term_report` để xem những ngày nào đã có dữ liệu đầy đủ.
+    2.  **Xác định Lỗ hổng:** Hệ thống lập một danh sách các ngày bị thiếu dữ liệu trong báo cáo.
+    3.  **Lấp đầy bằng Dữ liệu Stream:** Đối với những ngày bị thiếu, hệ thống sẽ tự động truy vấn và tổng hợp dữ liệu từ bảng `raw_stream_events`. Dữ liệu này đảm bảo rằng không có ngày nào bị bỏ sót, ngay cả khi báo cáo chính thức bị trễ.
+-   **Kết quả:** Bằng cách kết hợp dữ liệu lịch sử đáng tin cậy với dữ liệu stream để lấp đầy các lỗ hổng, rule `BID_ADJUSTMENT` luôn hoạt động trên một bộ dữ liệu hoàn chỉnh, giúp tăng cường độ chính xác và hiệu quả của các quyết định tự động.
 
-#### Đối với Rule `SEARCH_TERM_AUTOMATION` (Historical Model - Dữ liệu Lịch sử)
+#### 2.2. Đối với Rule `SEARCH_TERM_AUTOMATION` (Historical Model - Dữ liệu Lịch sử)
 -   **Nguồn dữ liệu Độc quyền:** Tính năng này **CHỈ** sử dụng dữ liệu từ bảng `sponsored_products_search_term_report`. Nó không sử dụng dữ liệu stream.
 -   **Độ trễ 2 ngày:** Dữ liệu này luôn có độ trễ 2 ngày so với ngày hiện tại. Điều này đảm bảo rằng các quyết định phủ định hoặc tạo mới từ khóa luôn dựa trên dữ liệu đã được tổng hợp đầy đủ và chính xác.
     -   **Ví dụ:** Nếu một rule chạy vào ngày **12 tháng 9** với lookback là **7 ngày**, hệ thống sẽ lấy dữ liệu từ ngày **3 tháng 9 đến ngày 10 tháng 9**.
 
-Sự tách biệt này đảm bảo rằng các quyết định điều chỉnh bid có thể tận dụng dữ liệu mới nhất, trong khi các quyết định về search term luôn dựa trên dữ liệu đã hoàn chỉnh và chính xác.
+#### 2.3. Đối với Rule `BUDGET_ACCELERATION` (Stream-Only Model)
+-   **Nguồn dữ liệu:** Rule này **CHỈ** sử dụng dữ liệu từ bảng `raw_stream_events`.
+-   **Phạm vi thời gian:** Truy vấn được thiết kế để chỉ tổng hợp dữ liệu **từ đầu ngày hôm nay cho đến thời điểm hiện tại** (Today so far), dựa trên múi giờ của tài khoản quảng cáo (ví dụ: `America/Los_Angeles`). Điều này cho phép đưa ra các quyết định tăng tốc ngân sách dựa trên hiệu suất thực tế đang diễn ra trong ngày.
+
+Sự tách biệt này đảm bảo rằng các quyết định điều chỉnh bid có thể tận dụng dữ liệu mới nhất, các quyết định về search term luôn dựa trên dữ liệu đã hoàn chỉnh, và các quyết định về ngân sách phản ánh hiệu suất tức thời.
 
 ### Bước 3: Phân loại Thực thể & Lấy Trạng thái Hiện tại (Entity Classification & Fetching Current State)
 
@@ -63,6 +63,7 @@ Dữ liệu được tổng hợp từ Bước 2 chứa hiệu suất của cả
 -   **Tính toán hành động:**
     -   **Điều chỉnh Bid:** Tính toán giá thầu mới dựa trên `currentBid` và `%` thay đổi. Áp dụng các giới hạn `minBid` và `maxBid` nếu có.
     -   **Phủ định Search Term:** Tạo một object chứa `campaignId`, `adGroupId`, `keywordText` (chính là search term), và `matchType`.
+    -   **Tăng tốc Ngân sách:** Tính toán ngân sách mới dựa trên ngân sách gốc và `%` tăng trưởng.
 
 ### Bước 5: Thực thi Hành động (API Calls)
 
@@ -77,6 +78,9 @@ Sau khi đã xác định tất cả các thay đổi cần thực hiện, hệ 
 -   **Tạo Từ khóa Phủ định:**
     -   **API Endpoint:** `POST /sp/negativeKeywords`
     -   **Input:** Một mảng các object `{"campaignId": ..., "adGroupId": ..., "keywordText": ..., "matchType": ...}`.
+-   **Cập nhật Ngân sách Chiến dịch:**
+    -   **API Endpoint:** `PUT /sp/campaigns`
+    -   **Input:** Một mảng các object `{"campaignId": ..., "budget": {"amount": ...}}`.
 
 ### Bước 6: Ghi Log (Logging)
 
@@ -86,3 +90,11 @@ Sau khi đã xác định tất cả các thay đổi cần thực hiện, hệ 
     -   `status`: `SUCCESS`, `FAILURE`, hoặc `NO_ACTION`.
     -   `summary`: Một câu tóm tắt (ví dụ: "Điều chỉnh giá thầu cho 5 từ khóa.").
     -   `details`: Một object JSON chứa thông tin chi tiết về các thay đổi (ví dụ: `{"changes": [{"keywordId": "123", "oldBid": 1.0, "newBid": 0.9}]}`).
+
+### Bước 7: Khôi phục Ngân sách (Budget Reset)
+
+-   **Kích hoạt:** Một `cron job` riêng biệt, độc lập chạy mỗi ngày một lần vào cuối ngày (ví dụ: 11:55 PM).
+-   **Logic:**
+    1. Truy vấn bảng `daily_budget_overrides` để tìm tất cả các chiến dịch đã được tăng ngân sách trong ngày mà chưa được khôi phục.
+    2. Gọi API `PUT /sp/campaigns` để đặt lại ngân sách của các chiến dịch này về giá trị `original_budget` đã được lưu.
+    3. Cập nhật các bản ghi trong `daily_budget_overrides` để đánh dấu là đã khôi phục (`reverted_at = NOW()`).

@@ -63,9 +63,9 @@ const downloadAndParseReport = async (reportUrl) => {
     return JSON.parse(decompressedData);
 };
 
-const saveDataToDB = async (client, reportData) => {
+const saveSpDataToDB = async (client, reportData) => {
     if (!reportData || reportData.length === 0) {
-        console.log("[DB] No records to save.");
+        console.log("[DB] No SP records to save.");
         return;
     }
     
@@ -77,23 +77,10 @@ const saveDataToDB = async (client, reportData) => {
             ad_group_name, ad_group_id, targeting, match_type, customer_search_term,
             keyword_id, keyword_text, keyword_bid, ad_keyword_status, asin,
             impressions, clicks, cost, cost_per_click, click_through_rate,
-            -- 7d
-            purchases_7d, sales_7d, units_sold_clicks_7d, acos_clicks_7d, roas_clicks_7d,
-            purchases_same_sku_7d, attributed_sales_same_sku_7d, units_sold_same_sku_7d,
-            sales_other_sku_7d, units_sold_other_sku_7d,
-            -- 1d
-            purchases_1d, sales_1d, units_sold_clicks_1d,
-            purchases_same_sku_1d, attributed_sales_same_sku_1d, units_sold_same_sku_1d,
-            -- 14d
-            purchases_14d, sales_14d, units_sold_clicks_14d, acos_clicks_14d, roas_clicks_14d,
-            purchases_same_sku_14d, attributed_sales_same_sku_14d, units_sold_same_sku_14d,
-            -- 30d
-            purchases_30d, sales_30d, units_sold_clicks_30d,
-            purchases_same_sku_30d, attributed_sales_same_sku_30d, units_sold_same_sku_30d
+            purchases_7d, sales_7d, units_sold_clicks_7d
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-            $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36,
-            $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52
+            $20, $21, $22, $23, $24, $25
         )
         ON CONFLICT (report_date, campaign_id, ad_group_id, keyword_id, customer_search_term, targeting) DO NOTHING;
     `;
@@ -103,29 +90,80 @@ const saveDataToDB = async (client, reportData) => {
         const values = [
             item.date, item.portfolioId, item.campaignName, item.campaignId, item.campaignStatus, item.campaignBudgetType, item.campaignBudgetAmount,
             item.adGroupName, item.adGroupId, item.targeting, item.matchType, item.searchTerm,
-            item.keywordId, item.keyword, item.keywordBid, item.adKeywordStatus, extractAsinFromName(item.campaignName), // FIX: Changed item.keywordText to item.keyword
+            item.keywordId, item.keyword, item.keywordBid, item.adKeywordStatus, extractAsinFromName(item.campaignName),
             item.impressions, item.clicks, item.cost, item.costPerClick, item.clickThroughRate,
-            // 7d
-            item.purchases7d, item.sales7d, item.unitsSoldClicks7d, item.acosClicks7d, item.roasClicks7d,
-            item.purchasesSameSku7d, item.attributedSalesSameSku7d, item.unitsSoldSameSku7d,
-            item.salesOtherSku7d, item.unitsSoldOtherSku7d,
-            // 1d
-            item.purchases1d, item.sales1d, item.unitsSoldClicks1d,
-            item.purchasesSameSku1d, item.attributedSalesSameSku1d, item.unitsSoldSameSku1d,
-            // 14d
-            item.purchases14d, item.sales14d, item.unitsSoldClicks14d, item.acosClicks14d, item.roasClicks14d,
-            item.purchasesSameSku14d, item.attributedSalesSameSku14d, item.unitsSoldSameSku14d,
-            // 30d
-            item.purchases30d, item.sales30d, item.unitsSoldClicks30d,
-            item.purchasesSameSku30d, item.attributedSalesSameSku30d, item.unitsSoldSameSku30d
+            item.purchases7d, item.sales7d, item.unitsSoldClicks7d
         ];
         const res = await client.query(query, values);
-        if (res.rowCount > 0) {
-            insertedCount++;
-        }
+        if (res.rowCount > 0) insertedCount++;
     }
-    console.log(`[DB] 💾 Inserted ${insertedCount} new records out of ${reportData.length} total from the report.`);
+    console.log(`[DB] 💾 Inserted ${insertedCount} new SP records out of ${reportData.length} total from the report.`);
 };
+
+const saveSbDataToDB = async (client, reportData) => {
+    if (!reportData || reportData.length === 0) {
+        console.log("[DB] No SB records to save.");
+        return;
+    }
+
+    const query = `
+        INSERT INTO sponsored_brands_search_term_report (
+            report_date, campaign_name, campaign_id, ad_group_name, ad_group_id,
+            customer_search_term, keyword_id, keyword_text, match_type,
+            impressions, clicks, cost, purchases, sales, units_sold, asin
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+        )
+        ON CONFLICT (report_date, campaign_id, ad_group_id, keyword_id, customer_search_term) DO NOTHING;
+    `;
+
+    let insertedCount = 0;
+    for (const item of reportData) {
+        const values = [
+            item.date, item.campaignName, item.campaignId, item.adGroupName, item.adGroupId,
+            item.searchTerm, item.keywordId, item.keywordText, item.matchType,
+            item.impressions, item.clicks, item.cost, item.purchases, item.sales, item.unitsSold,
+            item.advertisedAsin // Assuming 'advertisedAsin' is a column if available
+        ];
+        const res = await client.query(query, values);
+        if (res.rowCount > 0) insertedCount++;
+    }
+    console.log(`[DB] 💾 Inserted ${insertedCount} new SB records out of ${reportData.length} total from the report.`);
+};
+
+const saveSdDataToDB = async (client, reportData) => {
+    if (!reportData || reportData.length === 0) {
+        console.log("[DB] No SD records to save.");
+        return;
+    }
+
+    const extractAsinFromName = (name) => name?.match(/(B0[A-Z0-9]{8})/)?.[0] || null;
+
+    const query = `
+        INSERT INTO sponsored_display_targeting_report (
+            report_date, campaign_name, campaign_id, ad_group_name, ad_group_id,
+            target_id, targeting_expression, targeting_text, 
+            impressions, clicks, cost, purchases, sales, units_sold, asin
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+        )
+        ON CONFLICT (report_date, campaign_id, ad_group_id, target_id) DO NOTHING;
+    `;
+
+    let insertedCount = 0;
+    for (const item of reportData) {
+        const values = [
+            item.date, item.campaignName, item.campaignId, item.adGroupName, item.adGroupId,
+            item.targetingId, item.targetingExpression, item.targetingText,
+            item.impressions, item.clicks, item.cost, item.purchases, item.sales, item.unitsSold,
+            extractAsinFromName(item.campaignName)
+        ];
+        const res = await client.query(query, values);
+        if (res.rowCount > 0) insertedCount++;
+    }
+    console.log(`[DB] 💾 Inserted ${insertedCount} new SD records out of ${reportData.length} total from the report.`);
+};
+
 
 const updateReportRequestStatus = async (client, reportId, status, url = null, reason = null) => {
     const query = `
@@ -155,7 +193,7 @@ const main = async () => {
         const accessToken = await getAdsApiAccessToken();
         
         for (const report of pendingReports) {
-            console.log(`\n[Processor] Checking report ${report.report_id} for date ${report.report_date.toISOString().split('T')[0]}...`);
+            console.log(`\n[Processor] Checking report ${report.report_id} (${report.report_type}) for date ${report.report_date.toISOString().split('T')[0]}...`);
             try {
                 const { status, url, failureReason } = await checkReportStatus(accessToken, report.report_id);
                 console.log(`[API] STATUS: ${status}`);
@@ -163,7 +201,17 @@ const main = async () => {
                 if (status === 'COMPLETED') {
                     console.log("[Processor] ✅ Report is COMPLETED. Downloading and saving...");
                     const reportData = await downloadAndParseReport(url);
-                    await saveDataToDB(client, reportData);
+
+                    if (report.report_type === 'spSearchTerm') {
+                        await saveSpDataToDB(client, reportData);
+                    } else if (report.report_type === 'sbSearchTerm') {
+                        await saveSbDataToDB(client, reportData);
+                    } else if (report.report_type === 'sdTargeting') {
+                        await saveSdDataToDB(client, reportData);
+                    } else {
+                        console.warn(`[Processor] ⚠️  Unknown report type '${report.report_type}'. Cannot save data.`);
+                    }
+
                     await updateReportRequestStatus(client, report.report_id, 'DOWNLOADED', url);
                     console.log("[Processor] ✔️  Successfully downloaded and saved data.");
                 } else if (status === 'FAILURE') {

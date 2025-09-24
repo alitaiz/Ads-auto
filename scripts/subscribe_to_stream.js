@@ -1,9 +1,11 @@
+
+
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
 import crypto from 'crypto';
-import { getAdsApiAccessToken } from '../helpers/amazon-api.js';
+import { getAdsApiAccessToken } from '../backend/helpers/amazon-api.js';
 
 // --- Configuration ---
 const __filename = fileURLToPath(import.meta.url);
@@ -20,9 +22,33 @@ const {
 } = process.env;
 
 const ADS_API_ENDPOINT = 'https://advertising-api.amazon.com';
-const DATASETS_TO_SUBSCRIBE = ['sp-traffic', 'sp-conversion'];
+const DATASETS_TO_SUBSCRIBE = [
+    'sp-traffic', 
+    'sp-conversion',
+    'sb-traffic',
+    'sb-conversion',
+    'sd-traffic',
+    'sd-conversion'
+];
 
 // --- Helper Functions ---
+
+/**
+ * Gets the correct `sourceType` required by the Amazon Ads API based on the dataset ID.
+ * @param {string} dataSetId - The ID of the dataset (e.g., 'sb-traffic').
+ * @returns {string} The corresponding source type (e.g., 'SPONSORED_BRANDS').
+ */
+function getSourceType(dataSetId) {
+    if (dataSetId.startsWith('sb-')) {
+        return 'SPONSORED_BRANDS';
+    }
+    if (dataSetId.startsWith('sd-')) {
+        return 'SPONSORED_DISPLAY';
+    }
+    // Default for 'sp-' and any others
+    return 'SPONSORED_PRODUCTS';
+}
+
 
 /**
  * Checks if an active subscription for a given dataset already exists.
@@ -80,7 +106,7 @@ async function subscribeToStream(accessToken, dataSetId) {
     const body = {
         clientRequestToken: crypto.randomUUID(),
         dataSetId: dataSetId,
-        sourceType: "SPONSORED_PRODUCTS",
+        sourceType: getSourceType(dataSetId),
         destination: {
             firehoseDestination: {
                 deliveryStreamArn: ADS_API_FIREHOSE_ARN,

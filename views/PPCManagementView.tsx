@@ -140,7 +140,8 @@ export function PPCManagementView() {
 
     const [currentPage, setCurrentPage] = useState(1);
     const [searchTerm, setSearchTerm] = useState('');
-    const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' } | null>({ key: 'spend', direction: 'descending' });
+    // FIX: Changed initial sort key from 'spend' to 'adjustedSpend' to match CampaignWithMetrics type.
+    const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' } | null>({ key: 'adjustedSpend', direction: 'descending' });
     const [statusFilter, setStatusFilter] = useState<CampaignState | 'all'>('enabled');
     
     // State for expanded automation logs
@@ -409,32 +410,35 @@ export function PPCManagementView() {
 
     const combinedCampaignData: CampaignWithMetrics[] = useMemo(() => {
         const enrichedCampaigns = campaigns.map(campaign => {
+            // FIX: Use 'adjustedSpend' in the fallback object to match CampaignStreamMetrics.
             const metrics = performanceMetrics[campaign.campaignId] || {
                 campaignId: campaign.campaignId,
                 impressions: 0,
                 clicks: 0,
-                spend: 0,
+                adjustedSpend: 0,
                 orders: 0,
                 sales: 0,
             };
 
-            const { impressions, clicks, spend, sales, orders } = metrics;
+            // FIX: Destructure 'adjustedSpend' instead of 'spend'.
+            const { impressions, clicks, adjustedSpend, sales, orders } = metrics;
             
             return {
                 ...campaign,
                 impressions,
                 clicks,
-                spend,
+                // FIX: Use 'adjustedSpend' in the returned object and subsequent calculations.
+                adjustedSpend,
                 orders,
                 sales,
-                acos: sales > 0 ? spend / sales : 0,
-                roas: spend > 0 ? sales / spend : 0,
-                cpc: clicks > 0 ? spend / clicks : 0,
+                acos: sales > 0 ? adjustedSpend / sales : 0,
+                roas: adjustedSpend > 0 ? sales / adjustedSpend : 0,
+                cpc: clicks > 0 ? adjustedSpend / clicks : 0,
                 ctr: impressions > 0 ? clicks / impressions : 0,
             };
         });
 
-        return enrichedCampaigns.filter(c => c.impressions > 0 || c.clicks > 0 || c.spend > 0 || c.orders > 0 || c.sales > 0);
+        return enrichedCampaigns.filter(c => c.impressions > 0 || c.clicks > 0 || c.adjustedSpend > 0 || c.orders > 0 || c.sales > 0);
     }, [campaigns, performanceMetrics]);
     
     const dataForSummary = useMemo(() => {
@@ -445,20 +449,22 @@ export function PPCManagementView() {
     const summaryMetrics: SummaryMetricsData | null = useMemo(() => {
         if (loading.data) return null;
         
+        // FIX: Accumulate 'adjustedSpend' instead of 'spend' to match CampaignWithMetrics and SummaryMetricsData types.
         const total = dataForSummary.reduce((acc, campaign) => {
-            acc.spend += campaign.spend || 0;
+            acc.adjustedSpend += campaign.adjustedSpend || 0;
             acc.sales += campaign.sales || 0;
             acc.orders += campaign.orders || 0;
             acc.clicks += campaign.clicks || 0;
             acc.impressions += campaign.impressions || 0;
             return acc;
-        }, { spend: 0, sales: 0, orders: 0, clicks: 0, impressions: 0 });
+        }, { adjustedSpend: 0, sales: 0, orders: 0, clicks: 0, impressions: 0 });
 
         return {
             ...total,
-            acos: total.sales > 0 ? total.spend / total.sales : 0,
-            roas: total.spend > 0 ? total.sales / total.spend : 0,
-            cpc: total.clicks > 0 ? total.spend / total.clicks : 0,
+            // FIX: Use 'adjustedSpend' in calculations.
+            acos: total.sales > 0 ? total.adjustedSpend / total.sales : 0,
+            roas: total.adjustedSpend > 0 ? total.sales / total.adjustedSpend : 0,
+            cpc: total.clicks > 0 ? total.adjustedSpend / total.clicks : 0,
             ctr: total.impressions > 0 ? total.clicks / total.impressions : 0,
         };
     }, [dataForSummary, loading.data]);

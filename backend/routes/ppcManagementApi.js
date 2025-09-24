@@ -21,9 +21,103 @@ router.get('/profiles', async (req, res) => {
 });
 
 /**
+ * Fetches campaigns for Sponsored Products using POST with pagination.
+ */
+const fetchCampaignsForTypePost = async (profileId, url, headers, body) => {
+    let allCampaigns = [];
+    let nextToken = null;
+    
+    do {
+        const requestBody = { ...body };
+        if (nextToken) {
+            requestBody.nextToken = nextToken;
+        }
+
+        const data = await amazonAdsApiRequest({
+            method: 'post',
+            url,
+            profileId,
+            data: requestBody,
+            headers,
+        });
+
+        const campaignsKey = Object.keys(data).find(k => k.toLowerCase().includes('campaigns'));
+        if (campaignsKey && data[campaignsKey]) {
+            allCampaigns = allCampaigns.concat(data[campaignsKey]);
+        }
+        nextToken = data.nextToken;
+
+    } while (nextToken);
+
+    return allCampaigns;
+};
+
+/**
+ * Fetches campaigns for ad products using GET with pagination (for SB, SD).
+ */
+const fetchCampaignsForTypeGet = async (profileId, url, headers, params) => {
+    let allCampaigns = [];
+    let nextToken = null;
+
+    do {
+        const requestParams = { ...params };
+        if (nextToken) {
+            requestParams.nextToken = nextToken;
+        }
+
+        const data = await amazonAdsApiRequest({
+            method: 'get',
+            url,
+            profileId,
+            params: requestParams,
+            headers,
+        });
+        
+        // Handle different response structures gracefully
+        const campaignsInResponse = data.campaigns || data;
+        if (Array.isArray(campaignsInResponse)) {
+            allCampaigns = allCampaigns.concat(campaignsInResponse);
+        }
+        nextToken = data.nextToken;
+
+    } while (nextToken);
+
+    return allCampaigns;
+};
+
+/**
+ * Helper function to robustly extract the budget amount from various campaign object structures.
+ * @param {object} campaign - The campaign object from the Amazon Ads API.
+ * @returns {number} The budget amount, or 0 if not found.
+ */
+const getBudgetAmount = (campaign) => {
+    if (!campaign) return 0;
+
+    // Case 1: Sponsored Display (budget is a top-level number)
+    // e.g., { "campaignId": ..., "budget": 50.00 }
+    if (typeof campaign.budget === 'number') {
+        return campaign.budget;
+    }
+
+    // Case 2: Sponsored Products / Brands (budget is an object containing a budget property)
+    // e.g., { "campaignId": ..., "budget": { "budget": 50.00, "budgetType": "DAILY" } }
+    if (campaign.budget && typeof campaign.budget.budget === 'number') {
+        return campaign.budget.budget;
+    }
+    
+    // Case 3: Sponsored Products v3 (budget is an object containing an amount property)
+    // e.g., { "campaignId": ..., "budget": { "amount": 50.00, "budgetType": "DAILY" } }
+    if (campaign.budget && typeof campaign.budget.amount === 'number') {
+        return campaign.budget.amount;
+    }
+
+    return 0;
+};
+
+
+/**
  * POST /api/amazon/campaigns/list
- * Fetches a list of Sponsored Products campaigns.
- * Now supports filtering by a list of campaign IDs.
+ * Fetches a list of campaigns across all ad types (SP, SB, SD).
  */
 router.post('/campaigns/list', async (req, res) => {
     const { profileId, stateFilter, campaignIdFilter } = req.body;
@@ -32,45 +126,76 @@ router.post('/campaigns/list', async (req, res) => {
     }
 
     try {
-        const requestBody = {
-            maxResults: 1000,
-            stateFilter: { include: stateFilter || ["ENABLED", "PAUSED", "ARCHIVED"] },
-        };
-        // If a list of specific campaign IDs is provided, add it to the request.
-        // This is crucial for fetching metadata for campaigns that have metrics but might be outside the main state filter.
-        if (campaignIdFilter && Array.isArray(campaignIdFilter) && campaignIdFilter.length > 0) {
-            requestBody.campaignIdFilter = { include: campaignIdFilter.map(id => id.toString()) };
-        }
+        const baseStateFilter = stateFilter || ["ENABLED", "PAUSED", "ARCHIVED"];
 
-        let allCampaigns = [];
-        let nextToken = null;
+        // --- Sponsored Products (POST) ---
+        const spBody = {
+            maxResults: 500,
+            stateFilter: { include: baseStateFilter },
+        };
+        if (campaignIdFilter && Array.isArray(campaignIdFilter) && campaignIdFilter.length > 0) {
+            spBody.campaignIdFilter = { include: campaignIdFilter.map(id => id.toString()) };
+        }
+        const spPromise = fetchCampaignsForTypePost(profileId, '/sp/campaigns/list', 
+            { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' }, 
+            spBody
+        );
+
+        // --- Sponsored Brands (POST v4) ---
+        let sbPromise;
+        const sbCampaignIdFilter = campaignIdFilter ? campaignIdFilter.map(id => id.toString()) : [];
+        const sbHeaders = { 'Content-Type': 'application/vnd.sbcampaigns.v4+json', 'Accept': 'application/vnd.sbcampaigns.v4+json' };
         
-        do {
-            if (nextToken) {
-                requestBody.nextToken = nextToken;
+        const sbStateFilterObject = { include: baseStateFilter };
+
+        if (sbCampaignIdFilter.length > 100) {
+            const chunks = [];
+            for (let i = 0; i < sbCampaignIdFilter.length; i += 100) {
+                chunks.push(sbCampaignIdFilter.slice(i, i + 100));
             }
             
-            const data = await amazonAdsApiRequest({
-                method: 'post',
-                url: '/sp/campaigns/list',
-                profileId,
-                data: requestBody,
-                headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
+            const chunkPromises = chunks.map(chunk => {
+                const sbChunkBody = { pageSize: 100, stateFilter: sbStateFilterObject, campaignIdFilter: { include: chunk } };
+                return fetchCampaignsForTypePost(profileId, '/sb/v4/campaigns/list', sbHeaders, sbChunkBody);
             });
+            
+            sbPromise = Promise.all(chunkPromises).then(results => results.flat())
+                .catch(err => { console.error("SB Campaign chunked fetch failed:", err.details || err); return []; });
+        } else {
+            const sbBody = { pageSize: 100, stateFilter: sbStateFilterObject };
+            if (sbCampaignIdFilter.length > 0) sbBody.campaignIdFilter = { include: sbCampaignIdFilter };
+            sbPromise = fetchCampaignsForTypePost(profileId, '/sb/v4/campaigns/list', sbHeaders, sbBody)
+                .catch(err => { console.error("SB Campaign fetch failed:", err.details || err); return []; });
+        }
 
-            if (data.campaigns) {
-                allCampaigns = allCampaigns.concat(data.campaigns);
-            }
-            nextToken = data.nextToken;
-        } while (nextToken);
+        // --- Sponsored Display (GET) ---
+        const getStateFilterForGet = baseStateFilter.map(s => s.toLowerCase()).join(',');
+        const getCampaignIdFilter = (campaignIdFilter && campaignIdFilter.length > 0) ? campaignIdFilter.join(',') : undefined;
+        const sdParams = { stateFilter: getStateFilterForGet, campaignIdFilter: getCampaignIdFilter, count: 100 };
+        const sdPromise = fetchCampaignsForTypeGet(profileId, '/sd/campaigns', { 'Accept': 'application/json' }, sdParams)
+            .catch(err => { console.error("SD Campaign fetch failed:", err.details || err); return []; });
+
+        const [spCampaigns, sbCampaigns, sdCampaigns] = await Promise.all([spPromise, sbPromise, sdPromise]);
+
+        // --- Transform and Merge Results (Portfolio logic removed) ---
+        const transformCampaign = (campaign, type) => {
+            return {
+                campaignId: campaign.campaignId, name: campaign.name, campaignType: type,
+                targetingType: campaign.targetingType || campaign.tactic || 'UNKNOWN',
+                state: (campaign.state || 'archived').toLowerCase(),
+                dailyBudget: getBudgetAmount(campaign), // Budget is now sourced directly
+                startDate: campaign.startDate, endDate: campaign.endDate, bidding: campaign.bidding,
+                portfolioId: campaign.portfolioId,
+            };
+        };
+
+        const allCampaigns = [
+            ...spCampaigns.map(c => transformCampaign(c, 'sponsoredProducts')),
+            ...sbCampaigns.map(c => transformCampaign(c, 'sponsoredBrands')),
+            ...sdCampaigns.map(c => transformCampaign(c, 'sponsoredDisplay')),
+        ];
         
-        const transformedCampaigns = allCampaigns.map(c => ({
-            campaignId: c.campaignId, name: c.name, campaignType: 'sponsoredProducts',
-            targetingType: c.targetingType, state: c.state.toLowerCase(),
-            dailyBudget: c.budget?.budget ?? c.budget?.amount ?? 0,
-            startDate: c.startDate, endDate: c.endDate, bidding: c.bidding,
-        }));
-        res.json({ campaigns: transformedCampaigns });
+        res.json({ campaigns: allCampaigns });
     } catch (error) {
         res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred' });
     }
@@ -299,12 +424,11 @@ router.post('/negativeKeywords', async (req, res) => {
     }
 
     try {
-        // FIX: The Amazon API expects uppercase enum values for matchType, e.g., 'NEGATIVE_EXACT'.
-        // The previous logic and comment were incorrect.
+        // The Amazon API expects uppercase enum values for matchType, e.g., 'NEGATIVE_EXACT'.
         const transformedKeywords = negativeKeywords.map(kw => ({
             ...kw,
             state: 'ENABLED',
-            matchType: kw.matchType // Pass the value directly from the request
+            matchType: kw.matchType
         }));
 
         const data = await amazonAdsApiRequest({

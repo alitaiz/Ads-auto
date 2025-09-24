@@ -11,7 +11,7 @@ export type CampaignState = 'enabled' | 'paused' | 'archived';
 export interface Campaign {
   campaignId: number;
   name: string;
-  campaignType: 'sponsoredProducts'; // Assuming only SP for now
+  campaignType: 'sponsoredProducts' | 'sponsoredBrands' | 'sponsoredDisplay';
   targetingType: 'auto' | 'manual';
   state: CampaignState;
   dailyBudget: number;
@@ -42,7 +42,7 @@ export interface CampaignStreamMetrics {
     campaignId: number;
     impressions: number;
     clicks: number;
-    spend: number;
+    adjustedSpend: number; // Net spend after adjustments
     orders: number;
     sales: number;
 }
@@ -51,7 +51,7 @@ export interface CampaignStreamMetrics {
 export interface CampaignWithMetrics extends Campaign {
     impressions?: number;
     clicks?: number;
-    spend?: number;
+    adjustedSpend?: number;
     sales?: number;
     orders?: number;
     acos?: number;
@@ -63,7 +63,7 @@ export interface CampaignWithMetrics extends Campaign {
 
 export interface SummaryMetricsData {
     clicks: number;
-    spend: number;
+    adjustedSpend: number;
     orders: number;
     sales: number;
     acos: number;
@@ -74,14 +74,14 @@ export interface SummaryMetricsData {
 }
 
 export interface AutomationRuleCondition {
-    metric: 'spend' | 'sales' | 'acos' | 'orders' | 'clicks' | 'impressions';
-    timeWindow: number;
+    metric: 'spend' | 'sales' | 'acos' | 'orders' | 'clicks' | 'impressions' | 'roas' | 'budgetUtilization';
+    timeWindow: number | 'TODAY';
     operator: '>' | '<' | '=';
     value: number;
 }
 
 export interface AutomationRuleAction {
-    type: 'adjustBidPercent' | 'negateSearchTerm';
+    type: 'adjustBidPercent' | 'negateSearchTerm' | 'increaseBudgetPercent' | 'setBudgetAmount';
     value?: number;
     matchType?: 'NEGATIVE_EXACT' | 'NEGATIVE_PHRASE';
     minBid?: number;
@@ -97,14 +97,19 @@ export interface AutomationConditionGroup {
 export interface AutomationRule {
     id: number;
     name: string;
-    rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'CAMPAIGN_SCHEDULING' | 'PRICE_ADJUSTMENT';
+    rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION' | 'CAMPAIGN_SCHEDULING' | 'PRICE_ADJUSTMENT';
+    ad_type?: 'SP' | 'SB' | 'SD';
     config: {
-        // For BID_ADJUSTMENT and SEARCH_TERM_AUTOMATION
+        // A rule is composed of one or more condition groups.
+        // They are evaluated in order ("first match wins").
         conditionGroups?: AutomationConditionGroup[];
-        frequency?: {
+        // Dynamic frequency configuration
+        frequency: {
             unit: 'minutes' | 'hours' | 'days';
             value: number;
+            startTime?: string; // e.g., "01:00" for 1 AM
         };
+        // NEW: Cooldown configuration to prevent rapid-fire actions on the same entity.
         cooldown?: {
             unit: 'minutes' | 'hours' | 'days';
             value: number;
@@ -117,7 +122,7 @@ export interface AutomationRule {
             impressions: { operator: '>', value: number };
             acos: { operator: '>', value: number };
         };
-        // For PRICE_ADJUSTMENT
+         // For PRICE_ADJUSTMENT
         sku?: string;
         priceStep?: number;
         priceLimit?: number;
@@ -129,6 +134,16 @@ export interface AutomationRule {
     is_active: boolean;
     last_run_at?: string | null;
     profile_id: string;
+}
+
+export interface MetricFilters {
+  adjustedSpend: { min?: number; max?: number };
+  sales: { min?: number; max?: number };
+  orders: { min?: number; max?: number };
+  impressions: { min?: number; max?: number };
+  clicks: { min?: number; max?: number };
+  acos: { min?: number; max?: number };
+  roas: { min?: number; max?: number };
 }
 
 

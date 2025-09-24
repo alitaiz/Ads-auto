@@ -16,7 +16,7 @@ router.get('/automation/rules', async (req, res) => {
 
 // POST a new rule
 router.post('/automation/rules', async (req, res) => {
-  const { name, rule_type, config, scope, profile_id, is_active } = req.body;
+  const { name, rule_type, ad_type, config, scope, profile_id, is_active } = req.body;
 
   if (!name || !rule_type || !config || !scope || !profile_id) {
     return res.status(400).json({ error: 'Missing required fields for automation rule.' });
@@ -24,10 +24,10 @@ router.post('/automation/rules', async (req, res) => {
 
   try {
     const { rows } = await pool.query(
-      `INSERT INTO automation_rules (name, rule_type, config, scope, profile_id, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO automation_rules (name, rule_type, ad_type, config, scope, profile_id, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [name, rule_type, config, scope, profile_id, is_active ?? true]
+      [name, rule_type, ad_type || 'SP', config, scope, profile_id, is_active ?? true]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -142,10 +142,17 @@ router.get('/automation/logs', async (req, res) => {
                     summary = summaryParts.length > 0 ? summaryParts.join(' and ') + '.' : 'No changes were made for this campaign.';
                 }
 
+                // FIX: Construct a new details object that preserves the data_date_range
+                // while also providing the campaign-specific actions.
+                const newDetails = {
+                    ...campaignActions, // This has 'changes', 'newNegatives', etc.
+                    data_date_range: log.details.data_date_range // Add the date range back in
+                };
+
                 return {
                     ...log,
                     summary,
-                    details: campaignActions 
+                    details: newDetails // Use the newly constructed, complete details object
                 };
             }
             return null;

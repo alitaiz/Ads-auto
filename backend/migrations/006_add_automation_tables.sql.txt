@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS automation_rules (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     rule_type VARCHAR(50) NOT NULL, -- e.g., 'BID_ADJUSTMENT', 'SEARCH_TERM_AUTOMATION'
+    ad_type VARCHAR(10) NOT NULL DEFAULT 'SP', -- NEW: 'SP', 'SB', 'SD'
     
     -- Config contains all specific parameters for the rule, making the schema flexible.
     -- This now ALSO includes the frequency/schedule for the rule.
@@ -54,6 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_automation_throttle_expires ON automation_action_
 
 -- Index for performance
 CREATE INDEX IF NOT EXISTS idx_automation_rules_type ON automation_rules(rule_type);
+CREATE INDEX IF NOT EXISTS idx_automation_rules_ad_type ON automation_rules(ad_type);
 CREATE INDEX IF NOT EXISTS idx_automation_rules_active ON automation_rules(is_active);
 CREATE INDEX IF NOT EXISTS idx_automation_logs_rule_id ON automation_logs(rule_id);
 CREATE INDEX IF NOT EXISTS idx_automation_logs_run_at ON automation_logs(run_at);

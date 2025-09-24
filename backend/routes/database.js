@@ -148,6 +148,12 @@ router.post('/database/check-missing-dates', async (req, res) => {
         case 'searchTermReport':
             tableName = 'sponsored_products_search_term_report';
             break;
+        case 'sbSearchTermReport':
+             tableName = 'sponsored_brands_search_term_report';
+             break;
+        case 'sdTargetingReport':
+             tableName = 'sponsored_display_targeting_report';
+             break;
         case 'salesTrafficReport':
             tableName = 'sales_and_traffic_by_date'; // Use the smaller daily table for checking
             break;
@@ -186,6 +192,12 @@ router.post('/database/fetch-missing-day', async (req, res) => {
         if (source === 'searchTermReport') {
             await fetchSpSearchTermForDay(date);
             resultMessage = `Successfully fetched SP Search Term report for ${date}.`;
+        } else if (source === 'sbSearchTermReport') {
+            await fetchSbSearchTermForDay(date);
+            resultMessage = `Successfully fetched SB Search Term report for ${date}.`;
+        } else if (source === 'sdTargetingReport') {
+            await fetchSdTargetingForDay(date);
+            resultMessage = `Successfully fetched SD Targeting report for ${date}.`;
         } else if (source === 'salesTrafficReport') {
             await fetchSalesTrafficForDay(date);
             resultMessage = `Successfully fetched Sales & Traffic report for ${date}.`;
@@ -251,8 +263,170 @@ async function fetchSpSearchTermForDay(dateStr) {
     try {
         await client.query('BEGIN');
         for (const item of reportData) {
-            const query = `INSERT INTO sponsored_products_search_term_report (report_date, campaign_id, campaign_name, ad_group_id, ad_group_name, targeting, match_type, customer_search_term, impressions, clicks, cost_per_click, spend, seven_day_total_sales, seven_day_acos, seven_day_roas, seven_day_total_orders, seven_day_total_units, seven_day_advertised_sku_sales, seven_day_advertised_sku_units, seven_day_other_sku_sales, seven_day_other_sku_units, asin) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) ON CONFLICT (report_date, campaign_id, ad_group_id, customer_search_term, targeting) DO NOTHING;`;
+            const query = `INSERT INTO sponsored_products_search_term_report (report_date, campaign_id, campaign_name, ad_group_id, ad_group_name, targeting, match_type, customer_search_term, impressions, clicks, cost_per_click, spend, sales_7d, acos_clicks_7d, roas_clicks_7d, purchases_7d, units_sold_clicks_7d, attributed_sales_same_sku_7d, units_sold_same_sku_7d, sales_other_sku_7d, units_sold_other_sku_7d, asin) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) ON CONFLICT (report_date, campaign_id, ad_group_id, customer_search_term, targeting) DO NOTHING;`;
             const values = [item.date, item.campaignId, item.campaignName, item.adGroupId, item.adGroupName, item.targeting, item.matchType, item.searchTerm, item.impressions, item.clicks, item.costPerClick, item.cost, item.sales7d, item.acosClicks7d, item.roasClicks7d, item.purchases7d, item.unitsSoldClicks7d, item.attributedSalesSameSku7d, item.unitsSoldSameSku7d, item.salesOtherSku7d, item.unitsSoldOtherSku7d, extractAsinFromName(item.campaignName)];
+            await client.query(query, values);
+        }
+        await client.query('COMMIT');
+    } catch (e) {
+        await client.query('ROLLBACK'); throw e;
+    } finally {
+        client.release();
+    }
+}
+
+// Logic for SB Search Term Report
+async function fetchSbSearchTermForDay(dateStr) {
+    const { ADS_API_CLIENT_ID, ADS_API_PROFILE_ID } = process.env;
+    const accessToken = await getAdsApiAccessToken();
+
+    // 1. Create Report
+    const sbColumns = [
+        "date", "campaignName", "campaignId", "campaignStatus", "campaignBudgetType", "campaignBudgetAmount",
+        "adGroupName", "adGroupId", "searchTerm", "keywordId", "keywordText", "matchType",
+        "impressions", "clicks", "cost", "costType", "purchases", "sales", "unitsSold"
+    ];
+    const reportRequestBody = {
+        name: `SB Search Term Report for ${dateStr} (On-Demand)`,
+        startDate: dateStr,
+        endDate: dateStr,
+        configuration: {
+            adProduct: "SPONSORED_BRANDS",
+            groupBy: ["searchTerm"],
+            columns: sbColumns,
+            reportTypeId: 'sbSearchTerm',
+            timeUnit: "DAILY",
+            format: "GZIP_JSON"
+        }
+    };
+    const createResponse = await fetch(`https://advertising-api.amazon.com/reporting/reports`, {
+        method: 'POST',
+        headers: { 'Amazon-Advertising-API-ClientId': ADS_API_CLIENT_ID, 'Authorization': `Bearer ${accessToken}`, 'Amazon-Advertising-API-Scope': ADS_API_PROFILE_ID, 'Content-Type': 'application/vnd.createasyncreportrequest.v3+json' },
+        body: JSON.stringify(reportRequestBody),
+    });
+    const createData = await createResponse.json();
+    if (!createResponse.ok) throw new Error(`Ads API Error (Create SB Report): ${JSON.stringify(createData)}`);
+    const { reportId } = createData;
+
+    // 2. Poll for Report
+    let reportUrl = null;
+    for (let i = 0; i < 60; i++) { // Poll for up to 30 mins
+        await new Promise(resolve => setTimeout(resolve, 30000));
+        const pollResponse = await fetch(`https://advertising-api.amazon.com/reporting/reports/${reportId}`, { headers: { 'Amazon-Advertising-API-ClientId': ADS_API_CLIENT_ID, 'Authorization': `Bearer ${accessToken}`, 'Amazon-Advertising-API-Scope': ADS_API_PROFILE_ID } });
+        const pollData = await pollResponse.json();
+        if (pollData.status === 'COMPLETED') { reportUrl = pollData.url; break; }
+        if (pollData.status === 'FAILURE') throw new Error(`Ads API Report Failed: ${pollData.failureReason}`);
+    }
+    if (!reportUrl) throw new Error('SB Report polling timed out.');
+
+    // 3. Download, Parse, and Save
+    const fileResponse = await fetch(reportUrl);
+    const compressedBuffer = await fileResponse.arrayBuffer();
+    const decompressedData = zlib.gunzipSync(Buffer.from(compressedBuffer)).toString('utf-8');
+    const reportData = JSON.parse(decompressedData);
+    
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const query = `
+            INSERT INTO sponsored_brands_search_term_report (
+                report_date, campaign_name, campaign_id, ad_group_name, ad_group_id,
+                customer_search_term, keyword_id, keyword_text, match_type,
+                impressions, clicks, cost, purchases, sales, units_sold, asin
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+            )
+            ON CONFLICT (report_date, campaign_id, ad_group_id, keyword_id, customer_search_term) DO NOTHING;
+        `;
+        for (const item of reportData) {
+            const values = [
+                item.date, item.campaignName, item.campaignId, item.adGroupName, item.adGroupId,
+                item.searchTerm, item.keywordId, item.keywordText, item.matchType,
+                item.impressions, item.clicks, item.cost, item.purchases, item.sales, item.unitsSold,
+                item.advertisedAsin
+            ];
+            await client.query(query, values);
+        }
+        await client.query('COMMIT');
+    } catch (e) {
+        await client.query('ROLLBACK'); throw e;
+    } finally {
+        client.release();
+    }
+}
+
+// Logic for SD Targeting Report
+async function fetchSdTargetingForDay(dateStr) {
+    const { ADS_API_CLIENT_ID, ADS_API_PROFILE_ID } = process.env;
+    const accessToken = await getAdsApiAccessToken();
+
+    // 1. Create Report
+    const sdColumns = [
+        "date", "campaignName", "campaignId", "adGroupName", "adGroupId",
+        "targetingId", "targetingExpression", "targetingText",
+        "impressions", "clicks", "cost",
+        "purchases", "sales", "unitsSold"
+    ];
+    const reportRequestBody = {
+        name: `SD Targeting Report for ${dateStr} (On-Demand)`,
+        startDate: dateStr,
+        endDate: dateStr,
+        configuration: {
+            adProduct: "SPONSORED_DISPLAY",
+            groupBy: ["targeting"],
+            columns: sdColumns,
+            reportTypeId: 'sdTargeting',
+            timeUnit: "DAILY",
+            format: "GZIP_JSON"
+        }
+    };
+    const createResponse = await fetch(`https://advertising-api.amazon.com/reporting/reports`, {
+        method: 'POST',
+        headers: { 'Amazon-Advertising-API-ClientId': ADS_API_CLIENT_ID, 'Authorization': `Bearer ${accessToken}`, 'Amazon-Advertising-API-Scope': ADS_API_PROFILE_ID, 'Content-Type': 'application/vnd.createasyncreportrequest.v3+json' },
+        body: JSON.stringify(reportRequestBody),
+    });
+    const createData = await createResponse.json();
+    if (!createResponse.ok) throw new Error(`Ads API Error (Create SD Report): ${JSON.stringify(createData)}`);
+    const { reportId } = createData;
+
+    // 2. Poll for Report
+    let reportUrl = null;
+    for (let i = 0; i < 60; i++) { // Poll for up to 30 mins
+        await new Promise(resolve => setTimeout(resolve, 30000));
+        const pollResponse = await fetch(`https://advertising-api.amazon.com/reporting/reports/${reportId}`, { headers: { 'Amazon-Advertising-API-ClientId': ADS_API_CLIENT_ID, 'Authorization': `Bearer ${accessToken}`, 'Amazon-Advertising-API-Scope': ADS_API_PROFILE_ID } });
+        const pollData = await pollResponse.json();
+        if (pollData.status === 'COMPLETED') { reportUrl = pollData.url; break; }
+        if (pollData.status === 'FAILURE') throw new Error(`Ads API Report Failed: ${pollData.failureReason}`);
+    }
+    if (!reportUrl) throw new Error('SD Report polling timed out.');
+
+    // 3. Download, Parse, and Save
+    const fileResponse = await fetch(reportUrl);
+    const compressedBuffer = await fileResponse.arrayBuffer();
+    const decompressedData = zlib.gunzipSync(Buffer.from(compressedBuffer)).toString('utf-8');
+    const reportData = JSON.parse(decompressedData);
+    
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const query = `
+            INSERT INTO sponsored_display_targeting_report (
+                report_date, campaign_name, campaign_id, ad_group_name, ad_group_id,
+                target_id, targeting_expression, targeting_text,
+                impressions, clicks, cost, purchases, sales, units_sold, asin
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+            )
+            ON CONFLICT (report_date, campaign_id, ad_group_id, target_id) DO NOTHING;
+        `;
+        const extractAsinFromName = (name) => name?.match(/(B0[A-Z0-9]{8})/)?.[0] || null;
+        for (const item of reportData) {
+            const values = [
+                item.date, item.campaignName, item.campaignId, item.adGroupName, item.adGroupId,
+                item.targetingId, item.targetingExpression, item.targetingText,
+                item.impressions, item.clicks, item.cost, item.purchases, item.sales, item.unitsSold,
+                extractAsinFromName(item.campaignName)
+            ];
             await client.query(query, values);
         }
         await client.query('COMMIT');

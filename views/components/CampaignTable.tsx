@@ -328,7 +328,8 @@ export function CampaignTable({
                         <SortableHeader label="Campaign Name" sortKey="name" sortConfig={sortConfig} onRequestSort={onRequestSort} />
                         <SortableHeader label="Status" sortKey="state" sortConfig={sortConfig} onRequestSort={onRequestSort} />
                         <SortableHeader label="Daily Budget" sortKey="dailyBudget" sortConfig={sortConfig} onRequestSort={onRequestSort} />
-                        <SortableHeader label="Spend" sortKey="spend" sortConfig={sortConfig} onRequestSort={onRequestSort} />
+                        {/* FIX: Changed sortKey from "spend" to "adjustedSpend" to match CampaignWithMetrics type. */}
+                        <SortableHeader label="Spend" sortKey="adjustedSpend" sortConfig={sortConfig} onRequestSort={onRequestSort} />
                         <SortableHeader label="Sales" sortKey="sales" sortConfig={sortConfig} onRequestSort={onRequestSort} />
                         <SortableHeader label="Orders" sortKey="orders" sortConfig={sortConfig} onRequestSort={onRequestSort} />
                         <SortableHeader label="Impressions" sortKey="impressions" sortConfig={sortConfig} onRequestSort={onRequestSort} />
@@ -374,7 +375,8 @@ export function CampaignTable({
                                         <input type="number" style={styles.input} value={tempValue} onChange={(e) => setTempValue(e.target.value)} onBlur={() => handleUpdate(campaign.campaignId)} onKeyDown={(e) => handleKeyDown(e, campaign.campaignId)} autoFocus />
                                     ) : formatPrice(campaign.dailyBudget)}
                                 </td>
-                                <td style={styles.td}>{formatPrice(campaign.spend)}</td>
+                                {/* FIX: Changed property from campaign.spend to campaign.adjustedSpend to match CampaignWithMetrics type. */}
+                                <td style={styles.td}>{formatPrice(campaign.adjustedSpend)}</td>
                                 <td style={styles.td}>{formatPrice(campaign.sales)}</td>
                                 <td style={styles.td}>{formatNumber(campaign.orders)}</td>
                                 <td style={styles.td}>{formatNumber(campaign.impressions)}</td>

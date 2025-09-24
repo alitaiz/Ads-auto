@@ -145,35 +145,52 @@ router.get('/stream/campaign-metrics', async (req, res) => {
     const reportingTimezone = 'America/Los_Angeles';
 
     try {
+        // This query now handles all ad types (SP, SB, SD) and different JSON key casings (snake_case vs camelCase).
         const query = `
-            WITH traffic_data AS (
+            WITH all_events AS (
                 SELECT
-                    (event_data->>'campaign_id') as campaign_id_text,
+                    -- Normalize campaign ID from different possible keys
+                    COALESCE(event_data->>'campaign_id', event_data->>'campaignId') as campaign_id_text,
+                    -- Normalize timestamp from different possible keys
+                    COALESCE(event_data->>'time_window_start', event_data->>'timeWindowStart') as time_window_start_text,
+                    event_type,
+                    event_data
+                FROM raw_stream_events
+                WHERE event_type IN (
+                    'sp-traffic', 'sp-conversion',
+                    'sb-traffic', 'sb-conversion',
+                    'sd-traffic', 'sd-conversion'
+                )
+            ),
+            traffic_data AS (
+                SELECT
+                    campaign_id_text,
                     COALESCE(SUM((event_data->>'impressions')::bigint), 0) as impressions,
                     COALESCE(SUM((event_data->>'clicks')::bigint), 0) as clicks,
-                    COALESCE(SUM((event_data->>'cost')::numeric), 0.00) as spend
-                FROM raw_stream_events
-                WHERE event_type = 'sp-traffic' 
-                  AND (event_data->>'time_window_start')::timestamptz >= (($1)::timestamp AT TIME ZONE '${reportingTimezone}') 
-                  AND (event_data->>'time_window_start')::timestamptz < ((($2)::date + interval '1 day')::timestamp AT TIME ZONE '${reportingTimezone}')
+                    COALESCE(SUM((event_data->>'cost')::numeric), 0.00) as adjusted_spend
+                FROM all_events
+                WHERE event_type IN ('sp-traffic', 'sb-traffic', 'sd-traffic')
+                  AND (time_window_start_text)::timestamptz >= (($1)::timestamp AT TIME ZONE '${reportingTimezone}') 
+                  AND (time_window_start_text)::timestamptz < ((($2)::date + interval '1 day')::timestamp AT TIME ZONE '${reportingTimezone}')
                 GROUP BY 1
             ),
             conversion_data AS (
                 SELECT
-                    (event_data->>'campaign_id') as campaign_id_text,
-                    COALESCE(SUM((event_data->>'attributed_conversions_1d')::bigint), 0) as orders,
-                    COALESCE(SUM((event_data->>'attributed_sales_1d')::numeric), 0.00) as sales
-                FROM raw_stream_events
-                WHERE event_type = 'sp-conversion'
-                  AND (event_data->>'time_window_start')::timestamptz >= (($1)::timestamp AT TIME ZONE '${reportingTimezone}') 
-                  AND (event_data->>'time_window_start')::timestamptz < ((($2)::date + interval '1 day')::timestamp AT TIME ZONE '${reportingTimezone}')
+                    campaign_id_text,
+                    -- Use the most common keys for orders and sales, defaulting to 0
+                    COALESCE(SUM(COALESCE((event_data->>'attributed_conversions_1d')::bigint, (event_data->>'attributedConversions1d')::bigint, (event_data->>'purchases')::bigint)), 0) as orders,
+                    COALESCE(SUM(COALESCE((event_data->>'attributed_sales_1d')::numeric, (event_data->>'attributedSales1d')::numeric, (event_data->>'sales')::numeric)), 0.00) as sales
+                FROM all_events
+                WHERE event_type IN ('sp-conversion', 'sb-conversion', 'sd-conversion')
+                  AND (time_window_start_text)::timestamptz >= (($1)::timestamp AT TIME ZONE '${reportingTimezone}') 
+                  AND (time_window_start_text)::timestamptz < ((($2)::date + interval '1 day')::timestamp AT TIME ZONE '${reportingTimezone}')
                 GROUP BY 1
             )
             SELECT
                 COALESCE(t.campaign_id_text, c.campaign_id_text) as "campaignId",
                 COALESCE(t.impressions, 0) as impressions,
                 COALESCE(t.clicks, 0) as clicks,
-                COALESCE(t.spend, 0.00)::float as spend,
+                COALESCE(t.adjusted_spend, 0.00)::float as "adjustedSpend",
                 COALESCE(c.orders, 0) as orders,
                 COALESCE(c.sales, 0.00)::float as sales
             FROM traffic_data t
@@ -185,17 +202,16 @@ router.get('/stream/campaign-metrics', async (req, res) => {
         
         const metrics = result.rows
             .map(row => {
-                if (!row.campaignId) return null;
-                const campaignIdNumber = Number(row.campaignId);
-                if (!campaignIdNumber || isNaN(campaignIdNumber)) {
-                    console.warn(`[Stream Metrics] Filtering out invalid campaign ID from DB: ${row.campaignId}`);
+                const campaignIdStr = row.campaignId;
+                if (!campaignIdStr) {
+                    console.warn(`[Stream Metrics] Filtering out null/empty campaign ID from DB.`);
                     return null;
                 }
                 return {
-                    campaignId: campaignIdNumber,
+                    campaignId: Number(campaignIdStr),
                     impressions: parseInt(row.impressions || '0', 10),
                     clicks: parseInt(row.clicks || '0', 10),
-                    spend: parseFloat(row.spend || '0'),
+                    adjustedSpend: parseFloat(row.adjustedSpend || '0'),
                     orders: parseInt(row.orders || '0', 10),
                     sales: parseFloat(row.sales || '0'),
                 };

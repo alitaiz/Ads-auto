@@ -26,6 +26,11 @@ const styles: { [key: string]: React.CSSProperties } = {
     fontSize: '0.9rem',
     color: '#666',
     margin: 0,
+  },
+  secondaryMetricValue: {
+      fontSize: '0.9rem',
+      color: '#666',
+      margin: '5px 0 0 0',
   }
 };
 
@@ -48,7 +53,7 @@ export function SummaryMetrics({ metrics, loading }: SummaryMetricsProps) {
   return (
     <div style={styles.container}>
       <div style={styles.metricCard}>
-        <p style={styles.metricValue}>{formatPrice(metrics.spend)}</p>
+        <p style={styles.metricValue}>{formatPrice(metrics.adjustedSpend)}</p>
         <p style={styles.metricLabel}>Spend</p>
       </div>
       <div style={styles.metricCard}>

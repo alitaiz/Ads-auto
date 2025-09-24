@@ -10,6 +10,7 @@ import ppcManagementRoutes from './routes/ppcManagement.js';
 import salesAndTrafficRoutes from './routes/salesAndTraffic.js';
 import databaseRoutes from './routes/database.js'; // Replaced eventsRoutes
 import automationRoutes from './routes/automation.js';
+import aiRoutes from './routes/ai.js';
 import { startRulesEngine } from './services/rulesEngine.js';
 
 const app = express();
@@ -31,6 +32,7 @@ app.use('/api', ppcManagementRoutes);
 app.use('/api', salesAndTrafficRoutes);
 app.use('/api', databaseRoutes); // Use the new database router
 app.use('/api', automationRoutes);
+app.use('/api', aiRoutes);
 
 // --- Root Endpoint for health checks ---
 app.get('/', (req, res) => {

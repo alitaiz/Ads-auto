@@ -74,6 +74,7 @@ async function spApiRequest({ method, url, data, params }) {
 
 /**
  * Fetches listing information for a given SKU, including sellerId and current price.
+ * This function has been made more robust by checking multiple locations for the price.
  * @param {string} sku The Seller SKU of the product.
  * @returns {Promise<{price: number | null, sellerId: string | null}>}
  */
@@ -94,11 +95,19 @@ export async function getListingInfoBySku(sku) {
         }
     });
     
-    // The price is often in the 'summaries' part for purchasable offers.
-    const priceFromSummary = listingData?.summaries?.[0]?.purchasableOffer?.ourPrice?.[0]?.schedule?.[0]?.valueWithTax;
+    // Attempt 1: Price from 'summaries' (camelCase) - most reliable for active offers
+    let price = listingData?.summaries?.[0]?.purchasableOffer?.ourPrice?.[0]?.schedule?.[0]?.valueWithTax;
+
+    // Attempt 2: If summary price is not found, try 'attributes' (snake_case) as a fallback
+    if (typeof price !== 'number') {
+        const purchasableOffer = listingData?.attributes?.purchasable_offer;
+        if (purchasableOffer && Array.isArray(purchasableOffer) && purchasableOffer.length > 0) {
+            price = purchasableOffer[0]?.our_price?.[0]?.schedule?.[0]?.value_with_tax;
+        }
+    }
 
     return { 
-        price: typeof priceFromSummary === 'number' ? priceFromSummary : null, 
+        price: typeof price === 'number' ? price : null, 
         sellerId
     };
 }

@@ -25,28 +25,40 @@ export const evaluatePriceAdjustmentRule = async (rule) => {
                 continue;
             }
 
-            // Ensure priceStep is treated as a number
             const step = Number(priceStep);
+            const limit = Number(priceLimit);
+
             if (isNaN(step)) {
                  errors.push({ sku, reason: `Invalid priceStep: "${priceStep}".` });
                  continue;
             }
-
-            let newPrice = price + step;
-            newPrice = parseFloat(newPrice.toFixed(2)); // Round to 2 decimal places
-
-            // Apply the max price limit
-            if (typeof priceLimit === 'number') {
-                newPrice = Math.min(newPrice, priceLimit);
+             if (isNaN(limit)) {
+                 errors.push({ sku, reason: `Invalid priceLimit: "${priceLimit}".` });
+                 continue;
             }
 
-            // Ensure price is valid and has changed
+            let newPrice;
+            const potentialPrice = price + step;
+
+            // NEW LOGIC: If the potential price hits or exceeds the limit,
+            // reset it to the current price minus 0.5. Otherwise, use the potential price.
+            if (potentialPrice >= limit) {
+                newPrice = price - 0.5;
+                console.log(`[Price Evaluator] SKU ${sku} potential price ${potentialPrice.toFixed(2)} hit limit of ${limit}. Resetting price from ${price} to ${newPrice.toFixed(2)}.`);
+            } else {
+                newPrice = potentialPrice;
+            }
+            
+            // Round to 2 decimal places to handle floating point inaccuracies.
+            newPrice = parseFloat(newPrice.toFixed(2));
+
+            // Update only if the price has actually changed and is a valid positive number.
             if (newPrice > 0 && newPrice !== price) {
                 console.log(`[Price Evaluator] Updating SKU ${sku}: ${price} -> ${newPrice}`);
                 await updatePrice(sku, newPrice, sellerId);
                 changes.push({ sku, oldPrice: price, newPrice });
             } else {
-                 console.log(`[Price Evaluator] No price change needed for SKU ${sku}. Current: ${price}, New: ${newPrice}`);
+                 console.log(`[Price Evaluator] No price change needed for SKU ${sku}. Current: ${price}, Calculated New: ${newPrice}`);
             }
              // Add a small delay between API calls to avoid throttling
             await new Promise(resolve => setTimeout(resolve, 1500));

@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { AutomationRule, AutomationRuleCondition, AutomationConditionGroup, AutomationRuleAction } from '../types';
 import { RuleGuideContent } from './components/RuleGuideContent';
+import { AIRuleSuggester } from './components/AIRuleSuggester';
 
 const styles: { [key: string]: React.CSSProperties } = {
   container: { maxWidth: '1200px', margin: '0 auto', padding: '20px' },
@@ -32,6 +33,7 @@ const styles: { [key: string]: React.CSSProperties } = {
   formGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
   label: { fontWeight: 500, fontSize: '0.9rem', color: '#555' },
   input: { padding: '10px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '1rem', width: '100%' },
+  textarea: { padding: '10px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '1rem', width: '100%', minHeight: '120px', resize: 'vertical' },
   modalFooter: { display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 'auto', paddingTop: '20px', gap: '10px' },
   activeCheckboxContainer: { display: 'flex', alignItems: 'center', gap: '10px', marginRight: 'auto' },
   logTable: { width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' },
@@ -119,6 +121,20 @@ const getDefaultRule = (ruleType: AutomationRule['rule_type'], adType: 'SP' | 'S
                 },
                 scope: { campaignIds: [] }, is_active: true,
             };
+        case 'PRICE_ADJUSTMENT':
+             return {
+                name: '', rule_type: ruleType,
+                config: {
+                    skus: [],
+                    priceStep: 0.50,
+                    priceLimit: 99.99,
+                    runAtTime: '02:00',
+                    frequency: { unit: 'days', value: 1 }, // Implicitly daily
+                    cooldown: { unit: 'hours', value: 0 }
+                },
+                scope: {}, // Scope is SKU based, not campaign based
+                is_active: true,
+            };
         case 'BID_ADJUSTMENT':
         default:
              return {
@@ -135,6 +151,8 @@ const TABS = [
     { id: 'SD_BID_ADJUSTMENT', label: 'SD Bid Adjustment', type: 'BID_ADJUSTMENT', adType: 'SD' },
     { id: 'SEARCH_TERM_AUTOMATION', label: 'SP Search Term', type: 'SEARCH_TERM_AUTOMATION', adType: 'SP' },
     { id: 'BUDGET_ACCELERATION', label: 'SP Budget', type: 'BUDGET_ACCELERATION', adType: 'SP' },
+    { id: 'PRICE_ADJUSTMENT', label: 'Change Price', type: 'PRICE_ADJUSTMENT' },
+    { id: 'AI_SUGGESTER', label: 'AI Suggester' },
     { id: 'HISTORY', label: 'History' },
     { id: 'GUIDE', label: 'Guide' },
 ];
@@ -192,6 +210,9 @@ export function AutomationView() {
     delete newRule.last_run_at;
     newRule.name = `${newRule.name} - Copy`;
     newRule.scope = { campaignIds: [] };
+    if (newRule.rule_type === 'PRICE_ADJUSTMENT') {
+        newRule.scope = {};
+    }
     setEditingRule(newRule);
     setIsModalOpen(true);
   };
@@ -239,13 +260,12 @@ export function AutomationView() {
   const activeTab = TABS.find(t => t.id === activeTabId);
   
   const filteredRules = rules.filter(r => {
-    if (!activeTab || r.rule_type !== activeTab.type) return false;
+    if (!activeTab || !('type' in activeTab) || r.rule_type !== activeTab.type) return false;
     // For BID_ADJUSTMENT, we also filter by adType
     if (activeTab.type === 'BID_ADJUSTMENT') {
         // Old rules might not have ad_type, so we default them to 'SP' for filtering
         return (r.ad_type || 'SP') === (activeTab as any).adType;
     }
-    // For other rule types, they are SP-specific for now
     return true;
   });
 
@@ -267,18 +287,19 @@ export function AutomationView() {
         ))}
       </div>
       
-      {activeTab && activeTab.type && (
+      {activeTab && 'type' in activeTab && activeTab.type && (
           <div style={styles.contentHeader}>
               <h2 style={styles.contentTitle}>{activeTab.label} Rules</h2>
               <button style={styles.primaryButton} onClick={() => handleOpenModal()}>+ Create New Rule</button>
           </div>
       )}
 
+      {activeTabId === 'AI_SUGGESTER' && <AIRuleSuggester />}
       {activeTabId === 'HISTORY' && <LogsTab logs={logs} loading={loading.logs} />}
       {activeTabId === 'GUIDE' && <RuleGuideContent />}
-      {activeTab?.type && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} onDuplicate={handleDuplicateRule} />}
+      {activeTab && 'type' in activeTab && activeTab.type && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} onDuplicate={handleDuplicateRule} />}
       
-      {isModalOpen && activeTab?.type && (
+      {isModalOpen && activeTab && 'type' in activeTab && activeTab.type && (
           <RuleBuilderModal 
               rule={editingRule} 
               modalTitle={editingRule ? `Edit ${activeTab.label} Rule` : `Create New ${activeTab.label} Rule`}
@@ -302,12 +323,25 @@ const RulesList = ({ rules, onEdit, onDelete, onDuplicate }: { rules: Automation
                     </label>
                 </div>
                 <div style={styles.ruleDetails}>
-                    <span style={styles.ruleLabel}>Frequency</span>
-                    <span style={styles.ruleValue}>Every {rule.config.frequency?.value || 1} {rule.config.frequency?.unit || 'hour'}(s)</span>
-                    <span style={styles.ruleLabel}>Cooldown</span>
-                    <span style={styles.ruleValue}>{rule.config.cooldown?.value ?? 24} {rule.config.cooldown?.unit || 'hour'}(s)</span>
-                    <span style={styles.ruleLabel}>Last Run</span>
-                    <span style={styles.ruleValue}>{rule.last_run_at ? new Date(rule.last_run_at).toLocaleString() : 'Never'}</span>
+                    {rule.rule_type === 'PRICE_ADJUSTMENT' ? (
+                        <>
+                            <span style={styles.ruleLabel}>Run Time (UTC-7)</span>
+                            <span style={styles.ruleValue}>{rule.config.runAtTime || 'Not set'}</span>
+                            <span style={styles.ruleLabel}>SKUs</span>
+                            <span style={styles.ruleValue}>{(rule.config.skus || []).length} configured</span>
+                            <span style={styles.ruleLabel}>Last Run</span>
+                            <span style={styles.ruleValue}>{rule.last_run_at ? new Date(rule.last_run_at).toLocaleString() : 'Never'}</span>
+                        </>
+                    ) : (
+                        <>
+                            <span style={styles.ruleLabel}>Frequency</span>
+                            <span style={styles.ruleValue}>Every {rule.config.frequency?.value || 1} {rule.config.frequency?.unit || 'hour'}(s)</span>
+                            <span style={styles.ruleLabel}>Cooldown</span>
+                            <span style={styles.ruleValue}>{rule.config.cooldown?.value ?? 24} {rule.config.cooldown?.unit || 'hour'}(s)</span>
+                            <span style={styles.ruleLabel}>Last Run</span>
+                            <span style={styles.ruleValue}>{rule.last_run_at ? new Date(rule.last_run_at).toLocaleString() : 'Never'}</span>
+                        </>
+                    )}
                 </div>
                 <div style={styles.ruleActions}>
                     <button style={styles.button} onClick={() => onEdit(rule)}>Edit</button>
@@ -381,17 +415,14 @@ const LogsTab = ({ logs, loading }: { logs: any[], loading: boolean}) => {
 const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: AutomationRule | null, modalTitle: string, onClose: () => void, onSave: (data: any) => void }) => {
     const [formData, setFormData] = useState<Partial<AutomationRule>>(() => {
         if (rule) return JSON.parse(JSON.stringify(rule));
-        // This case should be handled by the parent, which passes a default rule structure
         return {};
     });
 
     if (!formData || !formData.config) {
-        // Render nothing or a loading/error state if formData is not ready
         return null;
     }
 
-    const { rule_type, ad_type } = formData;
-
+    const { rule_type } = formData;
 
     const handleConfigChange = (field: string, value: any) => {
         setFormData(prev => ({
@@ -436,7 +467,7 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
             else if (rule_type === 'BUDGET_ACCELERATION') newGroup = getDefaultBudgetAccelerationGroup();
             else newGroup = getDefaultBidAdjustmentGroup();
             
-            const newGroups = [...prev.config!.conditionGroups, newGroup];
+            const newGroups = [...(prev.config!.conditionGroups || []), newGroup];
             return { ...prev, config: { ...prev.config!, conditionGroups: newGroups } };
         });
     };
@@ -460,219 +491,190 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
                         <input style={styles.input} value={formData.name} onChange={e => setFormData(p => ({...p, name: e.target.value}))} required />
                     </div>
 
-                     <div style={styles.card}>
-                        <h3 style={styles.cardTitle}>Scheduling &amp; Cooldown</h3>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                                <div style={styles.formGroup}>
-                                    <label style={styles.label}>Frequency</label>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                        <span style={styles.conditionText}>Run every</span>
-                                        <input 
-                                            type="number" 
-                                            style={{...styles.input, width: '80px'}} 
-                                            value={formData.config?.frequency?.value || 1}
-                                            min="1"
-                                            onChange={e => handleConfigChange('frequency', { ...formData.config?.frequency, value: Number(e.target.value) })}
-                                            required
-                                        />
-                                        <select 
-                                            style={{...styles.input, flex: 1}}
-                                            value={formData.config?.frequency?.unit || 'hours'}
-                                            onChange={e => {
-                                                const newUnit = e.target.value as any;
-                                                const currentFrequency = formData.config?.frequency || { value: 1 };
-                                                const newFrequency = { ...currentFrequency, unit: newUnit };
-                                                if (newUnit === 'days' && !(newFrequency as any).startTime) {
-                                                    (newFrequency as any).startTime = '01:00'; // Default start time
-                                                }
-                                                handleConfigChange('frequency', newFrequency);
-                                            }}
-                                        >
-                                            <option value="minutes">Minute(s)</option>
-                                            <option value="hours">Hour(s)</option>
-                                            <option value="days">Day(s)</option>
-                                        </select>
-                                    </div>
+                    {rule_type === 'PRICE_ADJUSTMENT' ? (
+                        <>
+                            <div style={styles.card}>
+                                <h3 style={styles.cardTitle}>SKU & Scheduling</h3>
+                                 <div style={styles.formGroup}>
+                                    <label style={styles.label}>SKUs (one per line)</label>
+                                    <textarea 
+                                        style={styles.textarea} 
+                                        value={(formData.config.skus || []).join('\n')}
+                                        onChange={e => {
+                                            const skus = e.target.value.split('\n').map(s => s.trim()).filter(Boolean);
+                                            handleConfigChange('skus', skus);
+                                        }}
+                                        placeholder="Paste your list of SKUs here..."
+                                        required
+                                    />
                                 </div>
-                                <div style={styles.formGroup}>
-                                    <label style={styles.label}>Action Cooldown</label>
-                                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                        <span style={styles.conditionText}>Wait for</span>
-                                        <input
-                                            type="number"
-                                            style={{...styles.input, width: '80px'}}
-                                            value={formData.config?.cooldown?.value ?? 24}
-                                            min="0"
-                                            onChange={e => handleConfigChange('cooldown', { ...formData.config?.cooldown, value: Number(e.target.value) })}
-                                            required
-                                            disabled={rule_type === 'BUDGET_ACCELERATION'}
-                                        />
-                                        <select
-                                            style={{...styles.input, flex: 1}}
-                                            value={formData.config?.cooldown?.unit || 'hours'}
-                                            onChange={e => handleConfigChange('cooldown', { ...formData.config?.cooldown, unit: e.target.value as any })}
-                                            disabled={rule_type === 'BUDGET_ACCELERATION'}
-                                        >
-                                            <option value="minutes">Minute(s)</option>
-                                            <option value="hours">Hour(s)</option>
-                                            <option value="days">Day(s)</option>
-                                        </select>
-                                    </div>
-                                    <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>
-                                        {rule_type === 'BUDGET_ACCELERATION' ? 'Cooldown is handled by the daily reset mechanism.' : 'After acting on an item, wait this long before acting on it again. Set to 0 to disable.'}
-                                    </p>
+                                <div style={{...styles.formGroup, marginTop: '15px'}}>
+                                    <label style={styles.label}>Run At Time (UTC-7)</label>
+                                    <input
+                                        type="time"
+                                        style={{...styles.input, width: '150px'}}
+                                        value={formData.config.runAtTime || '02:00'}
+                                        onChange={e => handleConfigChange('runAtTime', e.target.value)}
+                                        required
+                                    />
                                 </div>
                             </div>
-
-                            {formData.config?.frequency?.unit === 'days' && (
-                                <div style={styles.formGroup}>
-                                    <label style={styles.label}>Scheduled Start Time (UTC-7)</label>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                        <input
-                                            type="time"
-                                            style={{...styles.input, width: '150px'}}
-                                            value={(formData.config.frequency as any).startTime || '01:00'}
-                                            onChange={e => handleConfigChange('frequency', { ...(formData.config.frequency as any), startTime: e.target.value })}
-                                            required
-                                        />
-                                        <p style={{fontSize: '0.8rem', color: '#666', margin: 0}}>Rule will run after this time, every {formData.config.frequency.value} day(s).</p>
+                            <div style={styles.card}>
+                                <h3 style={styles.cardTitle}>Price Adjustment Logic</h3>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                                    <div style={styles.formGroup}>
+                                        <label style={styles.label}>Price Step (+/-)</label>
+                                        <input type="number" step="0.01" style={styles.input} placeholder="e.g., -0.50" value={formData.config.priceStep ?? ''} onChange={e => handleConfigChange('priceStep', Number(e.target.value))} required />
+                                    </div>
+                                    <div style={styles.formGroup}>
+                                        <label style={styles.label}>Max Price Limit</label>
+                                        <input type="number" step="0.01" style={styles.input} placeholder="e.g., 29.99" value={formData.config.priceLimit ?? ''} onChange={e => handleConfigChange('priceLimit', Number(e.target.value))} required />
                                     </div>
                                 </div>
-                            )}
-                        </div>
-                    </div>
-
-
-                    <div style={styles.card}>
-                         <h3 style={styles.cardTitle}>Rule Logic (First Match Wins)</h3>
-                         <p style={{fontSize: '0.8rem', color: '#666', marginTop: '-10px', marginBottom: '15px'}}>Rules are checked from top to bottom. The first group whose conditions are met will trigger its action, and the engine will stop.</p>
-
-                        {formData.config?.conditionGroups.map((group, groupIndex) => (
-                           <React.Fragment key={groupIndex}>
-                                <div style={styles.ifThenBlock}>
-                                    <h4 style={styles.ifBlockHeader}>IF</h4>
-                                    {group.conditions.map((cond, condIndex) => (
-                                        <div key={condIndex} style={styles.conditionRow}>
-                                           <select style={styles.conditionInput} value={cond.metric} onChange={e => handleConditionChange(groupIndex, condIndex, 'metric', e.target.value)}>
-                                                {rule_type === 'BUDGET_ACCELERATION' ? (
-                                                    <>
-                                                        <option value="roas">ROAS</option>
-                                                        <option value="acos">ACoS</option>
-                                                        <option value="sales">Sales</option>
-                                                        <option value="orders">Orders</option>
-                                                        <option value="budgetUtilization">Budget Utilization %</option>
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <option value="spend">Spend</option>
-                                                        <option value="sales">Sales</option>
-                                                        <option value="acos">ACOS</option>
-                                                        <option value="orders">Orders</option>
-                                                        <option value="clicks">Clicks</option>
-                                                        <option value="impressions">Impressions</option>
-                                                    </>
-                                                )}
-                                            </select>
-                                            <span style={styles.conditionText}>in last</span>
-                                            {rule_type === 'BUDGET_ACCELERATION' ? (
-                                                <input style={{...styles.conditionInput, width: '60px', textAlign: 'center'}} value="Today" disabled />
-                                            ) : (
-                                                <input type="number" min="1" max="90" style={{...styles.conditionInput, width: '60px'}} value={cond.timeWindow} onChange={e => handleConditionChange(groupIndex, condIndex, 'timeWindow', Number(e.target.value))} required />
-                                            )}
-                                            <span style={styles.conditionText}>{rule_type !== 'BUDGET_ACCELERATION' && 'days'}</span>
-                                            <select style={{...styles.conditionInput, width: '60px'}} value={cond.operator} onChange={e => handleConditionChange(groupIndex, condIndex, 'operator', e.target.value)}>
-                                                <option value=">">&gt;</option> <option value="<">&lt;</option> <option value="=">=</option>
-                                            </select>
-                                            <input type="number" step="0.01" style={styles.conditionInput} value={cond.value} onChange={e => handleConditionChange(groupIndex, condIndex, 'value', Number(e.target.value))} required />
-                                            <button type="button" onClick={() => removeCondition(groupIndex, condIndex)} style={styles.deleteButton}>&times;</button>
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <div style={styles.card}>
+                                <h3 style={styles.cardTitle}>Scheduling &amp; Cooldown</h3>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                                        <div style={styles.formGroup}>
+                                            <label style={styles.label}>Frequency</label>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                <span>Run every</span>
+                                                <input type="number" min="1" style={{...styles.input, width: '80px'}} value={formData.config.frequency?.value || 1} onChange={e => handleConfigChange('frequency', { ...formData.config.frequency, value: Math.max(1, Number(e.target.value)) })} />
+                                                <select style={{...styles.input, flex: 1}} value={formData.config.frequency?.unit || 'hours'} onChange={e => {
+                                                    const unit = e.target.value as 'minutes' | 'hours' | 'days';
+                                                    const newFreq = { ...formData.config.frequency, unit };
+                                                    if (unit === 'days' && !formData.config.frequency?.startTime) {
+                                                        newFreq.startTime = '01:00'; // Default
+                                                    }
+                                                    handleConfigChange('frequency', newFreq);
+                                                }}>
+                                                    <option value="minutes">Minute(s)</option>
+                                                    <option value="hours">Hour(s)</option>
+                                                    <option value="days">Day(s)</option>
+                                                </select>
+                                            </div>
                                         </div>
-                                    ))}
-                                     <button type="button" onClick={() => addConditionToGroup(groupIndex)} style={{...styles.button, marginTop: '10px'}}>+ Add Condition (AND)</button>
-                                
-                                     <div style={styles.thenBlock}>
-                                        <h4 style={styles.thenHeader}>THEN</h4>
-                                        {rule_type === 'BID_ADJUSTMENT' && (
-                                            <div>
-                                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', alignItems: 'flex-end', marginBottom: '15px' }}>
-                                                    <div style={styles.formGroup}>
-                                                        <label style={styles.label}>Action</label>
-                                                        <select style={styles.input} value={(group.action.value || 0) >= 0 ? 'increase' : 'decrease'} 
-                                                            onChange={e => {
-                                                                const sign = e.target.value === 'increase' ? 1 : -1;
-                                                                handleActionChange(groupIndex, 'value', sign * Math.abs(group.action.value || 0))
-                                                            }}
-                                                        >
-                                                            <option value="decrease">Decrease Bid By</option>
-                                                            <option value="increase">Increase Bid By</option>
-                                                        </select>
-                                                    </div>
-                                                    <div style={styles.formGroup}>
-                                                        <label style={styles.label}>Value (%)</label>
-                                                        <input type="number" style={styles.input} value={Math.abs(group.action.value || 0)} 
-                                                            onChange={e => {
-                                                                const sign = (group.action.value || -1) >= 0 ? 1 : -1;
-                                                                handleActionChange(groupIndex, 'value', sign * Math.abs(Number(e.target.value)))
-                                                            }}
-                                                        />
-                                                    </div>
-                                                    <div style={styles.formGroup}>
-                                                        <label style={styles.label}>Min Bid ($)</label>
-                                                        <input type="number" step="0.01" style={styles.input} placeholder="e.g., 0.10"
-                                                               value={group.action.minBid ?? ''} 
-                                                               onChange={e => handleActionChange(groupIndex, 'minBid', e.target.value ? Number(e.target.value) : undefined)} />
-                                                    </div>
-                                                </div>
-                                                <div style={{ ...styles.formGroup, width: 'calc((100% - 30px) / 3)' }}>
-                                                    <label style={styles.label}>Max Bid ($)</label>
-                                                    <input type="number" step="0.01" style={styles.input} placeholder="e.g., 2.50"
-                                                           value={group.action.maxBid ?? ''} 
-                                                           onChange={e => handleActionChange(groupIndex, 'maxBid', e.target.value ? Number(e.target.value) : undefined)} />
-                                                </div>
+                                        <div style={styles.formGroup}>
+                                            <label style={styles.label}>Action Cooldown</label>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                <span>Wait for</span>
+                                                <input type="number" min="0" style={{...styles.input, width: '80px'}} value={formData.config.cooldown?.value ?? 24} onChange={e => handleConfigChange('cooldown', { ...formData.config.cooldown, value: Number(e.target.value) })}/>
+                                                <select style={{...styles.input, flex: 1}} value={formData.config.cooldown?.unit || 'hours'} onChange={e => handleConfigChange('cooldown', { ...formData.config.cooldown, unit: e.target.value as any })}>
+                                                    <option value="minutes">Minute(s)</option>
+                                                    <option value="hours">Hour(s)</option>
+                                                    <option value="days">Day(s)</option>
+                                                </select>
                                             </div>
-                                        )}
-                                         {rule_type === 'SEARCH_TERM_AUTOMATION' && (
-                                            <div style={styles.thenGrid}>
-                                                 <div style={styles.formGroup}>
-                                                    <label style={styles.label}>Action</label>
-                                                    <input style={styles.input} value="Create Negative Keyword" disabled />
-                                                </div>
-                                                <div style={styles.formGroup}>
-                                                    <label style={styles.label}>Match Type</label>
-                                                    <select style={styles.input} value={group.action.matchType} onChange={e => handleActionChange(groupIndex, 'matchType', e.target.value)}>
-                                                        <option value="NEGATIVE_EXACT">Negative Exact</option>
-                                                        <option value="NEGATIVE_PHRASE">Negative Phrase</option>
-                                                    </select>
-                                                </div>
-                                            </div>
-                                        )}
-                                        {rule_type === 'BUDGET_ACCELERATION' && (
-                                            <>
-                                            <div style={styles.thenGrid}>
-                                                 <div style={styles.formGroup}>
-                                                    <label style={styles.label}>Action</label>
-                                                    <select style={styles.input} value={group.action.type} onChange={e => handleActionChange(groupIndex, 'type', e.target.value)}>
-                                                        <option value="increaseBudgetPercent">Increase Budget By (%)</option>
-                                                        <option value="setBudgetAmount">Set Budget To ($)</option>
-                                                    </select>
-                                                </div>
-                                                <div style={styles.formGroup}>
-                                                    <label style={styles.label}>Value</label>
-                                                    <input type="number" step="0.01" style={styles.input} value={group.action.value} onChange={e => handleActionChange(groupIndex, 'value', Number(e.target.value))} required />
-                                                </div>
-                                            </div>
-                                            <div style={{...styles.infoBox, marginTop: '15px'}}>
-                                                ℹ️ Budgets will be automatically restored to their original values at the end of the day.
-                                            </div>
-                                            </>
-                                        )}
+                                             <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>After acting on an item, wait this long before acting on it again. Set to 0 to disable.</p>
+                                        </div>
                                     </div>
+                                    {formData.config.frequency?.unit === 'days' && (
+                                        <div style={{...styles.formGroup}}>
+                                            <label style={styles.label}>Scheduled Start Time (UTC-7)</label>
+                                            <input type="time" style={{...styles.input, width: '150px'}} value={formData.config.frequency?.startTime || '01:00'} onChange={e => handleConfigChange('frequency', { ...formData.config.frequency, startTime: e.target.value })} required />
+                                        </div>
+                                    )}
                                 </div>
-                               {groupIndex < formData.config!.conditionGroups.length - 1 && <div style={{textAlign: 'center', margin: '15px 0', fontWeight: 'bold', color: '#555'}}>OR</div>}
-                           </React.Fragment>
-                        ))}
-                        <button type="button" onClick={addConditionGroup} style={{...styles.button, marginTop: '15px'}}>+ Add Condition Group (OR)</button>
-                    </div>
+                            </div>
+                            <div style={styles.card}>
+                                <h3 style={styles.cardTitle}>Rule Logic (First Match Wins)</h3>
+                                <p style={{fontSize: '0.8rem', color: '#666', marginTop: '-10px', marginBottom: '15px'}}>Rules are checked from top to bottom. The first group whose conditions are met will trigger its action, and the engine will stop.</p>
+                                {(formData.config?.conditionGroups || []).map((group, groupIndex) => (
+                                   <React.Fragment key={groupIndex}>
+                                        <div style={styles.ifThenBlock}>
+                                            <h4 style={styles.ifBlockHeader}>IF</h4>
+                                            {group.conditions.map((cond, condIndex) => (
+                                                <div key={condIndex} style={styles.conditionRow}>
+                                                   <select style={styles.conditionInput} value={cond.metric} onChange={e => handleConditionChange(groupIndex, condIndex, 'metric', e.target.value)}>
+                                                        {rule_type === 'BUDGET_ACCELERATION' ? (
+                                                            <>
+                                                                <option value="roas">ROAS</option> <option value="acos">ACoS</option> <option value="sales">Sales</option> <option value="orders">Orders</option> <option value="budgetUtilization">Budget Utilization %</option>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <option value="spend">Spend</option> <option value="sales">Sales</option> <option value="acos">ACOS</option> <option value="orders">Orders</option> <option value="clicks">Clicks</option> <option value="impressions">Impressions</option>
+                                                            </>
+                                                        )}
+                                                    </select>
+                                                    <span style={styles.conditionText}>in last</span>
+                                                    {rule_type === 'BUDGET_ACCELERATION' ? <input style={{...styles.conditionInput, width: '60px', textAlign: 'center'}} value="Today" disabled /> : <input type="number" min="1" max="90" style={{...styles.conditionInput, width: '60px'}} value={cond.timeWindow} onChange={e => handleConditionChange(groupIndex, condIndex, 'timeWindow', Number(e.target.value))} required />}
+                                                    <span style={styles.conditionText}>{rule_type !== 'BUDGET_ACCELERATION' && 'days'}</span>
+                                                    <select style={{...styles.conditionInput, width: '60px'}} value={cond.operator} onChange={e => handleConditionChange(groupIndex, condIndex, 'operator', e.target.value)}>
+                                                        <option value=">">&gt;</option> <option value="<">&lt;</option> <option value="=">=</option>
+                                                    </select>
+                                                    <input type="number" step="0.01" style={styles.conditionInput} value={cond.value} onChange={e => handleConditionChange(groupIndex, condIndex, 'value', Number(e.target.value))} required />
+                                                    <button type="button" onClick={() => removeCondition(groupIndex, condIndex)} style={styles.deleteButton}>&times;</button>
+                                                </div>
+                                            ))}
+                                             <button type="button" onClick={() => addConditionToGroup(groupIndex)} style={{...styles.button, marginTop: '10px'}}>+ Add Condition (AND)</button>
+                                             <div style={styles.thenBlock}>
+                                                <h4 style={styles.thenHeader}>THEN</h4>
+                                                {rule_type === 'BID_ADJUSTMENT' && (
+                                                    <div style={styles.thenGrid}>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Action</label>
+                                                            <select style={styles.conditionInput} value={group.action.type} onChange={e => handleActionChange(groupIndex, 'type', e.target.value)}>
+                                                                <option value="adjustBidPercent">Adjust Bid By %</option>
+                                                            </select>
+                                                        </div>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Value (%)</label>
+                                                            <input type="number" style={styles.conditionInput} placeholder="e.g., -10" value={group.action.value ?? ''} onChange={e => handleActionChange(groupIndex, 'value', Number(e.target.value))} />
+                                                        </div>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Min Bid (Optional)</label>
+                                                            <input type="number" step="0.01" style={styles.conditionInput} placeholder="e.g., 0.15" value={group.action.minBid ?? ''} onChange={e => handleActionChange(groupIndex, 'minBid', e.target.value ? Number(e.target.value) : undefined)} />
+                                                        </div>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Max Bid (Optional)</label>
+                                                            <input type="number" step="0.01" style={styles.conditionInput} placeholder="e.g., 2.50" value={group.action.maxBid ?? ''} onChange={e => handleActionChange(groupIndex, 'maxBid', e.target.value ? Number(e.target.value) : undefined)} />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {rule_type === 'SEARCH_TERM_AUTOMATION' && (
+                                                    <div style={styles.thenGrid}>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Action</label>
+                                                            <select style={styles.conditionInput} value={group.action.type} onChange={e => handleActionChange(groupIndex, 'type', e.target.value)}>
+                                                                <option value="negateSearchTerm">Negate Search Term</option>
+                                                            </select>
+                                                        </div>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Match Type</label>
+                                                            <select style={styles.conditionInput} value={group.action.matchType} onChange={e => handleActionChange(groupIndex, 'matchType', e.target.value)}>
+                                                                <option value="NEGATIVE_EXACT">Negative Exact</option>
+                                                                <option value="NEGATIVE_PHRASE">Negative Phrase</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {rule_type === 'BUDGET_ACCELERATION' && (
+                                                    <div style={styles.thenGrid}>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Action</label>
+                                                            <select style={styles.conditionInput} value={group.action.type} onChange={e => handleActionChange(groupIndex, 'type', e.target.value)}>
+                                                                <option value="increaseBudgetPercent">Increase Budget By %</option>
+                                                            </select>
+                                                        </div>
+                                                        <div style={styles.formGroup}>
+                                                            <label style={styles.label}>Value (%)</label>
+                                                            <input type="number" style={styles.conditionInput} placeholder="e.g., 50" value={group.action.value ?? ''} onChange={e => handleActionChange(groupIndex, 'value', Number(e.target.value))} />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                             </div>
+                                        </div>
+                                       {groupIndex < formData.config!.conditionGroups!.length - 1 && <div style={{textAlign: 'center', margin: '15px 0', fontWeight: 'bold', color: '#555'}}>OR</div>}
+                                   </React.Fragment>
+                                ))}
+                                <button type="button" onClick={addConditionGroup} style={{...styles.button, marginTop: '15px'}}>+ Add Condition Group (OR)</button>
+                            </div>
+                        </>
+                    )}
                     
                     <div style={styles.modalFooter}>
                         <div style={styles.activeCheckboxContainer}>

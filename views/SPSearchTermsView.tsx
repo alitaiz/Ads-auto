@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect, useCallback, useContext } from 'react';
-import { SPSearchTermReportData, SPFilterOptions } from '../types';
+import React, { useState, useMemo, useEffect, useCallback, useContext, useRef } from 'react';
+import { SPSearchTermReportData } from '../types';
 import { formatNumber, formatPercent, formatPrice } from '../utils';
 import { DataCacheContext } from '../contexts/DataCacheContext';
 import { DateRangePicker } from './components/DateRangePicker';
@@ -42,7 +42,9 @@ const styles: { [key: string]: React.CSSProperties } = {
     tabButtonActive: { color: 'var(--primary-color)', borderBottom: '3px solid var(--primary-color)', fontWeight: 600 },
     tableContainer: { backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)', overflowX: 'auto' },
     table: { width: '100%', minWidth: '2200px', borderCollapse: 'collapse', tableLayout: 'fixed' },
-    th: { padding: '12px 10px', textAlign: 'left', borderBottom: '2px solid var(--border-color)', backgroundColor: '#f8f9fa', fontWeight: 600, whiteSpace: 'nowrap' },
+    th: { position: 'relative', padding: '12px 10px', textAlign: 'left', borderBottom: '2px solid var(--border-color)', backgroundColor: '#f8f9fa', fontWeight: 600, whiteSpace: 'nowrap', userSelect: 'none' },
+    thContent: { display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' },
+    sortIcon: { fontSize: '0.8em' },
     td: { padding: '10px', borderBottom: '1px solid var(--border-color)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
     nameCell: { display: 'flex', alignItems: 'center', gap: '8px' },
     expandIcon: { cursor: 'pointer', width: '15px', textAlign: 'center', transition: 'transform 0.2s', userSelect: 'none' },
@@ -108,32 +110,41 @@ const styles: { [key: string]: React.CSSProperties } = {
         borderColor: 'var(--border-color)',
         boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
         color: 'var(--primary-color)'
-    }
+    },
+    resizer: {
+        position: 'absolute',
+        right: 0,
+        top: 0,
+        height: '100%',
+        width: '5px',
+        cursor: 'col-resize',
+        zIndex: 1,
+    },
 };
 
 // --- Column Definitions ---
-const columns = [
-    { id: 'name', label: 'Name', width: '350px' },
-    { id: 'asin', label: 'ASIN', width: '200px' },
-    { id: 'status', label: 'Status', width: '120px' },
-    { id: 'costPerOrder', label: 'Cost per order', width: '120px' },
-    { id: 'spend', label: 'Ad spend', width: '100px' },
-    { id: 'clicks', label: 'Clicks', width: '100px' },
-    { id: 'conversion', label: 'Conversion', width: '110px' },
-    { id: 'orders', label: 'Orders', width: '100px' },
-    { id: 'units', label: 'Units', width: '100px' },
-    { id: 'cpc', label: 'CPC', width: '100px' },
-    { id: 'sales', label: 'PPC sales', width: '110px' },
-    { id: 'impressions', label: 'Impressions', width: '110px' },
-    { id: 'sku', label: 'Same SKU/All SKU\'s', width: '150px' },
-    { id: 'acos', label: 'ACOS', width: '100px' },
-    { id: 'profit', label: 'Profit', width: '100px' },
-    { id: 'tos', label: 'Top-of-search impression share', width: '200px' },
-    { id: 'breakEvenAcos', label: 'Break even ACOS', width: '140px' },
-    { id: 'breakEvenBid', label: 'Break Even Bid', width: '130px' },
-    { id: 'dailyBudget', label: 'Daily budget', width: '120px' },
-    { id: 'budgetUtil', label: 'Budget utilization', width: '140px' },
-    { id: 'currentBid', label: 'Current bid', width: '120px' },
+const getColumns = () => [
+    { id: 'name', label: 'Name', width: 350, sortable: true },
+    { id: 'asin', label: 'ASIN', width: 200, sortable: false },
+    { id: 'status', label: 'Status', width: 120, sortable: false },
+    { id: 'costPerOrder', label: 'Cost per order', width: 120, sortable: true },
+    { id: 'spend', label: 'Ad spend', width: 100, sortable: true },
+    { id: 'clicks', label: 'Clicks', width: 100, sortable: true },
+    { id: 'conversion', label: 'Conversion', width: 110, sortable: true },
+    { id: 'orders', label: 'Orders', width: 100, sortable: true },
+    { id: 'units', label: 'Units', width: 100, sortable: true },
+    { id: 'cpc', label: 'CPC', width: 100, sortable: true },
+    { id: 'sales', label: 'PPC sales', width: 110, sortable: true },
+    { id: 'impressions', label: 'Impressions', width: 110, sortable: true },
+    { id: 'sku', label: 'Same SKU/All SKU\'s', width: 150, sortable: false },
+    { id: 'acos', label: 'ACOS', width: 100, sortable: true },
+    { id: 'profit', label: 'Profit', width: 100, sortable: true },
+    { id: 'tos', label: 'Top-of-search impression share', width: 200, sortable: false },
+    { id: 'breakEvenAcos', label: 'Break even ACOS', width: 140, sortable: false },
+    { id: 'breakEvenBid', label: 'Break Even Bid', width: 130, sortable: false },
+    { id: 'dailyBudget', label: 'Daily budget', width: 120, sortable: false },
+    { id: 'budgetUtil', label: 'Budget utilization', width: 140, sortable: false },
+    { id: 'currentBid', label: 'Current bid', width: 120, sortable: false },
 ];
 
 
@@ -178,23 +189,8 @@ const aggregateSearchTerms = (flatData: SPSearchTermReportData[]): TreeNode[] =>
 };
 
 const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLevel): TreeNode[] => {
-    // For the search term and keyword tabs we only need aggregated data,
-    // so avoid building the full campaign → ad group hierarchy which is
-    // expensive for large datasets and previously caused the UI to freeze.
     if (level === 'searchTerms') {
-        const terms = new Map<string, Metrics>();
-        flatData.forEach(row => {
-            const term = row.customerSearchTerm;
-            if (!terms.has(term)) terms.set(term, emptyMetrics());
-            addMetrics(terms.get(term)!, createMetrics(row));
-        });
-        return Array.from(terms.entries()).map(([name, metrics]) => ({
-            id: `st-${name}`,
-            name,
-            type: 'searchTerm',
-            keywordType: 'search term',
-            metrics,
-        }));
+        return aggregateSearchTerms(flatData);
     }
 
     if (level === 'keywords') {
@@ -222,13 +218,10 @@ const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLe
             }
 
             const keywordEntry = keywordMap.get(key)!;
-            const keywordNode = keywordEntry.node;
-            const termMap = keywordEntry.termMap;
+            addMetrics(keywordEntry.node.metrics, createMetrics(row));
 
-            addMetrics(keywordNode.metrics, createMetrics(row));
-
-            if (!termMap.has(row.customerSearchTerm)) {
-                termMap.set(row.customerSearchTerm, {
+            if (!keywordEntry.termMap.has(row.customerSearchTerm)) {
+                keywordEntry.termMap.set(row.customerSearchTerm, {
                     id: `st-${row.customerSearchTerm}-${key}`,
                     name: row.customerSearchTerm,
                     type: 'searchTerm',
@@ -236,8 +229,8 @@ const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLe
                     metrics: emptyMetrics(),
                 });
             }
-            const termNode = termMap.get(row.customerSearchTerm)!;
-            addMetrics(termNode.metrics, createMetrics(row));
+// FIX: The first argument to addMetrics must be of type Metrics. The map returns a TreeNode, so we need to access its `metrics` property.
+            addMetrics(keywordEntry.termMap.get(row.customerSearchTerm)!.metrics, createMetrics(row));
         });
 
         return Array.from(keywordMap.values()).map(({ node, termMap }) => {
@@ -275,7 +268,7 @@ const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLe
             campaignNode.children!.push(adGroupNode);
         }
         addMetrics(adGroupNode.metrics, rowMetrics);
-        adGroupNode.metrics.productCount = (adGroupNode.metrics.productCount || 0) + 1; // Assuming 1 product per row for simplicity
+        adGroupNode.metrics.productCount = (adGroupNode.metrics.productCount || 0) + 1;
 
         let keywordNode = adGroupNode.children!.find(c => c.id === `k-${row.targeting}`);
         if (!keywordNode) {
@@ -286,21 +279,19 @@ const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLe
                 keywordType: 'keyword',
                 matchType: row.matchType,
                 metrics: emptyMetrics(),
-                children: level === 'campaigns' || level === 'adGroups' ? [] : undefined,
+                children: [],
             };
             adGroupNode.children!.push(keywordNode);
         }
         addMetrics(keywordNode.metrics, rowMetrics);
-
-        if (level === 'campaigns' || level === 'adGroups') {
-            keywordNode.children!.push({
-                id: `st-${row.customerSearchTerm}-${row.targeting}`,
-                name: row.customerSearchTerm,
-                type: 'searchTerm',
-                keywordType: 'search term',
-                metrics: rowMetrics,
-            });
-        }
+        
+        keywordNode.children!.push({
+            id: `st-${row.customerSearchTerm}-${row.targeting}`,
+            name: row.customerSearchTerm,
+            type: 'searchTerm',
+            keywordType: 'search term',
+            metrics: rowMetrics,
+        });
     });
 
     switch (level) {
@@ -312,6 +303,27 @@ const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLe
     }
 };
 
+const getSortableValue = (node: TreeNode, key: string): string | number => {
+    const { metrics } = node;
+    const { impressions, clicks, spend, sales, orders, units } = metrics;
+    if (key === 'name') return node.name.toLowerCase();
+    
+    switch (key) {
+        case 'spend': return spend;
+        case 'clicks': return clicks;
+        case 'orders': return orders;
+        case 'units': return units;
+        case 'sales': return sales;
+        case 'impressions': return impressions;
+        case 'cpc': return clicks > 0 ? spend / clicks : 0;
+        case 'acos': return sales > 0 ? spend / sales : (spend > 0 ? Infinity : 0);
+        case 'conversion': return clicks > 0 ? orders / clicks : 0;
+        case 'costPerOrder': return orders > 0 ? spend / orders : (spend > 0 ? Infinity : 0);
+        case 'profit': return sales - spend;
+        default: return 0;
+    }
+};
+
 // --- Recursive Row Component ---
 const TreeNodeRow: React.FC<{
     node: TreeNode;
@@ -320,7 +332,8 @@ const TreeNodeRow: React.FC<{
     onToggle: (id: string) => void;
     selectedIds: Set<string>;
     onSelect: (id: string, checked: boolean) => void;
-}> = ({ node, level, expandedIds, onToggle, selectedIds, onSelect }) => {
+    columns: ReturnType<typeof getColumns>;
+}> = ({ node, level, expandedIds, onToggle, selectedIds, onSelect, columns }) => {
     const isExpanded = expandedIds.has(node.id);
     const hasChildren = node.children && node.children.length > 0;
     
@@ -331,7 +344,7 @@ const TreeNodeRow: React.FC<{
     const costPerOrder = orders > 0 ? spend / orders : 0;
     const profit = sales - spend;
 
-    const renderCell = (columnId: string) => {
+    const renderCellContent = (columnId: string) => {
         switch (columnId) {
             case 'name': 
                 let nameSuffix = '';
@@ -341,14 +354,14 @@ const TreeNodeRow: React.FC<{
                 return (
                 <div style={{ ...styles.nameCell, paddingLeft: `${level * 25}px` }}>
                     <input type="checkbox" checked={selectedIds.has(node.id)} onChange={e => onSelect(node.id, e.target.checked)} />
-                    {hasChildren && (
+                    {hasChildren ? (
                         <span
                             style={{ ...styles.expandIcon, transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
                             onClick={() => onToggle(node.id)}
                         >
                             ►
                         </span>
-                    )}
+                    ) : <span style={{width: '15px'}} />}
                     <span title={node.name}>{node.name}{nameSuffix}</span>
                 </div>
             );
@@ -391,10 +404,14 @@ const TreeNodeRow: React.FC<{
     return (
         <>
             <tr style={{ backgroundColor: level < 2 ? '#fdfdfd' : 'transparent' }}>
-                {columns.map(col => <td key={col.id} style={{ ...styles.td, ...(col.id === 'name' && { fontWeight: 500 }) }} title={node.name}>{renderCell(col.id)}</td>)}
+                {columns.map(col => (
+                    <td key={col.id} style={{ ...styles.td, ...(col.id === 'name' && { fontWeight: 500 }) }} title={node.name}>
+                        {renderCellContent(col.id)}
+                    </td>
+                ))}
             </tr>
             {isExpanded && hasChildren && node.children!.map(child => (
-                <TreeNodeRow key={child.id} node={child} level={level + 1} expandedIds={expandedIds} onToggle={onToggle} selectedIds={selectedIds} onSelect={onSelect} />
+                <TreeNodeRow key={child.id} node={child} level={level + 1} expandedIds={expandedIds} onToggle={onToggle} selectedIds={selectedIds} onSelect={onSelect} columns={columns} />
             ))}
         </>
     );
@@ -406,24 +423,7 @@ export function SPSearchTermsView() {
     const [reportType, setReportType] = useState<ReportType>('SP');
     const [flatData, setFlatData] = useState<SPSearchTermReportData[]>(cache.spSearchTerms.data || []);
     const [viewLevel, setViewLevel] = useState<ViewLevel>('campaigns');
-    const campaignsTree = useMemo(() => buildHierarchyByLevel(flatData, 'campaigns'), [flatData]);
-    const adGroupsTree = useMemo(() => buildHierarchyByLevel(flatData, 'adGroups'), [flatData]);
-    const keywordsTree = useMemo(() => buildHierarchyByLevel(flatData, 'keywords'), [flatData]);
-    const aggregatedSearchTerms = useMemo(() => aggregateSearchTerms(flatData), [flatData]);
-
-    const treeData = useMemo<TreeNode[]>(() => {
-        switch (viewLevel) {
-            case 'adGroups':
-                return adGroupsTree;
-            case 'keywords':
-                return keywordsTree;
-            case 'searchTerms':
-                return aggregatedSearchTerms;
-            case 'campaigns':
-            default:
-                return campaignsTree;
-        }
-    }, [viewLevel, campaignsTree, adGroupsTree, keywordsTree, aggregatedSearchTerms]);
+    
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -434,6 +434,78 @@ export function SPSearchTermsView() {
 
     const [dateRange, setDateRange] = useState(cache.spSearchTerms.filters ? { start: new Date(cache.spSearchTerms.filters.startDate), end: new Date(cache.spSearchTerms.filters.endDate)} : { start: new Date(), end: new Date() });
     const [isDatePickerOpen, setDatePickerOpen] = useState(false);
+
+    // --- Sort & Resize State ---
+    const columns = useMemo(() => getColumns(), []);
+    const initialWidths = useMemo(() => columns.map(c => c.width), [columns]);
+// FIX: The `initialWidths` are already numbers. The `parseInt` call is redundant and causes a type error because it expects a string.
+    const [columnWidths, setColumnWidths] = useState(initialWidths);
+    const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'ascending' | 'descending' }>({ key: 'spend', direction: 'descending' });
+    const tableRef = useRef<HTMLTableElement>(null);
+    const resizingColumnIndex = useRef<number | null>(null);
+    const startX = useRef(0);
+    const startWidth = useRef(0);
+
+    const handleMouseDown = useCallback((index: number, e: React.MouseEvent<HTMLDivElement>) => {
+        resizingColumnIndex.current = index;
+        startX.current = e.clientX;
+        startWidth.current = columnWidths[index];
+    }, [columnWidths]);
+
+    const handleMouseMove = useCallback((e: MouseEvent) => {
+        if (resizingColumnIndex.current === null) return;
+        const deltaX = e.clientX - startX.current;
+        const newWidth = Math.max(startWidth.current + deltaX, 80); // Min width
+        setColumnWidths(prev => {
+            const newWidths = [...prev];
+            newWidths[resizingColumnIndex.current!] = newWidth;
+            return newWidths;
+        });
+    }, []);
+
+    const handleMouseUp = useCallback(() => {
+        resizingColumnIndex.current = null;
+    }, []);
+
+    useEffect(() => {
+        window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('mouseup', handleMouseUp);
+        return () => {
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+        };
+    }, [handleMouseMove, handleMouseUp]);
+
+
+    const treeData = useMemo(() => {
+        switch (viewLevel) {
+            case 'adGroups': return buildHierarchyByLevel(flatData, 'adGroups');
+            case 'keywords': return buildHierarchyByLevel(flatData, 'keywords');
+            case 'searchTerms': return buildHierarchyByLevel(flatData, 'searchTerms');
+            case 'campaigns': default: return buildHierarchyByLevel(flatData, 'campaigns');
+        }
+    }, [viewLevel, flatData]);
+    
+    const sortedTreeData = useMemo(() => {
+        if (!sortConfig.key) return treeData;
+        return [...treeData].sort((a, b) => {
+            const aValue = getSortableValue(a, sortConfig.key);
+            const bValue = getSortableValue(b, sortConfig.key);
+            if (aValue < bValue) return sortConfig.direction === 'ascending' ? -1 : 1;
+            if (aValue > bValue) return sortConfig.direction === 'ascending' ? 1 : -1;
+            return 0;
+        });
+    }, [treeData, sortConfig]);
+
+    const requestSort = (key: string) => {
+        const column = columns.find(c => c.id === key);
+        if (!column || !column.sortable) return;
+        let direction: 'ascending' | 'descending' = 'descending';
+        if (sortConfig.key === key && sortConfig.direction === 'descending') {
+            direction = 'ascending';
+        }
+        setSortConfig({ key, direction });
+    };
 
     const formatDateForQuery = (d: Date) => {
         const year = d.getFullYear();
@@ -446,39 +518,21 @@ export function SPSearchTermsView() {
         const today = new Date();
         const endDate = new Date(today);
         endDate.setDate(today.getDate() - 2);
-
         const startDate = new Date(endDate);
         startDate.setDate(endDate.getDate() - 6);
-
-        const startDateStr = formatDateForQuery(startDate);
-        const endDateStr = formatDateForQuery(endDate);
-        
         const source = type === 'SP' ? 'searchTermReport' : type === 'SB' ? 'sbSearchTermReport' : 'sdTargetingReport';
-
         try {
             const response = await fetch('/api/database/check-missing-dates', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ source, startDate: startDateStr, endDate: endDateStr }),
+                body: JSON.stringify({ source, startDate: formatDateForQuery(startDate), endDate: formatDateForQuery(endDate) }),
             });
-            const data = await response.json();
-            if (response.ok) {
-                setMissingDates(data.missingDates || []);
-                setFetchStatus({});
-            }
-        } catch (err) {
-            console.error("Failed to run data integrity check:", err);
-        }
+            if (response.ok) setMissingDates((await response.json()).missingDates || []);
+        } catch (err) { console.error("Failed to run data integrity check:", err); }
     }, []);
 
-    useEffect(() => {
-        checkDataIntegrity(reportType);
-    }, [reportType, checkDataIntegrity]);
-
-    useEffect(() => {
-        setExpandedIds(new Set());
-        setSelectedIds(new Set());
-    }, [flatData, viewLevel]);
+    useEffect(() => { checkDataIntegrity(reportType); }, [reportType, checkDataIntegrity]);
+    useEffect(() => { setExpandedIds(new Set()); setSelectedIds(new Set()); }, [flatData, viewLevel]);
 
     const handleToggle = (id: string) => setExpandedIds(prev => { const s = new Set(prev); if(s.has(id)) s.delete(id); else s.add(id); return s; });
     const handleSelect = (id: string, checked: boolean) => setSelectedIds(prev => { const s = new Set(prev); if(checked) s.add(id); else s.delete(id); return s; });
@@ -496,7 +550,6 @@ export function SPSearchTermsView() {
         setError(null);
         const startDate = formatDateForQuery(range.start);
         const endDate = formatDateForQuery(range.end);
-
         try {
             const url = `/api/sp-search-terms?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}&reportType=${type}`;
             const response = await fetch(url);
@@ -514,7 +567,7 @@ export function SPSearchTermsView() {
 
     const handleReportTypeChange = (newType: ReportType) => {
         setReportType(newType);
-        setFlatData([]); // Clear old data
+        setFlatData([]);
         handleApply(dateRange, newType);
         checkDataIntegrity(newType);
     };
@@ -526,7 +579,7 @@ export function SPSearchTermsView() {
             start.setDate(end.getDate() - 7);
             handleApply({ start, end }, reportType);
         }
-    }, [handleApply, cache.spSearchTerms.data.length, cache.spSearchTerms.filters, reportType]);
+    }, [handleApply, cache.spSearchTerms, reportType]);
     
     const handleApplyDateRange = (newRange: { start: Date; end: Date }) => {
         setDateRange(newRange);
@@ -539,16 +592,11 @@ export function SPSearchTermsView() {
         const source = reportType === 'SP' ? 'searchTermReport' : reportType === 'SB' ? 'sbSearchTermReport' : 'sdTargetingReport';
         try {
             const response = await fetch('/api/database/fetch-missing-day', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ source, date }),
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source, date }),
             });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error);
+            if (!response.ok) throw new Error((await response.json()).error);
             setFetchStatus(prev => ({ ...prev, [date]: 'success' }));
-            // Refresh main table data in case the fetched day is in the current view
             handleApply(dateRange, reportType);
-             // Remove the date from the missing list upon success
             setMissingDates(prev => prev.filter(d => d !== date));
         } catch (err) {
             setFetchStatus(prev => ({ ...prev, [date]: 'error' }));
@@ -560,29 +608,22 @@ export function SPSearchTermsView() {
         const status = fetchStatus[date] || 'idle';
         let text = 'Fetch';
         let disabled = false;
-
         switch (status) {
             case 'fetching': text = 'Fetching...'; disabled = true; break;
             case 'success': text = 'Success!'; disabled = true; break;
             case 'error': text = 'Error - Retry'; disabled = false; break;
-            default: text = 'Fetch'; disabled = false; break;
         }
-
         return <button style={styles.fetchButton} onClick={() => handleFetchMissingDay(date)} disabled={disabled}>{text}</button>;
     };
 
     const formatDateRangeDisplay = (start: Date, end: Date) => {
         const options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long', year: 'numeric' };
-        const startStr = start.toLocaleDateString('en-US', options);
-        const endStr = end.toLocaleDateString('en-US', options);
-        return startStr === endStr ? startStr : `${startStr} - ${endStr}`;
+        return `${start.toLocaleDateString('en-US', options)} - ${end.toLocaleDateString('en-US', options)}`;
     };
 
     const tabs: {id: ViewLevel, label: string}[] = [
-        {id: 'campaigns', label: 'Campaigns'},
-        {id: 'adGroups', label: 'Ad groups'},
-        {id: 'keywords', label: 'Keywords'},
-        {id: 'searchTerms', label: 'Search terms'},
+        {id: 'campaigns', label: 'Campaigns'}, {id: 'adGroups', label: 'Ad groups'},
+        {id: 'keywords', label: 'Keywords'}, {id: 'searchTerms', label: 'Search terms'},
     ];
     
     return (
@@ -600,7 +641,7 @@ export function SPSearchTermsView() {
             {missingDates.length > 0 && (
                 <div style={styles.integrityCheckContainer}>
                     <h3 style={styles.integrityTitle}>⚠️ Data Integrity Check</h3>
-                    <p>The following dates have missing {reportType === 'SP' ? 'Sponsored Products' : reportType === 'SB' ? 'Sponsored Brands' : 'Sponsored Display'} report data in the last 7 days (ending 2 days ago). You can fetch them individually.</p>
+                    <p>The following dates have missing {reportType} report data in the last 7 days (ending 2 days ago).</p>
                     {missingDates.map(date => (
                         <div key={date} style={styles.missingDateItem}>
                             <span>Missing data for: <strong>{date}</strong></span>
@@ -611,24 +652,15 @@ export function SPSearchTermsView() {
             )}
             
             <div style={styles.reportTypeSelector}>
-                <button 
-                    style={reportType === 'SP' ? {...styles.reportTypeButton, ...styles.reportTypeButtonActive} : styles.reportTypeButton}
-                    onClick={() => handleReportTypeChange('SP')}
-                >
-                    Sponsored Products
-                </button>
-                <button 
-                    style={reportType === 'SB' ? {...styles.reportTypeButton, ...styles.reportTypeButtonActive} : styles.reportTypeButton}
-                    onClick={() => handleReportTypeChange('SB')}
-                >
-                    Sponsored Brands
-                </button>
-                <button 
-                    style={reportType === 'SD' ? {...styles.reportTypeButton, ...styles.reportTypeButtonActive} : styles.reportTypeButton}
-                    onClick={() => handleReportTypeChange('SD')}
-                >
-                    Sponsored Display
-                </button>
+                {(['SP', 'SB', 'SD'] as ReportType[]).map(type => (
+                    <button 
+                        key={type}
+                        style={reportType === type ? {...styles.reportTypeButton, ...styles.reportTypeButtonActive} : styles.reportTypeButton}
+                        onClick={() => handleReportTypeChange(type)}
+                    >
+                        {`Sponsored ${type === 'SP' ? 'Products' : type === 'SB' ? 'Brands' : 'Display'}`}
+                    </button>
+                ))}
             </div>
             <div style={styles.headerTabs}>
                  {tabs.map(tab => (
@@ -642,21 +674,30 @@ export function SPSearchTermsView() {
 
             <div style={styles.tableContainer}>
                 {loading ? <div style={styles.message}>Loading...</div> :
-                 treeData.length === 0 ? <div style={styles.message}>No data found for the selected criteria.</div> :
+                 sortedTreeData.length === 0 ? <div style={styles.message}>No data found for the selected criteria.</div> :
                  (
-                    <table style={styles.table}>
+                    <table style={styles.table} ref={tableRef}>
                         <colgroup>
-                            {columns.map(c => <col key={c.id} style={{width: c.width}} />)}
+                            {columnWidths.map((width, i) => <col key={i} style={{width: `${width}px`}} />)}
                         </colgroup>
                         <thead>
                             <tr>
-                                <th style={{...styles.th, width: '30px'}}><input type="checkbox" onChange={e => handleSelectAll(e.target.checked)} /></th>
-                                {columns.slice(1).map(c => <th key={c.id} style={styles.th}>{c.label}</th>)}
+                                {columns.map((col, i) => (
+                                    <th key={col.id} style={styles.th}>
+                                        <div style={styles.thContent} onClick={() => requestSort(col.id)}>
+                                            {col.label}
+                                            {sortConfig.key === col.id && (
+                                                <span style={styles.sortIcon}>{sortConfig.direction === 'ascending' ? '▲' : '▼'}</span>
+                                            )}
+                                        </div>
+                                        <div style={styles.resizer} onMouseDown={(e) => handleMouseDown(i, e)} />
+                                    </th>
+                                ))}
                             </tr>
                         </thead>
                         <tbody>
-                            {treeData.map(node => (
-                                <TreeNodeRow key={node.id} node={node} level={0} expandedIds={expandedIds} onToggle={handleToggle} selectedIds={selectedIds} onSelect={handleSelect} />
+                            {sortedTreeData.map(node => (
+                                <TreeNodeRow key={node.id} node={node} level={0} expandedIds={expandedIds} onToggle={handleToggle} selectedIds={selectedIds} onSelect={handleSelect} columns={columns} />
                             ))}
                         </tbody>
                     </table>

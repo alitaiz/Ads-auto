@@ -229,7 +229,6 @@ const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLe
                     metrics: emptyMetrics(),
                 });
             }
-// FIX: The first argument to addMetrics must be of type Metrics. The map returns a TreeNode, so we need to access its `metrics` property.
             addMetrics(keywordEntry.termMap.get(row.customerSearchTerm)!.metrics, createMetrics(row));
         });
 
@@ -337,7 +336,7 @@ const TreeNodeRow: React.FC<{
     const isExpanded = expandedIds.has(node.id);
     const hasChildren = node.children && node.children.length > 0;
     
-    const { impressions, clicks, spend, sales, orders, units, asins } = node.metrics;
+    const { impressions, clicks, spend, sales, orders, units } = node.metrics;
     const cpc = clicks > 0 ? spend / clicks : 0;
     const acos = sales > 0 ? spend / sales : 0;
     const conversion = clicks > 0 ? orders / clicks : 0;
@@ -369,13 +368,13 @@ const TreeNodeRow: React.FC<{
             case 'asin': {
                 const asinList = node.metrics.asins || [];
                 const singleAsinFromMetrics = node.metrics.asin;
-            
-                // For the lowest level (search term), display its specific ASIN.
-                if (node.type === 'searchTerm') {
-                    return singleAsinFromMetrics || '—';
+
+                // Priority 1: If there's a specific ASIN (for leaf nodes), show it.
+                if (singleAsinFromMetrics) {
+                    return singleAsinFromMetrics;
                 }
-            
-                // For aggregated levels (keyword, adgroup, campaign)
+
+                // Priority 2: If it's an aggregated node, check the list of ASINs.
                 if (asinList.length === 1) {
                     return asinList[0];
                 }
@@ -391,6 +390,7 @@ const TreeNodeRow: React.FC<{
                     );
                 }
                 
+                // Fallback if no ASIN data is found at all.
                 return '—';
             }
             case 'status': return node.type !== 'searchTerm' ? <div style={styles.statusCell}>Active <span style={styles.statusDropdownIcon}>▼</span></div> : '—';
@@ -446,7 +446,6 @@ export function SPSearchTermsView() {
     // --- Sort & Resize State ---
     const columns = useMemo(() => getColumns(), []);
     const initialWidths = useMemo(() => columns.map(c => c.width), [columns]);
-// FIX: The `initialWidths` are already numbers. The `parseInt` call is redundant and causes a type error because it expects a string.
     const [columnWidths, setColumnWidths] = useState(initialWidths);
     const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'ascending' | 'descending' }>({ key: 'spend', direction: 'descending' });
     const tableRef = useRef<HTMLTableElement>(null);

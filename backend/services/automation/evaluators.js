@@ -704,11 +704,6 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
                     metricValue = metrics[condition.metric];
                 }
 
-                if ((condition.metric === 'acos' || condition.metric === 'roas') && metrics.sales === 0) {
-                    allConditionsMet = false;
-                    break;
-                }
-
                 let conditionValue = condition.value;
                 if (condition.metric === 'acos') {
                     conditionValue = condition.value / 100;
@@ -751,7 +746,7 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
                     });
 
                     if (!actionsByCampaign[campaignPerf.campaignId]) {
-                        actionsByCampaign[campaignPerf.campaignId] = { changes: [], newNegatives: [] };
+                        actionsByCampaign[campaignId] = { changes: [], newNegatives: [] };
                     }
                     actionsByCampaign[campaignPerf.campaignId].changes.push({
                         entityType: 'campaign', entityId: campaignPerf.campaignId,

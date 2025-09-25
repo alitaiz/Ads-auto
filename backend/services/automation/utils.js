@@ -65,8 +65,18 @@ export const calculateMetricsForWindow = (dailyData, lookbackDays, referenceDate
         return acc;
     }, { spend: 0, sales: 0, clicks: 0, orders: 0, impressions: 0 });
 
-    totals.acos = totals.sales > 0 ? totals.spend / totals.sales : 0;
-    totals.roas = totals.spend > 0 ? totals.sales / totals.spend : 0;
+    if (totals.sales > 0) {
+        totals.acos = totals.spend / totals.sales;
+    } else {
+        totals.acos = (totals.spend > 0) ? Infinity : 0;
+    }
+
+    if (totals.spend > 0) {
+        totals.roas = totals.sales / totals.spend;
+    } else {
+        totals.roas = (totals.sales > 0) ? Infinity : 0;
+    }
+
     return totals;
 };
 

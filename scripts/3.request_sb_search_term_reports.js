@@ -35,7 +35,7 @@ const createReportRequest = async (accessToken, dateStr) => {
     
     const sbColumns = [
         "date", "campaignName", "campaignId", "campaignStatus", "campaignBudgetType", "campaignBudgetAmount",
-        "adGroupName", "adGroupId", "searchTerm", "keywordId", "keywordText", "matchType", "advertisedAsin",
+        "adGroupName", "adGroupId", "searchTerm", "keywordId", "keywordText", "matchType",
         "impressions", "clicks", "cost", "costType", "purchases", "sales", "unitsSold"
     ];
 

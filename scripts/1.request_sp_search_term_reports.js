@@ -36,8 +36,8 @@ const createReportRequest = async (accessToken, dateStr) => {
     // A comprehensive list of columns to request, covering most available metrics.
     const comprehensiveColumns = [
         "date", "portfolioId", "campaignName", "campaignId", "campaignStatus", "campaignBudgetType", "campaignBudgetAmount",
-        "adGroupName", "adGroupId", "targeting", "matchType", "searchTerm", "advertisedAsin",
-        "keywordId", "keyword", "keywordBid", "adKeywordStatus", // FIX: Changed "keywordText" to "keyword"
+        "adGroupName", "adGroupId", "targeting", "matchType", "searchTerm",
+        "keywordId", "keyword", "keywordBid", "adKeywordStatus",
         "impressions", "clicks", "cost", "costPerClick", "clickThroughRate",
         // 7-Day Window
         "purchases7d", "sales7d", "unitsSoldClicks7d", "acosClicks7d", "roasClicks7d",

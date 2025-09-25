@@ -109,6 +109,8 @@ const saveSbDataToDB = async (client, reportData) => {
         return;
     }
 
+    const extractAsinFromName = (name) => name?.match(/(B0[A-Z0-9]{8})/)?.[0] || null;
+
     const query = `
         INSERT INTO sponsored_brands_search_term_report (
             report_date, campaign_name, campaign_id, ad_group_name, ad_group_id,
@@ -122,11 +124,12 @@ const saveSbDataToDB = async (client, reportData) => {
 
     let insertedCount = 0;
     for (const item of reportData) {
+        const asin = item.advertisedAsin || extractAsinFromName(item.campaignName);
         const values = [
             item.date, item.campaignName, item.campaignId, item.adGroupName, item.adGroupId,
             item.searchTerm, item.keywordId, item.keywordText, item.matchType,
             item.impressions, item.clicks, item.cost, item.purchases, item.sales, item.unitsSold,
-            item.advertisedAsin
+            asin
         ];
         const res = await client.query(query, values);
         if (res.rowCount > 0) insertedCount++;

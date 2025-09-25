@@ -11,9 +11,15 @@ CREATE TABLE IF NOT EXISTS daily_budget_overrides (
     CONSTRAINT unique_budget_override_per_day UNIQUE (campaign_id, override_date)
 );
 
+-- Add rule_id to link back to the rule that triggered the override.
+-- This is crucial for retrieving the profile_id needed for the API call.
+ALTER TABLE daily_budget_overrides ADD COLUMN IF NOT EXISTS rule_id INTEGER REFERENCES automation_rules(id) ON DELETE SET NULL;
+
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_dbo_override_date ON daily_budget_overrides(override_date);
 CREATE INDEX IF NOT EXISTS idx_dbo_reverted_at ON daily_budget_overrides(reverted_at);
+CREATE INDEX IF NOT EXISTS idx_dbo_rule_id ON daily_budget_overrides(rule_id);
 
 -- Grant Permissions to Application User
 -- IMPORTANT: Replace 'yourdbuser' with the actual DB_USER from your .env file.

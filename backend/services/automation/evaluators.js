@@ -734,10 +734,12 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
 
                 if (newBudget > currentBudget) {
                     await pool.query(
-                        `INSERT INTO daily_budget_overrides (campaign_id, original_budget, override_date) 
-                         VALUES ($1, $2, $3) 
-                         ON CONFLICT (campaign_id, override_date) DO NOTHING`,
-                        [campaignPerf.campaignId, currentBudget, todayDateStr]
+                        `INSERT INTO daily_budget_overrides (campaign_id, original_budget, override_date, rule_id) 
+                         VALUES ($1, $2, $3, $4) 
+                         ON CONFLICT (campaign_id, override_date) DO UPDATE SET
+                           rule_id = EXCLUDED.rule_id,
+                           reverted_at = NULL;`,
+                        [campaignPerf.campaignId, currentBudget, todayDateStr, rule.id]
                     );
 
                     // FIX: Construct the payload according to the SP Campaign v3 API specification.

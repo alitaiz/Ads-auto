@@ -173,19 +173,40 @@ const createMetrics = (row: SPSearchTermReportData): Metrics => ({
 const emptyMetrics = (): Metrics => ({ impressions: 0, clicks: 0, spend: 0, sales: 0, orders: 0, units: 0, productCount: 0, asins: [] });
 
 const aggregateSearchTerms = (flatData: SPSearchTermReportData[]): TreeNode[] => {
-    const terms = new Map<string, Metrics>();
+    // The key is a composite of search term and ASIN to create a unique row for each pair.
+    const termsMap = new Map<string, { name: string; asin: string | null; metrics: Metrics }>();
+
     flatData.forEach(row => {
-        const term = row.customerSearchTerm;
-        if (!terms.has(term)) terms.set(term, emptyMetrics());
-        addMetrics(terms.get(term)!, createMetrics(row));
+        const searchTerm = row.customerSearchTerm;
+        const asin = row.asin;
+        // Use a separator that's unlikely to appear in a search term
+        const key = `${searchTerm}::${asin || 'null'}`;
+
+        if (!termsMap.has(key)) {
+            termsMap.set(key, {
+                name: searchTerm,
+                asin: asin,
+                metrics: emptyMetrics(),
+            });
+        }
+        
+        const entry = termsMap.get(key)!;
+        addMetrics(entry.metrics, createMetrics(row));
     });
-    return Array.from(terms.entries()).map(([name, metrics]) => ({
-        id: `st-${name}`,
-        name,
-        type: 'searchTerm',
-        keywordType: 'search term',
-        metrics,
-    }));
+
+    return Array.from(termsMap.values()).map(entry => {
+        // We explicitly set the 'asin' on the final metrics object so the renderer can easily pick it up.
+        // The 'asins' array from addMetrics will naturally contain just this single ASIN anyway.
+        const finalMetrics = { ...entry.metrics, asin: entry.asin };
+        
+        return {
+            id: `st-${entry.name}::${entry.asin || 'null'}`,
+            name: entry.name,
+            type: 'searchTerm',
+            keywordType: 'search term',
+            metrics: finalMetrics,
+        };
+    });
 };
 
 const buildHierarchyByLevel = (flatData: SPSearchTermReportData[], level: ViewLevel): TreeNode[] => {

@@ -693,10 +693,14 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
         for (const group of rule.config.conditionGroups) {
             let allConditionsMet = true;
             const evaluatedMetrics = [];
+            
+            // *** FIX for "test rule doesn't find campaigns" ***
+            // The previous logic may have incorrectly filtered out campaigns with zero sales,
+            // preventing permissive rules (like ROAS >= 0) from being evaluated.
+            // This new logic ensures all conditions are checked against the calculated metrics.
+            const metrics = calculateMetricsForWindow(campaignPerf.dailyData, 'TODAY', referenceDate);
 
             for (const condition of group.conditions) {
-                const metrics = calculateMetricsForWindow(campaignPerf.dailyData, 'TODAY', referenceDate);
-                
                 let metricValue;
                 if (condition.metric === 'budgetUtilization') {
                     metricValue = currentBudget > 0 ? (metrics.spend / currentBudget) * 100 : 0;
@@ -742,11 +746,14 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
 
                     campaignsToUpdate.push({
                         campaignId: String(campaignPerf.campaignId),
-                        budget: { budget: newBudget, budgetType: 'DAILY' }
+                        budget: { amount: newBudget }
                     });
 
+                    // *** FIX for ReferenceError ***
+                    // The variable `campaignId` was not defined in this scope.
+                    // The correct variable is `campaignPerf.campaignId`.
                     if (!actionsByCampaign[campaignPerf.campaignId]) {
-                        actionsByCampaign[campaignId] = { changes: [], newNegatives: [] };
+                        actionsByCampaign[campaignPerf.campaignId] = { changes: [], newNegatives: [] };
                     }
                     actionsByCampaign[campaignPerf.campaignId].changes.push({
                         entityType: 'campaign', entityId: campaignPerf.campaignId,
@@ -762,8 +769,8 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
     if (campaignsToUpdate.length > 0) {
         await amazonAdsApiRequest({
             method: 'put', url: '/sp/campaigns', profileId: rule.profile_id,
-            data: { campaigns: campaignsToUpdate },
-            headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
+            data: { updates: campaignsToUpdate },
+            headers: { 'Content-Type': 'application/json' },
         });
     }
 

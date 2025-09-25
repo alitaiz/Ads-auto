@@ -694,10 +694,6 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
             let allConditionsMet = true;
             const evaluatedMetrics = [];
             
-            // *** FIX for "test rule doesn't find campaigns" ***
-            // The previous logic may have incorrectly filtered out campaigns with zero sales,
-            // preventing permissive rules (like ROAS >= 0) from being evaluated.
-            // This new logic ensures all conditions are checked against the calculated metrics.
             const metrics = calculateMetricsForWindow(campaignPerf.dailyData, 'TODAY', referenceDate);
 
             for (const condition of group.conditions) {
@@ -744,14 +740,13 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
                         [campaignPerf.campaignId, currentBudget, todayDateStr]
                     );
 
+                    // FIX: Construct the payload according to the SP Campaign v3 API specification.
+                    // The API expects a `budget` object with a `budget` key for the amount.
                     campaignsToUpdate.push({
                         campaignId: String(campaignPerf.campaignId),
-                        budget: { amount: newBudget }
+                        budget: { budget: newBudget, budgetType: 'DAILY' }
                     });
 
-                    // *** FIX for ReferenceError ***
-                    // The variable `campaignId` was not defined in this scope.
-                    // The correct variable is `campaignPerf.campaignId`.
                     if (!actionsByCampaign[campaignPerf.campaignId]) {
                         actionsByCampaign[campaignPerf.campaignId] = { changes: [], newNegatives: [] };
                     }
@@ -767,10 +762,17 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
     }
 
     if (campaignsToUpdate.length > 0) {
+        // FIX: The API call for updating SP campaigns requires a versioned Content-Type and Accept header,
+        // and the top-level key in the payload must be 'campaigns'. This was causing a 415 error.
         await amazonAdsApiRequest({
-            method: 'put', url: '/sp/campaigns', profileId: rule.profile_id,
-            data: { updates: campaignsToUpdate },
-            headers: { 'Content-Type': 'application/json' },
+            method: 'put',
+            url: '/sp/campaigns',
+            profileId: rule.profile_id,
+            data: { campaigns: campaignsToUpdate },
+            headers: {
+                'Content-Type': 'application/vnd.spCampaign.v3+json',
+                'Accept': 'application/vnd.spCampaign.v3+json'
+            },
         });
     }
 

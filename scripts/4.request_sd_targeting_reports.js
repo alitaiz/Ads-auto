@@ -36,7 +36,7 @@ const createReportRequest = async (accessToken, dateStr) => {
     // Corrected columns based on Amazon Ads API documentation for sdTargeting report
     const sdColumns = [
         "date", "campaignName", "campaignId", "adGroupName", "adGroupId",
-        "targetingId", "targetingExpression", "targetingText",
+        "targetingId", "targetingExpression", "targetingText", "advertisedAsin",
         "impressions", "clicks", "cost",
         "purchases", "sales", "unitsSold"
     ];

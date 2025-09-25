@@ -88,10 +88,11 @@ const saveSpDataToDB = async (client, reportData) => {
     
     let insertedCount = 0;
     for (const item of reportData) {
+        const asin = item.advertisedAsin || extractAsinFromName(item.campaignName);
         const values = [
             item.date, item.portfolioId, item.campaignName, item.campaignId, item.campaignStatus, item.campaignBudgetType, item.campaignBudgetAmount,
             item.adGroupName, item.adGroupId, item.targeting, item.matchType, item.searchTerm,
-            item.keywordId, item.keyword, item.keywordBid, item.adKeywordStatus, extractAsinFromName(item.campaignName),
+            item.keywordId, item.keyword, item.keywordBid, item.adKeywordStatus, asin,
             item.impressions, item.clicks, item.cost, item.costPerClick, item.clickThroughRate,
             item.purchases7d, item.sales7d, item.unitsSoldClicks7d,
             item.sales1d, item.purchases1d
@@ -125,7 +126,7 @@ const saveSbDataToDB = async (client, reportData) => {
             item.date, item.campaignName, item.campaignId, item.adGroupName, item.adGroupId,
             item.searchTerm, item.keywordId, item.keywordText, item.matchType,
             item.impressions, item.clicks, item.cost, item.purchases, item.sales, item.unitsSold,
-            item.advertisedAsin // Assuming 'advertisedAsin' is a column if available
+            item.advertisedAsin
         ];
         const res = await client.query(query, values);
         if (res.rowCount > 0) insertedCount++;
@@ -154,11 +155,12 @@ const saveSdDataToDB = async (client, reportData) => {
 
     let insertedCount = 0;
     for (const item of reportData) {
+        const asin = item.advertisedAsin || extractAsinFromName(item.campaignName);
         const values = [
             item.date, item.campaignName, item.campaignId, item.adGroupName, item.adGroupId,
             item.targetingId, item.targetingExpression, item.targetingText,
             item.impressions, item.clicks, item.cost, item.purchases, item.sales, item.unitsSold,
-            extractAsinFromName(item.campaignName)
+            asin
         ];
         const res = await client.query(query, values);
         if (res.rowCount > 0) insertedCount++;

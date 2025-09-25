@@ -337,7 +337,7 @@ const TreeNodeRow: React.FC<{
     const isExpanded = expandedIds.has(node.id);
     const hasChildren = node.children && node.children.length > 0;
     
-    const { impressions, clicks, spend, sales, orders, units, asins, productCount } = node.metrics;
+    const { impressions, clicks, spend, sales, orders, units, asins } = node.metrics;
     const cpc = clicks > 0 ? spend / clicks : 0;
     const acos = sales > 0 ? spend / sales : 0;
     const conversion = clicks > 0 ? orders / clicks : 0;
@@ -366,25 +366,33 @@ const TreeNodeRow: React.FC<{
                 </div>
             );
 
-            case 'asin':
-                if (node.type === 'adGroup') return `ASINs: ${productCount || 1}`;
-
-                if (node.type === 'campaign') {
-                    const asinList = asins || [];
-                    if (asinList.length === 1) {
-                        const single = asinList[0];
-                        return <img src={`https://m.media-amazon.com/images/I/${single}.jpg`} alt={single} height="30" onError={(e) => (e.currentTarget.style.display='none')} />;
-                    }
-                    if (asinList.length > 1) {
-                        return (
-                            <span style={{ color: 'var(--primary-color)', cursor: 'pointer', textDecoration: 'underline' }}
-                                onClick={() => alert(asinList.join('\n'))}>
-                                ASINS
-                            </span>
-                        );
-                    }
+            case 'asin': {
+                const asinList = node.metrics.asins || [];
+                const singleAsinFromMetrics = node.metrics.asin;
+            
+                // For the lowest level (search term), display its specific ASIN.
+                if (node.type === 'searchTerm') {
+                    return singleAsinFromMetrics || '—';
                 }
+            
+                // For aggregated levels (keyword, adgroup, campaign)
+                if (asinList.length === 1) {
+                    return asinList[0];
+                }
+                if (asinList.length > 1) {
+                    return (
+                        <span
+                            style={{ color: 'var(--primary-color)', cursor: 'pointer', textDecoration: 'underline' }}
+                            onClick={(e) => { e.stopPropagation(); alert(`Associated ASINs:\n${asinList.join('\n')}`); }}
+                            title={asinList.join(', ')}
+                        >
+                            {`${asinList.length} ASINs`}
+                        </span>
+                    );
+                }
+                
                 return '—';
+            }
             case 'status': return node.type !== 'searchTerm' ? <div style={styles.statusCell}>Active <span style={styles.statusDropdownIcon}>▼</span></div> : '—';
             case 'costPerOrder': return formatPrice(costPerOrder);
             case 'spend': return spend < 0 ? `-${formatPrice(Math.abs(spend))}` : formatPrice(spend);

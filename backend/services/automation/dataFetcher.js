@@ -5,93 +5,269 @@ import { getLocalDateString } from './utils.js';
 
 const REPORTING_TIMEZONE = 'America/Los_Angeles';
 
-const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDays, today) => {
-    const requiredDates = Array.from({ length: maxLookbackDays }, (_, i) => {
-        const d = new Date(today);
-        d.setDate(today.getDate() - i);
-        return d.toISOString().split('T')[0];
-    });
+/**
+ * A helper to perform paginated POST requests against the Amazon Ads API.
+ * @param {string} profileId - The Amazon Ads profile ID.
+ * @param {string} url - The API endpoint URL.
+ * @param {object} body - The request body.
+ * @param {object} headers - The request headers.
+ * @param {string} resultsKey - The key in the response object that contains the array of results.
+ * @returns {Promise<Array>} - A flattened array of all results from all pages.
+ */
+const paginatedPostRequest = async (profileId, url, body, headers, resultsKey) => {
+    let allResults = [];
+    let nextToken = null;
+    do {
+        const requestBody = { ...body };
+        if (nextToken) {
+            requestBody.nextToken = nextToken;
+        }
+        try {
+            const data = await amazonAdsApiRequest({ method: 'post', url, profileId, data: requestBody, headers });
+            if (data[resultsKey] && Array.isArray(data[resultsKey])) {
+                allResults = allResults.concat(data[resultsKey]);
+            }
+            nextToken = data.nextToken;
+        } catch (error) {
+            console.error(`[DataFetcher] Paginated request to ${url} failed.`, error.details || error);
+            break; // Stop pagination on error
+        }
+    } while (nextToken);
+    return allResults;
+};
 
-    const checkResult = await pool.query(
-        `SELECT DISTINCT report_date FROM sponsored_products_search_term_report 
-         WHERE report_date = ANY($1::date[]) AND campaign_id::text = ANY($2::text[])`,
-        [requiredDates, campaignIds.map(String)]
+
+/**
+ * Fetches all active keywords and targets for a given list of campaign IDs.
+ * This provides a complete list of entities that a rule should evaluate.
+ * @param {string} profileId - The Amazon Ads profile ID.
+ * @param {string[]} campaignIds - An array of campaign IDs.
+ * @returns {Promise<Array>} - A list of standardized entity objects.
+ */
+const getAllEntitiesForCampaigns = async (profileId, campaignIds) => {
+    console.log(`[DataFetcher] Fetching all entities for ${campaignIds.length} campaign(s)...`);
+
+    // 1. Fetch Ad Groups for all campaigns in parallel
+    const adGroupPromises = campaignIds.map(campaignId =>
+        paginatedPostRequest(profileId, '/sp/adGroups/list',
+            { campaignIdFilter: { include: [campaignId] }, stateFilter: { include: ["ENABLED", "PAUSED"] }, maxResults: 500 },
+            { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' },
+            'adGroups'
+        )
     );
-    const foundDatesInHistory = new Set(checkResult.rows.map(r => r.report_date.toISOString().split('T')[0]));
-    const missingDatesForStream = requiredDates.filter(d => !foundDatesInHistory.has(d));
+    const adGroupChunks = await Promise.all(adGroupPromises);
+    const allAdGroups = adGroupChunks.flat();
+    const allAdGroupIds = allAdGroups.map(ag => ag.adGroupId);
 
-    console.log(`[DataFetcher] Rule "${rule.name}" | Lookback: ${maxLookbackDays} days.`);
-    console.log(`[DataFetcher] Found historical data for dates: ${[...foundDatesInHistory].join(', ') || 'None'}`);
-    console.log(`[DataFetcher] Missing dates (will use stream data): ${missingDatesForStream.join(', ') || 'None'}`);
-
-    const allRows = [];
-    if (foundDatesInHistory.size > 0) {
-        const historicalQuery = `
-            SELECT report_date AS performance_date, keyword_id::text AS entity_id_text, COALESCE(keyword_text, targeting) AS entity_text,
-                   match_type, campaign_id::text AS campaign_id_text, ad_group_id::text AS ad_group_id_text,
-                   SUM(COALESCE(impressions, 0))::bigint AS impressions, SUM(COALESCE(cost, 0))::numeric AS spend,
-                   SUM(COALESCE(clicks, 0))::bigint AS clicks, SUM(COALESCE(sales_1d, 0))::numeric AS sales,
-                   SUM(COALESCE(purchases_1d, 0))::bigint AS orders
-            FROM sponsored_products_search_term_report
-            WHERE report_date = ANY($1::date[]) AND keyword_id IS NOT NULL AND campaign_id::text = ANY($2::text[])
-            GROUP BY 1, 2, 3, 4, 5, 6;
-        `;
-        const historicalResult = await pool.query(historicalQuery, [[...foundDatesInHistory], campaignIds.map(String)]);
-        allRows.push(...historicalResult.rows);
-    }
-    if (missingDatesForStream.length > 0) {
-        const streamQuery = `
-            SELECT ((event_data->>'time_window_start')::timestamptz AT TIME ZONE '${REPORTING_TIMEZONE}')::date AS performance_date,
-                   COALESCE(event_data->>'keyword_id', event_data->>'target_id') AS entity_id_text,
-                   COALESCE(event_data->>'keyword_text', event_data->>'targeting') AS entity_text,
-                   (event_data->>'match_type') AS match_type, (event_data->>'campaign_id') AS campaign_id_text,
-                   (event_data->>'ad_group_id') AS ad_group_id_text,
-                   SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'impressions')::bigint ELSE 0 END) AS impressions,
-                   SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END) AS spend,
-                   SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END) AS clicks,
-                   SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributed_sales_1d')::numeric ELSE 0 END) AS sales,
-                   SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributed_conversions_1d')::bigint ELSE 0 END) AS orders
-            FROM raw_stream_events
-            WHERE event_type IN ('sp-traffic', 'sp-conversion')
-              AND ((event_data->>'time_window_start')::timestamptz AT TIME ZONE '${REPORTING_TIMEZONE}')::date = ANY($1::date[])
-              AND COALESCE(event_data->>'keyword_id', event_data->>'target_id') IS NOT NULL
-              AND (event_data->>'campaign_id') = ANY($2::text[])
-            GROUP BY 1, 2, 3, 4, 5, 6;
-        `;
-        const streamResult = await pool.query(streamQuery, [missingDatesForStream, campaignIds.map(String)]);
-        allRows.push(...streamResult.rows);
+    if (allAdGroupIds.length === 0) {
+        console.log('[DataFetcher] No active ad groups found for the scoped campaigns.');
+        return [];
     }
 
-    const performanceMap = new Map();
-    allRows.forEach(row => {
-        const key = row.entity_id_text;
-        if (!key) return;
-        if (!performanceMap.has(key)) {
-            performanceMap.set(key, {
-                entityId: row.entity_id_text,
-                entityType: ['BROAD', 'PHRASE', 'EXACT'].includes(row.match_type) ? 'keyword' : 'target',
-                entityText: row.entity_text, matchType: row.match_type, campaignId: row.campaign_id_text,
-                adGroupId: row.ad_group_id_text, dailyData: []
-            });
-        }
-        const entityData = performanceMap.get(key);
-        const dateStr = new Date(row.performance_date).toISOString().split('T')[0];
-        let dayEntry = entityData.dailyData.find(d => d.date.toISOString().split('T')[0] === dateStr);
-        if (!dayEntry) {
-            dayEntry = { date: new Date(row.performance_date), impressions: 0, spend: 0, sales: 0, clicks: 0, orders: 0 };
-            entityData.dailyData.push(dayEntry);
-        }
-        dayEntry.impressions += parseInt(row.impressions || 0, 10);
-        dayEntry.spend += parseFloat(row.spend || 0);
-        dayEntry.sales += parseFloat(row.sales || 0);
-        dayEntry.clicks += parseInt(row.clicks || 0, 10);
-        dayEntry.orders += parseInt(row.orders || 0, 10);
+    // 2. Fetch Keywords and Targets for all Ad Groups in parallel
+    const keywordPromises = allAdGroupIds.map(adGroupId =>
+        paginatedPostRequest(profileId, '/sp/keywords/list',
+            { adGroupIdFilter: { include: [adGroupId] }, stateFilter: { include: ["ENABLED", "PAUSED"] }, maxResults: 1000 },
+            { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
+            'keywords'
+        )
+    );
+
+    const targetPromises = allAdGroupIds.map(adGroupId =>
+        paginatedPostRequest(profileId, '/sp/targets/list',
+            { adGroupIdFilter: { include: [adGroupId] }, stateFilter: { include: ["ENABLED", "PAUSED"] }, maxResults: 1000 },
+            { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' },
+            'targetingClauses'
+        )
+    );
+
+    const [keywordChunks, targetChunks] = await Promise.all([
+        Promise.all(keywordPromises),
+        Promise.all(targetPromises)
+    ]);
+
+    const allKeywords = keywordChunks.flat();
+    const allTargets = targetChunks.flat();
+    const allEntities = [];
+
+    // Create a map for quick lookup of an ad group's campaign ID
+    const adGroupToCampaignMap = new Map();
+    allAdGroups.forEach(ag => adGroupToCampaignMap.set(ag.adGroupId.toString(), ag.campaignId.toString()));
+
+    // 3. Map Keywords to a common format
+    allKeywords.forEach(kw => {
+        allEntities.push({
+            entityId: kw.keywordId.toString(),
+            entityType: 'keyword',
+            entityText: kw.keywordText,
+            matchType: kw.matchType,
+            campaignId: adGroupToCampaignMap.get(kw.adGroupId.toString()),
+            adGroupId: kw.adGroupId.toString(),
+            dailyData: [], // Initialize with empty performance data
+        });
     });
+
+    // 4. Map Targets to a common format
+    allTargets.forEach(t => {
+        allEntities.push({
+            entityId: t.targetId.toString(),
+            entityType: 'target',
+            entityText: t.expression?.[0]?.value || 'Unknown Target',
+            matchType: 'TARGETING_EXPRESSION',
+            campaignId: adGroupToCampaignMap.get(t.adGroupId.toString()),
+            adGroupId: t.adGroupId.toString(),
+            dailyData: [], // Initialize with empty performance data
+        });
+    });
+
+    console.log(`[DataFetcher] Found a total of ${allEntities.length} active entities (keywords/targets).`);
+    return allEntities;
+};
+
+const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDays, today) => {
+    const hasZeroImpressionCondition = rule.config.conditionGroups.some(group =>
+        group.conditions.some(cond =>
+            cond.metric === 'impressions' && cond.operator === '=' && cond.value === 0
+        )
+    );
+
+    if (hasZeroImpressionCondition) {
+        console.log(`[DataFetcher] Rule "${rule.name}" has zero-impression condition. Using comprehensive fetch.`);
+        // --- STRATEGY 1: Comprehensive Fetch (for zero-impression rules) ---
+        // 1. Get ALL entities from the API first. This is the master list.
+        const allApiEntities = await getAllEntitiesForCampaigns(rule.profile_id, campaignIds);
+        const performanceMap = new Map();
+        allApiEntities.forEach(entity => performanceMap.set(entity.entityId, entity));
+
+        if (allApiEntities.length === 0) return { performanceMap: new Map(), dataDateRange: null };
+
+        // 2. Fetch performance data from the local database to "enrich" the master list.
+        const requiredDates = Array.from({ length: maxLookbackDays }, (_, i) => { const d = new Date(today); d.setDate(today.getDate() - i); return d.toISOString().split('T')[0]; });
+        const checkResult = await pool.query(`SELECT DISTINCT report_date FROM sponsored_products_search_term_report WHERE report_date = ANY($1::date[]) AND campaign_id::text = ANY($2::text[])`, [requiredDates, campaignIds.map(String)]);
+        const foundDatesInHistory = new Set(checkResult.rows.map(r => r.report_date.toISOString().split('T')[0]));
+        const missingDatesForStream = requiredDates.filter(d => !foundDatesInHistory.has(d));
+
+        const allDbPerformanceRows = [];
+        if (foundDatesInHistory.size > 0) {
+            const historicalResult = await pool.query(`SELECT report_date AS performance_date, keyword_id::text AS entity_id_text, SUM(COALESCE(impressions, 0))::bigint AS impressions, SUM(COALESCE(cost, 0))::numeric AS spend, SUM(COALESCE(clicks, 0))::bigint AS clicks, SUM(COALESCE(sales_1d, 0))::numeric AS sales, SUM(COALESCE(purchases_1d, 0))::bigint AS orders FROM sponsored_products_search_term_report WHERE report_date = ANY($1::date[]) AND keyword_id IS NOT NULL AND campaign_id::text = ANY($2::text[]) GROUP BY 1, 2;`, [[...foundDatesInHistory], campaignIds.map(String)]);
+            allDbPerformanceRows.push(...historicalResult.rows);
+        }
+        if (missingDatesForStream.length > 0) {
+            const streamResult = await pool.query(`SELECT ((event_data->>'time_window_start')::timestamptz AT TIME ZONE '${REPORTING_TIMEZONE}')::date AS performance_date, COALESCE(event_data->>'keyword_id', event_data->>'target_id') AS entity_id_text, SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'impressions')::bigint ELSE 0 END) AS impressions, SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END) AS spend, SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END) AS clicks, SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributed_sales_1d')::numeric ELSE 0 END) AS sales, SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributed_conversions_1d')::bigint ELSE 0 END) AS orders FROM raw_stream_events WHERE event_type IN ('sp-traffic', 'sp-conversion') AND ((event_data->>'time_window_start')::timestamptz AT TIME ZONE '${REPORTING_TIMEZONE}')::date = ANY($1::date[]) AND COALESCE(event_data->>'keyword_id', event_data->>'target_id') IS NOT NULL AND (event_data->>'campaign_id') = ANY($2::text[]) GROUP BY 1, 2;`, [missingDatesForStream, campaignIds.map(String)]);
+            allDbPerformanceRows.push(...streamResult.rows);
+        }
+
+        allDbPerformanceRows.forEach(row => {
+            const key = row.entity_id_text;
+            if (!key || !performanceMap.has(key)) return; // Only enrich entities that exist in the API list
+            const entityData = performanceMap.get(key);
+            const dateStr = new Date(row.performance_date).toISOString().split('T')[0];
+            let dayEntry = entityData.dailyData.find(d => d.date.toISOString().split('T')[0] === dateStr);
+            if (!dayEntry) {
+                dayEntry = { date: new Date(row.performance_date), impressions: 0, spend: 0, sales: 0, clicks: 0, orders: 0 };
+                entityData.dailyData.push(dayEntry);
+            }
+            dayEntry.impressions += parseInt(row.impressions || 0, 10);
+            dayEntry.spend += parseFloat(row.spend || 0);
+            dayEntry.sales += parseFloat(row.sales || 0);
+            dayEntry.clicks += parseInt(row.clicks || 0, 10);
+            dayEntry.orders += parseInt(row.orders || 0, 10);
+        });
+        
+        const reportDateRange = foundDatesInHistory.size > 0 ? { start: [...foundDatesInHistory].sort()[0], end: [...foundDatesInHistory].sort().pop() } : null;
+        const streamDateRange = missingDatesForStream.length > 0 ? { start: missingDatesForStream.sort()[0], end: missingDatesForStream.sort().pop() } : null;
+        return { performanceMap, dataDateRange: { report: reportDateRange, stream: streamDateRange } };
+
+    } else {
+        console.log(`[DataFetcher] Rule "${rule.name}" has no zero-impression condition. Using efficient DB-only fetch.`);
+        // --- STRATEGY 2: Efficient Fetch (the original logic) ---
+        const requiredDates = Array.from({ length: maxLookbackDays }, (_, i) => {
+            const d = new Date(today);
+            d.setDate(today.getDate() - i);
+            return d.toISOString().split('T')[0];
+        });
+
+        const checkResult = await pool.query(
+            `SELECT DISTINCT report_date FROM sponsored_products_search_term_report 
+             WHERE report_date = ANY($1::date[]) AND campaign_id::text = ANY($2::text[])`,
+            [requiredDates, campaignIds.map(String)]
+        );
+        const foundDatesInHistory = new Set(checkResult.rows.map(r => r.report_date.toISOString().split('T')[0]));
+        const missingDatesForStream = requiredDates.filter(d => !foundDatesInHistory.has(d));
     
-    const reportDateRange = foundDatesInHistory.size > 0 ? { start: [...foundDatesInHistory].sort()[0], end: [...foundDatesInHistory].sort().pop() } : null;
-    const streamDateRange = missingDatesForStream.length > 0 ? { start: missingDatesForStream.sort()[0], end: missingDatesForStream.sort().pop() } : null;
+        console.log(`[DataFetcher] Rule "${rule.name}" | Lookback: ${maxLookbackDays} days.`);
+        console.log(`[DataFetcher] Found historical data for dates: ${[...foundDatesInHistory].join(', ') || 'None'}`);
+        console.log(`[DataFetcher] Missing dates (will use stream data): ${missingDatesForStream.join(', ') || 'None'}`);
     
-    return { performanceMap, dataDateRange: { report: reportDateRange, stream: streamDateRange } };
+        const allRows = [];
+        if (foundDatesInHistory.size > 0) {
+            const historicalQuery = `
+                SELECT report_date AS performance_date, keyword_id::text AS entity_id_text, COALESCE(keyword_text, targeting) AS entity_text,
+                       match_type, campaign_id::text AS campaign_id_text, ad_group_id::text AS ad_group_id_text,
+                       SUM(COALESCE(impressions, 0))::bigint AS impressions, SUM(COALESCE(cost, 0))::numeric AS spend,
+                       SUM(COALESCE(clicks, 0))::bigint AS clicks, SUM(COALESCE(sales_1d, 0))::numeric AS sales,
+                       SUM(COALESCE(purchases_1d, 0))::bigint AS orders
+                FROM sponsored_products_search_term_report
+                WHERE report_date = ANY($1::date[]) AND keyword_id IS NOT NULL AND campaign_id::text = ANY($2::text[])
+                GROUP BY 1, 2, 3, 4, 5, 6;
+            `;
+            const historicalResult = await pool.query(historicalQuery, [[...foundDatesInHistory], campaignIds.map(String)]);
+            allRows.push(...historicalResult.rows);
+        }
+        if (missingDatesForStream.length > 0) {
+            const streamQuery = `
+                SELECT ((event_data->>'time_window_start')::timestamptz AT TIME ZONE '${REPORTING_TIMEZONE}')::date AS performance_date,
+                       COALESCE(event_data->>'keyword_id', event_data->>'target_id') AS entity_id_text,
+                       COALESCE(event_data->>'keyword_text', event_data->>'targeting') AS entity_text,
+                       (event_data->>'match_type') AS match_type, (event_data->>'campaign_id') AS campaign_id_text,
+                       (event_data->>'ad_group_id') AS ad_group_id_text,
+                       SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'impressions')::bigint ELSE 0 END) AS impressions,
+                       SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END) AS spend,
+                       SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END) AS clicks,
+                       SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributed_sales_1d')::numeric ELSE 0 END) AS sales,
+                       SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributed_conversions_1d')::bigint ELSE 0 END) AS orders
+                FROM raw_stream_events
+                WHERE event_type IN ('sp-traffic', 'sp-conversion')
+                  AND ((event_data->>'time_window_start')::timestamptz AT TIME ZONE '${REPORTING_TIMEZONE}')::date = ANY($1::date[])
+                  AND COALESCE(event_data->>'keyword_id', event_data->>'target_id') IS NOT NULL
+                  AND (event_data->>'campaign_id') = ANY($2::text[])
+                GROUP BY 1, 2, 3, 4, 5, 6;
+            `;
+            const streamResult = await pool.query(streamQuery, [missingDatesForStream, campaignIds.map(String)]);
+            allRows.push(...streamResult.rows);
+        }
+    
+        const performanceMap = new Map();
+        allRows.forEach(row => {
+            const key = row.entity_id_text;
+            if (!key) return;
+            if (!performanceMap.has(key)) {
+                performanceMap.set(key, {
+                    entityId: row.entity_id_text,
+                    entityType: ['BROAD', 'PHRASE', 'EXACT'].includes(row.match_type) ? 'keyword' : 'target',
+                    entityText: row.entity_text, matchType: row.match_type, campaignId: row.campaign_id_text,
+                    adGroupId: row.ad_group_id_text, dailyData: []
+                });
+            }
+            const entityData = performanceMap.get(key);
+            const dateStr = new Date(row.performance_date).toISOString().split('T')[0];
+            let dayEntry = entityData.dailyData.find(d => d.date.toISOString().split('T')[0] === dateStr);
+            if (!dayEntry) {
+                dayEntry = { date: new Date(row.performance_date), impressions: 0, spend: 0, sales: 0, clicks: 0, orders: 0 };
+                entityData.dailyData.push(dayEntry);
+            }
+            dayEntry.impressions += parseInt(row.impressions || 0, 10);
+            dayEntry.spend += parseFloat(row.spend || 0);
+            dayEntry.sales += parseFloat(row.sales || 0);
+            dayEntry.clicks += parseInt(row.clicks || 0, 10);
+            dayEntry.orders += parseInt(row.orders || 0, 10);
+        });
+        
+        const reportDateRange = foundDatesInHistory.size > 0 ? { start: [...foundDatesInHistory].sort()[0], end: [...foundDatesInHistory].sort().pop() } : null;
+        const streamDateRange = missingDatesForStream.length > 0 ? { start: missingDatesForStream.sort()[0], end: missingDatesForStream.sort().pop() } : null;
+        
+        return { performanceMap, dataDateRange: { report: reportDateRange, stream: streamDateRange } };
+    }
 };
 
 const getSbSdPerformanceData = async (rule, campaignIds, maxLookbackDays, today) => {

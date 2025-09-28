@@ -44,7 +44,7 @@ const styles: { [key: string]: React.CSSProperties } = {
     },
     mainContent: {
         flex: 1,
-        padding: '20px',
+        padding: '0px', // Removed padding to allow full-height views
         backgroundColor: 'var(--background-color)',
     }
 };
@@ -73,6 +73,9 @@ export function Layout() {
                     </NavLink>
                     <NavLink to="/automation" style={getNavLinkStyle}>
                         Automation
+                    </NavLink>
+                    <NavLink to="/ai-copilot" style={getNavLinkStyle}>
+                        AI Co-Pilot
                     </NavLink>
                 </nav>
             </header>

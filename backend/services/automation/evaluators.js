@@ -253,19 +253,52 @@ export const evaluateBidAdjustmentRule = async (rule, performanceData, throttled
 
             if (allConditionsMet) {
                 const { type, value, minBid, maxBid } = group.action;
-                if (type === 'adjustBidPercent') {
-                    let newBid = entity.currentBid * (1 + (value / 100));
+                let newBid; // This will hold the calculated new bid
 
-                    if (value < 0) {
-                        newBid = Math.floor(newBid * 100) / 100;
+                // Use Math.abs(value) because the UI now enforces positive values and direction is in the type
+                const absValue = Math.abs(value || 0);
+
+                switch (type) {
+                    case 'increaseBidPercent':
+                        newBid = entity.currentBid * (1 + (absValue / 100));
+                        break;
+                    case 'decreaseBidPercent':
+                        newBid = entity.currentBid * (1 - (absValue / 100));
+                        break;
+                    case 'increaseBidAmount':
+                        newBid = entity.currentBid + absValue;
+                        break;
+                    case 'decreaseBidAmount':
+                        newBid = entity.currentBid - absValue;
+                        break;
+                    // Backward compatibility for old rules still in the DB
+                    case 'adjustBidPercent':
+                        newBid = entity.currentBid * (1 + (value / 100)); // Here we use the original signed value
+                        break;
+                    default:
+                        // If the action type is not for bid adjustment, skip to the next group.
+                        continue;
+                }
+
+                // Check if newBid was successfully calculated before proceeding
+                if (typeof newBid === 'number') {
+                    // Apply rounding based on the intended direction of change
+                    if (type.startsWith('decrease') || (type === 'adjustBidPercent' && value < 0)) {
+                        newBid = Math.floor(newBid * 100) / 100; // Round down for decreases
                     } else {
-                        newBid = Math.ceil(newBid * 100) / 100;
+                        newBid = Math.ceil(newBid * 100) / 100; // Round up for increases
                     }
-
+                    
+                    // Enforce Amazon's minimum bid of $0.02
                     newBid = Math.max(0.02, newBid);
 
-                    if (typeof minBid === 'number') newBid = Math.max(minBid, newBid);
-                    if (typeof maxBid === 'number') newBid = Math.min(maxBid, newBid);
+                    // Apply user-defined min/max bid constraints
+                    if (typeof minBid === 'number') {
+                        newBid = Math.max(minBid, newBid);
+                    }
+                    if (typeof maxBid === 'number') {
+                        newBid = Math.min(maxBid, newBid);
+                    }
                     
                     newBid = parseFloat(newBid.toFixed(2));
                     
@@ -284,10 +317,14 @@ export const evaluateBidAdjustmentRule = async (rule, performanceData, throttled
                              [entity.entityType === 'keyword' ? 'keywordId' : 'targetId']: entity.entityId,
                              bid: newBid
                          };
-                         if (entity.entityType === 'keyword') keywordsToUpdate.push(updatePayload);
-                         else targetsToUpdate.push(updatePayload);
+                         if (entity.entityType === 'keyword') {
+                             keywordsToUpdate.push(updatePayload);
+                         } else {
+                             targetsToUpdate.push(updatePayload);
+                         }
                     }
                 }
+                // "First Match Wins" - break from the conditionGroups loop for this entity
                 break;
             }
         }
@@ -750,7 +787,7 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
                     });
 
                     if (!actionsByCampaign[campaignPerf.campaignId]) {
-                        actionsByCampaign[campaignPerf.campaignId] = { changes: [], newNegatives: [] };
+                        actionsByCampaign[campaignId] = { changes: [], newNegatives: [] };
                     }
                     actionsByCampaign[campaignPerf.campaignId].changes.push({
                         entityType: 'campaign', entityId: campaignPerf.campaignId,

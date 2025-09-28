@@ -21,7 +21,7 @@ export default defineConfig(({ mode }) => {
         rollupOptions: {
           // Externalize dependencies that are provided by the browser via import maps.
           // This prevents Vite from trying to bundle them, fixing build errors.
-          external: ['@google/genai']
+          external: ['@google/genai', 'marked']
         }
       }
     };

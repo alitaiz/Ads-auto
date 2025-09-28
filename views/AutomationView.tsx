@@ -2,7 +2,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { AutomationRule, AutomationRuleCondition, AutomationConditionGroup, AutomationRuleAction } from '../types';
 import { RuleGuideContent } from './components/RuleGuideContent';
-import { AIRuleSuggester } from './components/AIRuleSuggester';
 
 const styles: { [key: string]: React.CSSProperties } = {
   container: { maxWidth: '1200px', margin: '0 auto', padding: '20px' },
@@ -59,8 +58,8 @@ const getDefaultCondition = (): AutomationRuleCondition => ({
 });
 
 const getDefaultBidAdjustmentAction = (): AutomationRuleAction => ({ 
-    type: 'adjustBidPercent', 
-    value: -1,
+    type: 'decreaseBidPercent', 
+    value: 10,
     minBid: undefined,
     maxBid: undefined,
 });
@@ -152,7 +151,6 @@ const TABS = [
     { id: 'SEARCH_TERM_AUTOMATION', label: 'SP Search Term', type: 'SEARCH_TERM_AUTOMATION', adType: 'SP' },
     { id: 'BUDGET_ACCELERATION', label: 'SP Budget', type: 'BUDGET_ACCELERATION', adType: 'SP' },
     { id: 'PRICE_ADJUSTMENT', label: 'Change Price', type: 'PRICE_ADJUSTMENT' },
-    { id: 'AI_SUGGESTER', label: 'AI Suggester' },
     { id: 'HISTORY', label: 'History' },
     { id: 'GUIDE', label: 'Guide' },
 ];
@@ -193,7 +191,7 @@ export function AutomationView() {
   
   const handleOpenModal = (rule: AutomationRule | null = null) => {
     const activeTabInfo = TABS.find(t => t.id === activeTabId);
-    if (!activeTabInfo || !activeTabInfo.type) return;
+    if (!activeTabInfo || !('type' in activeTabInfo) || !activeTabInfo.type) return;
 
     if (rule) {
         setEditingRule(rule);
@@ -294,7 +292,6 @@ export function AutomationView() {
           </div>
       )}
 
-      {activeTabId === 'AI_SUGGESTER' && <AIRuleSuggester />}
       {activeTabId === 'HISTORY' && <LogsTab logs={logs} loading={loading.logs} />}
       {activeTabId === 'GUIDE' && <RuleGuideContent />}
       {activeTab && 'type' in activeTab && activeTab.type && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} onDuplicate={handleDuplicateRule} />}
@@ -302,7 +299,7 @@ export function AutomationView() {
       {isModalOpen && activeTab && 'type' in activeTab && activeTab.type && (
           <RuleBuilderModal 
               rule={editingRule} 
-              modalTitle={editingRule ? `Edit ${activeTab.label} Rule` : `Create New ${activeTab.label} Rule`}
+              modalTitle={editingRule && editingRule.id ? `Edit ${activeTab.label} Rule` : `Create New ${activeTab.label} Rule`}
               onClose={() => setIsModalOpen(false)}
               onSave={handleSaveRule}
           />
@@ -417,6 +414,41 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
         if (rule) return JSON.parse(JSON.stringify(rule));
         return {};
     });
+
+    useEffect(() => {
+        // This effect runs once when the component mounts with a rule
+        // to normalize old 'adjustBidPercent' actions for a better UX.
+        if (formData.config?.conditionGroups) {
+            let needsUpdate = false;
+            const newGroups = formData.config.conditionGroups.map(group => {
+                if (group.action.type === 'adjustBidPercent') {
+                    needsUpdate = true;
+                    const value = group.action.value || 0;
+                    const newAction: AutomationRuleAction = {
+                        ...group.action,
+                        type: value >= 0 ? 'increaseBidPercent' : 'decreaseBidPercent',
+                        value: Math.abs(value),
+                    };
+                    return {
+                        ...group,
+                        action: newAction
+                    };
+                }
+                return group;
+            });
+
+            if (needsUpdate) {
+                setFormData(prev => ({
+                    ...prev,
+                    config: {
+                        ...prev.config!,
+                        conditionGroups: newGroups,
+                    }
+                }));
+            }
+        }
+    }, []); // Empty dependency array means it runs once on mount
+
 
     if (!formData || !formData.config) {
         return null;
@@ -618,12 +650,15 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
                                                         <div style={styles.formGroup}>
                                                             <label style={styles.label}>Action</label>
                                                             <select style={styles.conditionInput} value={group.action.type} onChange={e => handleActionChange(groupIndex, 'type', e.target.value)}>
-                                                                <option value="adjustBidPercent">Adjust Bid By %</option>
+                                                                <option value="decreaseBidPercent">Decrease Bid By %</option>
+                                                                <option value="increaseBidPercent">Increase Bid By %</option>
+                                                                <option value="decreaseBidAmount">Decrease Bid By $</option>
+                                                                <option value="increaseBidAmount">Increase Bid By $</option>
                                                             </select>
                                                         </div>
                                                         <div style={styles.formGroup}>
-                                                            <label style={styles.label}>Value (%)</label>
-                                                            <input type="number" style={styles.conditionInput} placeholder="e.g., -10" value={group.action.value ?? ''} onChange={e => handleActionChange(groupIndex, 'value', Number(e.target.value))} />
+                                                            <label style={styles.label}>{`Value ${group.action.type?.includes('Percent') ? '(%)' : '($)'}`}</label>
+                                                            <input type="number" step="0.01" min="0" style={styles.conditionInput} placeholder={group.action.type?.includes('Percent') ? "e.g., 10" : "e.g., 0.25"} value={group.action.value ?? ''} onChange={e => handleActionChange(groupIndex, 'value', Number(e.target.value))} />
                                                         </div>
                                                         <div style={styles.formGroup}>
                                                             <label style={styles.label}>Min Bid (Optional)</label>

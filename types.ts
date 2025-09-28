@@ -81,7 +81,7 @@ export interface AutomationRuleCondition {
 }
 
 export interface AutomationRuleAction {
-    type: 'adjustBidPercent' | 'negateSearchTerm' | 'increaseBudgetPercent' | 'setBudgetAmount';
+    type: 'adjustBidPercent' | 'increaseBidPercent' | 'decreaseBidPercent' | 'increaseBidAmount' | 'decreaseBidAmount' | 'negateSearchTerm' | 'increaseBudgetPercent' | 'setBudgetAmount';
     value?: number;
     matchType?: 'NEGATIVE_EXACT' | 'NEGATIVE_PHRASE';
     minBid?: number;
@@ -214,9 +214,48 @@ export interface SalesAndTrafficCache {
     } | null;
 }
 
+export interface ChatMessage {
+    id: number;
+    sender: 'user' | 'ai';
+    text: string;
+}
+
+export interface LoadedDataInfo {
+    data: any[] | null;
+    dateRange: {
+        startDate: string;
+        endDate: string;
+    } | null;
+}
+
+export interface AICopilotCache {
+    productInfo: {
+        asin: string;
+        salePrice: string;
+        cost: string;
+        fbaFee: string;
+        referralFeePercent: string;
+    };
+    dateRange: {
+        startDate: string;
+        endDate: string;
+    };
+    loadedData: {
+        searchTermData: LoadedDataInfo;
+        streamData: LoadedDataInfo;
+        salesTrafficData: LoadedDataInfo;
+    };
+    chat: {
+        conversationId: string | null;
+        messages: ChatMessage[];
+        systemInstruction: string;
+    };
+}
+
 
 export interface AppDataCache {
     ppcManagement: PPCManagementCache;
     spSearchTerms: SPSearchTermsCache;
     salesAndTraffic: SalesAndTrafficCache;
+    aiCopilot: AICopilotCache;
 }

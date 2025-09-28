@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { PPCManagementView } from './views/PPCManagementView';
 import { AdGroupView } from './views/AdGroupView';
 import { KeywordView } from './views/KeywordView';
@@ -9,6 +9,8 @@ import { SalesAndTrafficView } from './views/SalesAndTrafficView';
 import { SPSearchTermsView } from './views/SPSearchTermsView';
 import { DatabaseView } from './views/DatabaseView';
 import { AutomationView } from './views/AutomationView';
+import { AICopilotView } from './views/AICopilotView';
+import { DataViewer } from './views/components/DataViewer';
 import { DataCacheProvider } from './contexts/DataCacheContext';
 
 // Basic global styles
@@ -53,8 +55,12 @@ function App() {
   }, []); // Empty dependency array ensures this effect runs only once.
 
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
+        {/* Standalone route for the data viewer, outside the main layout */}
+        <Route path="data-viewer/:dataKey" element={<DataViewer />} />
+
+        {/* Main application routes with shared layout */}
         <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/campaigns" replace />} />
           <Route path="campaigns" element={<PPCManagementView />} />
@@ -64,10 +70,11 @@ function App() {
           <Route path="sales-and-traffic" element={<SalesAndTrafficView />} />
           <Route path="database" element={<DatabaseView />} />
           <Route path="automation" element={<AutomationView />} />
+          <Route path="ai-copilot" element={<AICopilotView />} />
           <Route path="*" element={<Navigate to="/campaigns" replace />} />
         </Route>
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
 

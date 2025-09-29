@@ -92,47 +92,85 @@ router.post('/ai/tool/stream', async (req, res) => {
         return res.status(400).json({ error: 'ASIN, startDate, and endDate are required.' });
     }
     try {
+        // Step 1: Find campaign IDs associated with the given ASIN within a recent lookback period to keep the scope relevant.
+        const lookbackDays = 60;
         const lookbackStartDate = new Date(endDate);
-        lookbackStartDate.setDate(lookbackStartDate.getDate() - 29); // 30-day lookback
+        lookbackStartDate.setDate(lookbackStartDate.getDate() - (lookbackDays - 1));
         const lookbackStartDateStr = lookbackStartDate.toISOString().split('T')[0];
-        
+
         const campaignIdQuery = `
-            SELECT DISTINCT campaign_id 
-            FROM sponsored_products_search_term_report 
+            SELECT DISTINCT campaign_id::bigint
+            FROM sponsored_products_search_term_report
+            WHERE asin = $1 AND report_date BETWEEN $2 AND $3
+            UNION
+            SELECT DISTINCT campaign_id::bigint
+            FROM sponsored_brands_search_term_report
+            WHERE asin = $1 AND report_date BETWEEN $2 AND $3
+            UNION
+            SELECT DISTINCT campaign_id::bigint
+            FROM sponsored_display_targeting_report
             WHERE asin = $1 AND report_date BETWEEN $2 AND $3;
         `;
         const campaignIdResult = await pool.query(campaignIdQuery, [asin, lookbackStartDateStr, endDate]);
         const campaignIds = campaignIdResult.rows.map(r => r.campaign_id);
 
         if (campaignIds.length === 0) {
+            console.log(`[AI Tool/Stream] No campaigns found for ASIN ${asin} in the last ${lookbackDays} days.`);
             return res.json({ data: [], dateRange: { startDate, endDate } });
         }
-        
+        console.log(`[AI Tool/Stream] Found ${campaignIds.length} campaigns for ASIN ${asin}. Fetching detailed stream data...`);
+
+        // Step 2: Fetch detailed, flattened stream events for the found campaigns and user-selected date range.
         const streamQuery = `
-            WITH traffic AS (
-                SELECT SUM((event_data->>'cost')::numeric) as spend, SUM((event_data->>'clicks')::bigint) as clicks
-                FROM raw_stream_events
-                WHERE event_type = 'sp-traffic'
-                AND (event_data->>'campaign_id')::bigint = ANY($1)
-                AND (event_data->>'time_window_start')::timestamptz >= $2::date
-                AND (event_data->>'time_window_start')::timestamptz < ($3::date + interval '1 day')
-            ),
-            conversion AS (
-                SELECT SUM((event_data->>'attributed_sales_1d')::numeric) as sales, SUM((event_data->>'attributed_conversions_1d')::bigint) as orders
-                FROM raw_stream_events
-                WHERE event_type = 'sp-conversion'
-                AND (event_data->>'campaign_id')::bigint = ANY($1)
-                AND (event_data->>'time_window_start')::timestamptz >= $2::date
-                AND (event_data->>'time_window_start')::timestamptz < ($3::date + interval '1 day')
-            )
-            SELECT * FROM traffic, conversion;
+            SELECT
+                received_at,
+                (COALESCE(event_data ->> 'time_window_start', event_data ->> 'timeWindowStart'))::timestamptz as event_time,
+                event_type,
+                COALESCE(event_data ->> 'campaign_id', event_data ->> 'campaignId') AS campaign_id,
+                COALESCE(event_data ->> 'ad_group_id', event_data ->> 'adGroupId') AS ad_group_id,
+                COALESCE(event_data ->> 'keyword_text', event_data ->> 'targeting_text', event_data ->> 'keywordText', event_data ->> 'searchTerm') AS term_or_target,
+                COALESCE(event_data ->> 'match_type', event_data ->> 'keyword_type', event_data ->> 'matchType') AS match_type,
+                (COALESCE(event_data ->> 'impressions', '0'))::int AS impressions,
+                (COALESCE(event_data ->> 'clicks', '0'))::int AS clicks,
+                (COALESCE(event_data ->> 'cost', '0'))::numeric AS spend,
+                (COALESCE(
+                    event_data ->> 'purchases_7d',
+                    event_data ->> 'purchases7d',
+                    event_data ->> 'purchases',
+                    '0'
+                ))::int AS orders,
+                (COALESCE(
+                    event_data ->> 'sales_7d',
+                    event_data ->> 'sales7d',
+                    event_data ->> 'sales',
+                    '0'
+                ))::numeric AS sales,
+                (COALESCE(
+                    event_data ->> 'units_sold_7d',
+                    event_data ->> 'unitsSold7d',
+                    event_data ->> 'units_sold',
+                    event_data ->> 'unitsSold',
+                    '0'
+                ))::int as units
+            FROM
+                raw_stream_events
+            WHERE
+                (COALESCE(event_data ->> 'campaign_id', event_data ->> 'campaignId'))::bigint = ANY($1::bigint[])
+                AND event_type IN ('sp-traffic', 'sp-conversion', 'sb-traffic', 'sb-conversion', 'sd-traffic', 'sd-conversion')
+                AND (COALESCE(event_data ->> 'time_window_start', event_data ->> 'timeWindowStart'))::timestamptz >= $2::date
+                AND (COALESCE(event_data ->> 'time_window_start', event_data ->> 'timeWindowStart'))::timestamptz < ($3::date + interval '1 day')
+            ORDER BY
+                event_time DESC
+            LIMIT 1000;
         `;
         const { rows } = await pool.query(streamQuery, [campaignIds, startDate, endDate]);
         res.json({ data: rows, dateRange: { startDate, endDate } });
     } catch (e) {
+        console.error('[AI Tool/Stream] Error fetching detailed stream data:', e);
         res.status(500).json({ error: e.message });
     }
 });
+
 
 router.post('/ai/tool/sales-traffic', async (req, res) => {
     const { asin, startDate, endDate } = req.body;

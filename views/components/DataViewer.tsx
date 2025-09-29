@@ -45,6 +45,34 @@ const styles: { [key: string]: React.CSSProperties } = {
     },
 };
 
+
+// Helper to format headers for readability (e.g., snake_case or camelCase to Title Case)
+const formatHeader = (header: string) => {
+    return header
+        .replace(/_/g, ' ')
+        .replace(/([A-Z])/g, ' $1')
+        .replace(/^./, (str) => str.toUpperCase());
+};
+
+// Helper to render cell content more intelligently
+const renderCellContent = (value: any) => {
+    if (value === null || typeof value === 'undefined') {
+        return <i style={{ color: '#999' }}>null</i>;
+    }
+    if (typeof value === 'object') {
+        return <pre style={{ margin: 0, fontSize: '0.8rem' }}>{JSON.stringify(value, null, 2)}</pre>;
+    }
+    if (typeof value === 'number') {
+        if (value % 1 !== 0) { // Check if it's a float
+            return value.toFixed(2);
+        }
+        return value.toLocaleString();
+    }
+    // For strings, just display them. This avoids formatting IDs with commas.
+    return String(value);
+};
+
+
 export function DataViewer() {
     const { dataKey } = useParams<{ dataKey: string }>();
     const [data, setData] = useState<any[] | null>(null);
@@ -90,7 +118,7 @@ export function DataViewer() {
                 <table style={styles.table}>
                     <thead>
                         <tr>
-                            {headers.map(header => <th key={header} style={styles.th}>{header.replace(/([A-Z])/g, ' $1')}</th>)}
+                            {headers.map(header => <th key={header} style={styles.th}>{formatHeader(header)}</th>)}
                         </tr>
                     </thead>
                     <tbody>
@@ -98,7 +126,7 @@ export function DataViewer() {
                             <tr key={index}>
                                 {headers.map(header => (
                                     <td key={`${header}-${index}`} style={styles.td}>
-                                        {JSON.stringify(row[header])}
+                                        {renderCellContent(row[header])}
                                     </td>
                                 ))}
                             </tr>

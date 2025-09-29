@@ -122,17 +122,14 @@ async function fetchSalesTrafficDataForAI(asin, dateRange) {
         `, [asin, startDate, endDate]);
         const { minDate, maxDate } = dateRangeResult.rows[0] || {};
 
-        // FIX: The placeholder query was causing a syntax error.
-        // This query aggregates key sales and traffic metrics by day for the specified ASIN.
         const { rows } = await pool.query(`
             WITH daily_data AS (
                 SELECT
                     report_date,
                     SUM((sales_data->>'unitsOrdered')::int) as "unitsOrdered",
-                    SUM((sales_data->>'orderedProductSales'->>'amount')::numeric) as "orderedProductSales",
+                    SUM((sales_data->'orderedProductSales'->>'amount')::numeric) as "orderedProductSales",
                     SUM((traffic_data->>'sessions')::int) as "sessions",
                     SUM((traffic_data->>'pageViews')::int) as "pageViews",
-                    -- Calculate weighted average for unit session percentage to be accurate
                     SUM((traffic_data->>'sessions')::int * (traffic_data->>'unitSessionPercentage')::numeric) as "weightedUnitSessionTotal",
                     SUM((traffic_data->>'sessions')::int) as "totalSessionsForAvg"
                 FROM sales_and_traffic_by_asin
@@ -145,7 +142,6 @@ async function fetchSalesTrafficDataForAI(asin, dateRange) {
                 "orderedProductSales",
                 "sessions",
                 "pageViews",
-                -- Finalize the weighted average calculation, and normalize to a decimal (e.g., 0.15 for 15%)
                 ("weightedUnitSessionTotal" / NULLIF("totalSessionsForAvg", 0)) / 100 as "avgUnitSessionPercentage"
             FROM daily_data
             ORDER BY report_date ASC;
@@ -176,12 +172,95 @@ async function fetchSqpDataForAI(asin, weeks) {
              WHERE asin = $1 AND start_date = ANY($2::date[]);
         `, [asin, weeks]);
         
-        // ... aggregation logic from tool endpoint ...
         const aggregationMap = new Map();
-        // ... (loop and aggregate)
-        const transformedData = [];
-        // ... (transform aggregated data)
+        const getMedian = (arr) => {
+            if (!arr || arr.length === 0) return null;
+            const sorted = [...arr].sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+        };
 
+        for (const row of rows) {
+            const raw = row.performance_data;
+            if (!raw || !raw.searchQueryData) continue;
+            
+            const sq = raw.searchQueryData.searchQuery;
+            if (!aggregationMap.has(sq)) {
+                aggregationMap.set(sq, {
+                    searchQueryScore: raw.searchQueryData.searchQueryScore,
+                    searchQueryVolume: 0,
+                    impressionData: { totalQueryImpressionCount: 0, asinImpressionCount: 0 },
+                    clickData: { totalClickCount: 0, asinClickCount: 0, totalMedianClickPrices: [], asinMedianClickPrices: [] },
+                    cartAddData: { totalCartAddCount: 0, asinCartAddCount: 0, totalMedianCartAddPrices: [], asinMedianCartAddPrices: [] },
+                    purchaseData: { totalPurchaseCount: 0, asinPurchaseCount: 0, totalMedianPurchasePrices: [], asinMedianPurchasePrices: [] },
+                });
+            }
+
+            const agg = aggregationMap.get(sq);
+            
+            agg.searchQueryVolume += raw.searchQueryData.searchQueryVolume || 0;
+            agg.impressionData.totalQueryImpressionCount += raw.impressionData?.totalQueryImpressionCount || 0;
+            agg.impressionData.asinImpressionCount += raw.impressionData?.asinImpressionCount || 0;
+            
+            agg.clickData.totalClickCount += raw.clickData?.totalClickCount || 0;
+            agg.clickData.asinClickCount += raw.clickData?.asinClickCount || 0;
+            if(raw.clickData?.totalMedianClickPrice?.amount) agg.clickData.totalMedianClickPrices.push(raw.clickData.totalMedianClickPrice.amount);
+            if(raw.clickData?.asinMedianClickPrice?.amount) agg.clickData.asinMedianClickPrices.push(raw.clickData.asinMedianClickPrice.amount);
+
+            agg.cartAddData.totalCartAddCount += raw.cartAddData?.totalCartAddCount || 0;
+            agg.cartAddData.asinCartAddCount += raw.cartAddData?.asinCartAddCount || 0;
+            if(raw.cartAddData?.totalMedianCartAddPrice?.amount) agg.cartAddData.totalMedianCartAddPrices.push(raw.cartAddData.totalMedianCartAddPrice.amount);
+            if(raw.cartAddData?.asinMedianCartAddPrice?.amount) agg.cartAddData.asinMedianCartAddPrices.push(raw.cartAddData.asinMedianCartAddPrice.amount);
+            
+            agg.purchaseData.totalPurchaseCount += raw.purchaseData?.totalPurchaseCount || 0;
+            agg.purchaseData.asinPurchaseCount += raw.purchaseData?.asinPurchaseCount || 0;
+            if(raw.purchaseData?.totalMedianPurchasePrice?.amount) agg.purchaseData.totalMedianPurchasePrices.push(raw.purchaseData.totalMedianPurchasePrice.amount);
+            if(raw.purchaseData?.asinMedianPurchasePrice?.amount) agg.purchaseData.asinMedianPurchasePrices.push(raw.purchaseData.asinMedianPurchasePrice.amount);
+        }
+
+        const transformedData = [];
+        const formatPrice = (priceObj) => priceObj ? `${priceObj.currencyCode} ${priceObj.amount.toFixed(2)}` : null;
+
+        for (const [searchQuery, agg] of aggregationMap.entries()) {
+            const currencyCode = 'USD';
+            const totalImpressions = agg.impressionData.totalQueryImpressionCount;
+
+            transformedData.push({
+                searchQuery,
+                searchQueryScore: agg.searchQueryScore,
+                searchQueryVolume: agg.searchQueryVolume,
+                impressions: {
+                    totalCount: totalImpressions,
+                    asinCount: agg.impressionData.asinImpressionCount,
+                    asinShare: totalImpressions > 0 ? agg.impressionData.asinImpressionCount / totalImpressions : 0,
+                },
+                clicks: {
+                    totalCount: agg.clickData.totalClickCount,
+                    clickRate: totalImpressions > 0 ? agg.clickData.totalClickCount / totalImpressions : 0,
+                    asinCount: agg.clickData.asinClickCount,
+                    asinShare: agg.clickData.totalClickCount > 0 ? agg.clickData.asinClickCount / agg.clickData.totalClickCount : 0,
+                    totalMedianPrice: formatPrice(getMedian(agg.clickData.totalMedianClickPrices) != null ? { amount: getMedian(agg.clickData.totalMedianClickPrices), currencyCode } : null),
+                    asinMedianPrice: formatPrice(getMedian(agg.clickData.asinMedianClickPrices) != null ? { amount: getMedian(agg.clickData.asinMedianClickPrices), currencyCode } : null),
+                },
+                cartAdds: {
+                    totalCount: agg.cartAddData.totalCartAddCount,
+                    cartAddRate: totalImpressions > 0 ? agg.cartAddData.totalCartAddCount / totalImpressions : 0,
+                    asinCount: agg.cartAddData.asinCartAddCount,
+                    asinShare: agg.cartAddData.totalCartAddCount > 0 ? agg.cartAddData.asinCartAddCount / agg.cartAddData.totalCartAddCount : 0,
+                    totalMedianPrice: formatPrice(getMedian(agg.cartAddData.totalMedianCartAddPrices) != null ? { amount: getMedian(agg.cartAddData.totalMedianCartAddPrices), currencyCode } : null),
+                    asinMedianPrice: formatPrice(getMedian(agg.cartAddData.asinMedianCartAddPrices) != null ? { amount: getMedian(agg.cartAddData.asinMedianCartAddPrices), currencyCode } : null),
+                },
+                purchases: {
+                    totalCount: agg.purchaseData.totalPurchaseCount,
+                    purchaseRate: totalImpressions > 0 ? agg.purchaseData.totalPurchaseCount / totalImpressions : 0,
+                    asinCount: agg.purchaseData.asinPurchaseCount,
+                    asinShare: agg.purchaseData.totalPurchaseCount > 0 ? agg.purchaseData.asinPurchaseCount / agg.purchaseData.totalPurchaseCount : 0,
+                    totalMedianPrice: formatPrice(getMedian(agg.purchaseData.totalMedianPurchasePrices) != null ? { amount: getMedian(agg.purchaseData.totalMedianPurchasePrices), currencyCode } : null),
+                    asinMedianPrice: formatPrice(getMedian(agg.purchaseData.asinMedianPurchasePrices) != null ? { amount: getMedian(agg.purchaseData.asinMedianPurchasePrices), currencyCode } : null),
+                },
+            });
+        }
+        
         const sortedWeeks = weeks.sort();
         const startDate = sortedWeeks[0];
         const lastWeekStartDate = new Date(sortedWeeks[sortedWeeks.length - 1]);

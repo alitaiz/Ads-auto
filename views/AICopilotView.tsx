@@ -199,16 +199,16 @@ export function AICopilotView() {
     };
 
     const handleViewData = (tool: 'st' | 'stream' | 'sat') => {
-        let dataToView: any[] | null = null;
+        let dataInfo: LoadedDataInfo | null = null;
         switch(tool) {
-            case 'st': dataToView = aiCache.loadedData.searchTermData.data; break;
-            case 'stream': dataToView = aiCache.loadedData.streamData.data; break;
-            case 'sat': dataToView = aiCache.loadedData.salesTrafficData.data; break;
+            case 'st': dataInfo = aiCache.loadedData.searchTermData; break;
+            case 'stream': dataInfo = aiCache.loadedData.streamData; break;
+            case 'sat': dataInfo = aiCache.loadedData.salesTrafficData; break;
         }
-
-        if (dataToView && dataToView.length > 0) {
+    
+        if (dataInfo && dataInfo.data && dataInfo.data.length > 0) {
             const key = `ai-data-viewer-${tool}-${Date.now()}`;
-            sessionStorage.setItem(key, JSON.stringify(dataToView));
+            sessionStorage.setItem(key, JSON.stringify(dataInfo));
             window.open(`#/data-viewer/${key}`, '_blank');
         }
     };

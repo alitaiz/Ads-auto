@@ -13,6 +13,18 @@ const styles: { [key: string]: React.CSSProperties } = {
         fontSize: '1.5rem',
         color: '#0f1111',
         marginBottom: '15px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '15px',
+        flexWrap: 'wrap'
+    },
+    dateRange: {
+        fontSize: '1rem',
+        fontWeight: 'normal',
+        color: '#555',
+        backgroundColor: '#e9ecef',
+        padding: '5px 10px',
+        borderRadius: '6px',
     },
     tableContainer: {
         overflowX: 'auto',
@@ -78,18 +90,32 @@ export function DataViewer() {
     const [data, setData] = useState<any[] | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [title, setTitle] = useState('Loaded Data');
+    const [dateRange, setDateRange] = useState<{ startDate: string, endDate: string } | null>(null);
 
     useEffect(() => {
         if (dataKey) {
             const jsonData = sessionStorage.getItem(dataKey);
             if (jsonData) {
                 try {
-                    setData(JSON.parse(jsonData));
+                    const storedPayload = JSON.parse(jsonData);
+                    
+                    if (Array.isArray(storedPayload)) {
+                        setData(storedPayload); // Handle old format
+                    } else {
+                        setData(storedPayload.data); // Handle new format
+                        setDateRange(storedPayload.dateRange);
+                    }
+                    
                     sessionStorage.removeItem(dataKey); // Clean up immediately after reading
 
-                    if (dataKey.includes('st')) setTitle('Search Term Report Data');
-                    else if (dataKey.includes('stream')) setTitle('Stream Data');
-                    else if (dataKey.includes('sat')) setTitle('Sales & Traffic Data');
+                    // FIX: Check for 'stream' before 'st' to avoid incorrect substring matching.
+                    if (dataKey.includes('stream')) {
+                        setTitle('Stream Data');
+                    } else if (dataKey.includes('st')) {
+                        setTitle('Search Term Report Data');
+                    } else if (dataKey.includes('sat')) {
+                        setTitle('Sales & Traffic Data');
+                    }
 
                 } catch (e) {
                     setError('Failed to parse data from storage.');
@@ -99,6 +125,17 @@ export function DataViewer() {
             }
         }
     }, [dataKey]);
+
+    const formatDate = (dateStr: string) => {
+        return new Date(dateStr + 'T00:00:00Z').toLocaleDateString('en-US', {
+            month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC'
+        });
+    };
+    
+    const formattedDateRange = dateRange
+        ? `${formatDate(dateRange.startDate)} - ${formatDate(dateRange.endDate)}`
+        : '';
+
 
     const renderContent = () => {
         if (error) {
@@ -139,7 +176,10 @@ export function DataViewer() {
 
     return (
         <div style={styles.container}>
-            <h1 style={styles.header}>{title}</h1>
+            <div style={styles.header}>
+                <h1>{title}</h1>
+                {formattedDateRange && <span style={styles.dateRange}>{formattedDateRange}</span>}
+            </div>
             {renderContent()}
         </div>
     );

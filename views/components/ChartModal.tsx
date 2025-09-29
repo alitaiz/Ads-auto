@@ -1,6 +1,6 @@
 // views/components/ChartModal.tsx
 import React, { useEffect, useState } from 'react';
-import { Line } from 'react-chartjs-2';
+import { Chart } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -169,7 +169,7 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
                 <div style={styles.modalBody}>
                     {loading && <div style={styles.message}>Loading history...</div>}
                     {error && <div style={styles.message}>{error}</div>}
-                    {!loading && !error && chartData && <Line options={chartOptions} data={chartData} />}
+                    {!loading && !error && chartData && <Chart type='bar' options={chartOptions} data={chartData} />}
                     {!loading && !error && !chartData && <div style={styles.message}>No historical data available.</div>}
                 </div>
                 <div style={styles.modalFooter}>

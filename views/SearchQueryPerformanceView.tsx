@@ -57,7 +57,7 @@ const styles: { [key: string]: React.CSSProperties } = {
     modalContent: { backgroundColor: 'white', padding: '20px', borderRadius: '8px', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' },
     modalHeader: { fontSize: '1.5rem', margin: '0 0 15px 0' },
     modalBody: { overflowY: 'auto', flex: 1, padding: '10px' },
-    modalFooter: { paddingTop: '15px', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'flex-end', gap: '10px' },
+    modalFooter: { paddingTop: '15px', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'flex-end', gap: '10px' },
     columnGroup: { marginBottom: '15px' },
     columnGroupTitle: { fontWeight: 'bold', borderBottom: '1px solid #eee', paddingBottom: '5px', marginBottom: '10px' },
     columnCheckbox: { display: 'block', marginBottom: '8px' },
@@ -238,7 +238,6 @@ export function SearchQueryPerformanceView() {
                 if (!response.ok) throw new Error('Failed to fetch filter options');
                 const data: PerformanceFilterOptions = await response.json();
                 setFilterOptions(data);
-                if (data.asins.length > 0) setSelectedAsin(data.asins[0]);
                 if (data.weeks.length > 0) setSelectedWeek(data.weeks[0].value);
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'An unknown error occurred.');
@@ -350,8 +349,8 @@ export function SearchQueryPerformanceView() {
         // Parse the date as UTC to avoid timezone issues.
         const endDate = new Date(selectedWeek + 'T00:00:00Z');
         const startDate = new Date(endDate);
-        // Go back 11 weeks (for a total of 12 data points including the current week)
-        startDate.setUTCDate(endDate.getUTCDate() - (11 * 7));
+        // Go back 51 weeks (for a total of 52 data points, i.e., one year) to provide a longer historical view.
+        startDate.setUTCDate(endDate.getUTCDate() - (51 * 7));
         
         const formatDate = (d: Date) => d.toISOString().split('T')[0];
 

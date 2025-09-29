@@ -1,7 +1,29 @@
 // views/components/ChartModal.tsx
 import React, { useEffect, useState } from 'react';
 import { Line } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
 import { AppChartConfig } from '../../types';
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend
+);
 
 const styles: { [key: string]: React.CSSProperties } = {
     modalBackdrop: { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1050, },
@@ -35,7 +57,7 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
 
     useEffect(() => {
         const fetchHistory = async () => {
-            if (!config) return;
+            if (!config || !dateRange.start || !dateRange.end) return;
             setLoading(true);
             setError(null);
             try {
@@ -66,16 +88,20 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
     }, [config, dateRange]);
 
     useEffect(() => {
-        if (!historyData || historyData.length === 0) return;
+        if (!historyData || historyData.length === 0) {
+            setChartData(null);
+            return;
+        };
 
         const formatDate = (dateStr: string) => {
              const d = new Date(dateStr);
+             // Use UTC methods to avoid timezone shifts
              return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
         };
 
         const labels = historyData.map(d => formatDate(d.report_date));
         
-        // FIX: Use `any[]` to allow mixed chart types (line and bar) which have slightly different properties.
+        // Use any[] to allow mixed chart types (line and bar)
         const datasets: any[] = [{
             type: 'line',
             label: config.metricLabel,

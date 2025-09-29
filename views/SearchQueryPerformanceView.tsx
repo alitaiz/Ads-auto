@@ -345,9 +345,25 @@ export function SearchQueryPerformanceView() {
         setCustomizeModalOpen(false);
     };
 
+    const getChartDateRange = () => {
+        if (!selectedWeek) return { start: '', end: '' };
+        // Parse the date as UTC to avoid timezone issues.
+        const endDate = new Date(selectedWeek + 'T00:00:00Z');
+        const startDate = new Date(endDate);
+        // Go back 11 weeks (for a total of 12 data points including the current week)
+        startDate.setUTCDate(endDate.getUTCDate() - (11 * 7));
+        
+        const formatDate = (d: Date) => d.toISOString().split('T')[0];
+
+        return {
+            start: formatDate(startDate),
+            end: formatDate(endDate)
+        };
+    };
+
     return (
         <div style={styles.viewContainer}>
-            {chartConfig && <ChartModal config={chartConfig} dateRange={{start: selectedWeek, end: selectedWeek}} onClose={() => setChartConfig(null)} />}
+            {chartConfig && <ChartModal config={chartConfig} dateRange={getChartDateRange()} onClose={() => setChartConfig(null)} />}
             {isCustomizeModalOpen && <CustomizeColumnsModal allColumns={allColumns} visibleColumnIds={new Set(visibleColumns.map(c => c.id))} onSave={handleSaveCustomization} onClose={() => setCustomizeModalOpen(false)} />}
             
             <header style={styles.header}>

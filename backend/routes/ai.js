@@ -91,25 +91,20 @@ router.post('/ai/tool/stream', async (req, res) => {
     if (!asin || !startDate || !endDate) {
         return res.status(400).json({ error: 'ASIN, startDate, and endDate are required.' });
     }
+
     try {
-        // Step 1: Find campaign IDs associated with the given ASIN within a recent lookback period to keep the scope relevant.
-        const lookbackDays = 60;
+        // Step 1: Find all campaign IDs associated with the given ASIN from historical reports.
+        const lookbackDays = 90;
         const lookbackStartDate = new Date(endDate);
         lookbackStartDate.setDate(lookbackStartDate.getDate() - (lookbackDays - 1));
         const lookbackStartDateStr = lookbackStartDate.toISOString().split('T')[0];
 
         const campaignIdQuery = `
-            SELECT DISTINCT campaign_id::bigint
-            FROM sponsored_products_search_term_report
-            WHERE asin = $1 AND report_date BETWEEN $2 AND $3
+            SELECT DISTINCT campaign_id::bigint FROM sponsored_products_search_term_report WHERE asin = $1 AND report_date BETWEEN $2 AND $3
             UNION
-            SELECT DISTINCT campaign_id::bigint
-            FROM sponsored_brands_search_term_report
-            WHERE asin = $1 AND report_date BETWEEN $2 AND $3
+            SELECT DISTINCT campaign_id::bigint FROM sponsored_brands_search_term_report WHERE asin = $1 AND report_date BETWEEN $2 AND $3
             UNION
-            SELECT DISTINCT campaign_id::bigint
-            FROM sponsored_display_targeting_report
-            WHERE asin = $1 AND report_date BETWEEN $2 AND $3;
+            SELECT DISTINCT campaign_id::bigint FROM sponsored_display_targeting_report WHERE asin = $1 AND report_date BETWEEN $2 AND $3;
         `;
         const campaignIdResult = await pool.query(campaignIdQuery, [asin, lookbackStartDateStr, endDate]);
         const campaignIds = campaignIdResult.rows.map(r => r.campaign_id);
@@ -118,57 +113,77 @@ router.post('/ai/tool/stream', async (req, res) => {
             console.log(`[AI Tool/Stream] No campaigns found for ASIN ${asin} in the last ${lookbackDays} days.`);
             return res.json({ data: [], dateRange: { startDate, endDate } });
         }
-        console.log(`[AI Tool/Stream] Found ${campaignIds.length} campaigns for ASIN ${asin}. Fetching aggregated daily stream data...`);
+        console.log(`[AI Tool/Stream] Found ${campaignIds.length} campaigns for ASIN ${asin}. Fetching detailed stream data...`);
 
-        // Step 2: Fetch and aggregate stream events by day for the found campaigns.
+        // Step 2: Fetch and aggregate stream events by campaign, ad group, and entity.
         const streamQuery = `
             WITH all_events AS (
                 SELECT
-                    -- Normalize timestamp and cast to date in the reporting timezone
-                    ((COALESCE(event_data ->> 'time_window_start', event_data ->> 'timeWindowStart'))::timestamptz AT TIME ZONE 'America/Los_Angeles')::date as event_date,
                     event_type,
+                    (COALESCE(event_data->>'campaignId', event_data->>'campaign_id'))::bigint AS campaign_id,
+                    (COALESCE(event_data->>'adGroupId', event_data->>'ad_group_id'))::bigint AS ad_group_id,
+                    (COALESCE(event_data->>'keywordId', event_data->>'keyword_id', event_data->>'targetId', event_data->>'target_id'))::bigint AS entity_id,
+                    COALESCE(event_data->>'keywordText', event_data->>'keyword_text', event_data->>'targeting_text', event_data->>'targetingExpression') AS entity_text,
                     event_data
                 FROM raw_stream_events
                 WHERE 
-                    (COALESCE(event_data ->> 'campaign_id', event_data ->> 'campaignId'))::bigint = ANY($1::bigint[])
-                    AND event_type IN ('sp-traffic', 'sp-conversion', 'sb-traffic', 'sb-conversion', 'sd-traffic', 'sd-conversion')
+                    (COALESCE(event_data->>'campaignId', event_data->>'campaign_id'))::bigint = ANY($1::bigint[])
                     AND ((COALESCE(event_data ->> 'time_window_start', event_data ->> 'timeWindowStart'))::timestamptz AT TIME ZONE 'America/Los_Angeles')::date BETWEEN $2::date AND $3::date
             ),
-            traffic_data AS (
+            aggregated AS (
                 SELECT
-                    event_date,
-                    SUM((COALESCE(event_data ->> 'impressions', '0'))::bigint) as impressions,
-                    SUM((COALESCE(event_data ->> 'clicks', '0'))::bigint) as clicks,
-                    SUM((COALESCE(event_data ->> 'cost', '0'))::numeric) as spend
+                    campaign_id,
+                    ad_group_id,
+                    entity_id,
+                    MAX(entity_text) as entity_text,
+
+                    -- Traffic Metrics
+                    SUM(COALESCE((event_data->>'impressions')::bigint, 0)) FILTER (WHERE event_type LIKE '%-traffic') as impressions,
+                    SUM(COALESCE((event_data->>'clicks')::bigint, 0)) FILTER (WHERE event_type LIKE '%-traffic') as clicks,
+                    SUM(COALESCE((event_data->>'cost')::numeric, 0)) FILTER (WHERE event_type LIKE '%-traffic') as spend,
+
+                    -- 1-Day Conversions (SP Only)
+                    SUM(COALESCE((event_data->>'purchases_1d')::bigint, 0)) FILTER (WHERE event_type = 'sp-conversion') as orders_1d,
+                    SUM(COALESCE((event_data->>'sales_1d')::numeric, 0)) FILTER (WHERE event_type = 'sp-conversion') as sales_1d,
+                    
+                    -- 7-Day Conversions (SP Only)
+                    SUM(COALESCE((event_data->>'purchases_7d')::bigint, 0)) FILTER (WHERE event_type = 'sp-conversion') as orders_7d,
+                    SUM(COALESCE((event_data->>'sales_7d')::numeric, 0)) FILTER (WHERE event_type = 'sp-conversion') as sales_7d,
+                    
+                    -- 14-Day Conversions (SP + SB/SD)
+                    SUM(
+                        COALESCE((event_data->>'purchases_14d')::bigint, 0) FILTER (WHERE event_type = 'sp-conversion') +
+                        COALESCE((event_data->>'purchases')::bigint, 0) FILTER (WHERE event_type IN ('sb-conversion', 'sd-conversion'))
+                    ) as orders_14d,
+                    SUM(
+                        COALESCE((event_data->>'sales_14d')::numeric, 0) FILTER (WHERE event_type = 'sp-conversion') +
+                        COALESCE((event_data->>'sales')::numeric, 0) FILTER (WHERE event_type IN ('sb-conversion', 'sd-conversion'))
+                    ) as sales_14d,
+
+                    -- 30-Day Conversions (SP Only)
+                    SUM(COALESCE((event_data->>'purchases_30d')::bigint, 0)) FILTER (WHERE event_type = 'sp-conversion') as orders_30d,
+                    SUM(COALESCE((event_data->>'sales_30d')::numeric, 0)) FILTER (WHERE event_type = 'sp-conversion') as sales_30d,
+                    
+                    -- Same SKU Sales (SP Only)
+                    SUM(COALESCE((event_data->>'attributed_sales_1d_same_sku')::numeric, 0)) FILTER (WHERE event_type = 'sp-conversion') as attributed_sales_1d_same_sku,
+                    SUM(COALESCE((event_data->>'attributed_sales_7d_same_sku')::numeric, 0)) FILTER (WHERE event_type = 'sp-conversion') as attributed_sales_7d_same_sku
+
                 FROM all_events
-                WHERE event_type IN ('sp-traffic', 'sb-traffic', 'sd-traffic')
-                GROUP BY 1
-            ),
-            conversion_data AS (
-                SELECT
-                    event_date,
-                    SUM((COALESCE(event_data ->> 'purchases_7d', event_data ->> 'purchases7d', event_data ->> 'purchases', '0'))::bigint) AS orders,
-                    SUM((COALESCE(event_data ->> 'sales_7d', event_data ->> 'sales7d', event_data ->> 'sales', '0'))::numeric) AS sales
-                FROM all_events
-                WHERE event_type IN ('sp-conversion', 'sb-conversion', 'sd-conversion')
-                GROUP BY 1
+                WHERE entity_id IS NOT NULL AND campaign_id IS NOT NULL AND ad_group_id IS NOT NULL
+                GROUP BY campaign_id, ad_group_id, entity_id
             )
-            SELECT
-                COALESCE(t.event_date, c.event_date)::text as date,
-                COALESCE(t.impressions, 0)::bigint as impressions,
-                COALESCE(t.clicks, 0)::bigint as clicks,
-                COALESCE(t.spend, 0.0)::numeric as spend,
-                COALESCE(c.orders, 0)::bigint as orders,
-                COALESCE(c.sales, 0.0)::numeric as sales
-            FROM traffic_data t
-            FULL OUTER JOIN conversion_data c ON t.event_date = c.event_date
-            WHERE COALESCE(t.event_date, c.event_date) IS NOT NULL
-            ORDER BY date ASC;
+            SELECT 
+                * 
+            FROM aggregated
+            WHERE
+                impressions > 0 OR clicks > 0 OR spend > 0 OR sales_7d > 0 OR sales_14d > 0
+            ORDER BY spend DESC NULLS LAST;
         `;
+
         const { rows } = await pool.query(streamQuery, [campaignIds, startDate, endDate]);
         res.json({ data: rows, dateRange: { startDate, endDate } });
     } catch (e) {
-        console.error('[AI Tool/Stream] Error fetching aggregated stream data:', e);
+        console.error('[AI Tool/Stream] Error fetching detailed stream data:', e);
         res.status(500).json({ error: e.message });
     }
 });

@@ -48,7 +48,10 @@ const styles: { [key: string]: React.CSSProperties } = {
     td: {
         padding: '10px 12px',
         borderBottom: '1px solid #ddd',
-        whiteSpace: 'nowrap',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        fontFamily: 'monospace',
+        fontSize: '0.9rem',
     },
     message: {
         padding: '20px',
@@ -67,14 +70,36 @@ const formatHeader = (header: string) => {
 };
 
 // Helper to render cell content more intelligently
-const renderCellContent = (value: any) => {
+const renderCellContent = (value: any, header: string) => {
     if (value === null || typeof value === 'undefined') {
         return <i style={{ color: '#999' }}>null</i>;
     }
     if (typeof value === 'object') {
-        return <pre style={{ margin: 0, fontSize: '0.8rem' }}>{JSON.stringify(value, null, 2)}</pre>;
+        const replacer = (key: string, val: any) => {
+            if (typeof val === 'number') {
+                const lowerKey = key.toLowerCase();
+                if (lowerKey.includes('rate') || lowerKey.includes('share') || lowerKey.includes('percentage')) {
+                    // It's a percentage value, format it as such.
+                    return `${(val * 100).toFixed(2)}%`;
+                }
+                if (val % 1 !== 0) { // It's a float
+                    const s = String(val);
+                    const decimalPart = s.split('.')[1];
+                    // Only round very long floats to avoid unnecessary changes to prices etc.
+                    if (decimalPart && decimalPart.length > 4) {
+                       return parseFloat(val.toFixed(4));
+                    }
+                }
+            }
+            return val;
+        };
+        return <pre style={{ margin: 0, fontSize: '0.8rem', whiteSpace: 'pre-wrap' }}>{JSON.stringify(value, replacer, 2)}</pre>;
     }
     if (typeof value === 'number') {
+        const lowerHeader = header.toLowerCase();
+        if (lowerHeader.includes('rate') || lowerHeader.includes('share') || lowerHeader.includes('percentage')) {
+            return `${(value * 100).toFixed(2)}%`;
+        }
         if (value % 1 !== 0) { // Check if it's a float
             return value.toFixed(2);
         }
@@ -108,8 +133,10 @@ export function DataViewer() {
                     
                     sessionStorage.removeItem(dataKey); // Clean up immediately after reading
 
-                    // FIX: Check for 'stream' before 'st' to avoid incorrect substring matching.
-                    if (dataKey.includes('stream')) {
+                    // Set title based on the data key
+                    if (dataKey.includes('sqp')) {
+                        setTitle('Search Query Performance Data');
+                    } else if (dataKey.includes('stream')) {
                         setTitle('Stream Data');
                     } else if (dataKey.includes('st')) {
                         setTitle('Search Term Report Data');
@@ -163,7 +190,7 @@ export function DataViewer() {
                             <tr key={index}>
                                 {headers.map(header => (
                                     <td key={`${header}-${index}`} style={styles.td}>
-                                        {renderCellContent(row[header])}
+                                        {renderCellContent(row[header], header)}
                                     </td>
                                 ))}
                             </tr>

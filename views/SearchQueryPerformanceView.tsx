@@ -121,6 +121,8 @@ export function SearchQueryPerformanceView() {
         setSortConfig({ key, direction });
     };
 
+    const getNested = (obj: any, path: string) => path.split('.').reduce((p, c) => (p && typeof p === 'object' && c in p) ? p[c] : null, obj);
+
     const sortedData = useMemo(() => {
         let sortableItems = [...data];
         if (sortConfig !== null) {
@@ -147,8 +149,6 @@ export function SearchQueryPerformanceView() {
         end.setDate(start.getDate() + 6);
         return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
     }, [selectedWeek]);
-
-    const getNested = (obj: any, path: string) => path.split('.').reduce((p, c) => (p && p[c] !== undefined) ? p[c] : null, obj);
 
     return (
         <div style={styles.viewContainer}>

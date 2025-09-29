@@ -144,24 +144,30 @@ router.get('/query-performance', async (req, res) => {
             
             agg.clickData.totalClickCount += raw.clickData?.totalClickCount || 0;
             agg.clickData.asinClickCount += raw.clickData?.asinClickCount || 0;
-            if(raw.clickData?.totalMedianClickPrice?.amount) agg.clickData.totalMedianClickPrices.push(raw.clickData.totalMedianClickPrice.amount);
-            if(raw.clickData?.asinMedianClickPrice?.amount) agg.clickData.asinMedianClickPrices.push(raw.clickData.asinMedianClickPrice.amount);
+            const clickTotalMedianPrice = getNested(raw, 'clickData.totalMedianClickPrice.amount');
+            if (typeof clickTotalMedianPrice === 'number') agg.clickData.totalMedianClickPrices.push(clickTotalMedianPrice);
+            const clickAsinMedianPrice = getNested(raw, 'clickData.asinMedianClickPrice.amount');
+            if (typeof clickAsinMedianPrice === 'number') agg.clickData.asinMedianClickPrices.push(clickAsinMedianPrice);
             agg.clickData.totalSameDayShippingClickCount += raw.clickData?.totalSameDayShippingClickCount || 0;
             agg.clickData.totalOneDayShippingClickCount += raw.clickData?.totalOneDayShippingClickCount || 0;
             agg.clickData.totalTwoDayShippingClickCount += raw.clickData?.totalTwoDayShippingClickCount || 0;
 
             agg.cartAddData.totalCartAddCount += raw.cartAddData?.totalCartAddCount || 0;
             agg.cartAddData.asinCartAddCount += raw.cartAddData?.asinCartAddCount || 0;
-            if(raw.cartAddData?.totalMedianCartAddPrice?.amount) agg.cartAddData.totalMedianCartAddPrices.push(raw.cartAddData.totalMedianCartAddPrice.amount);
-            if(raw.cartAddData?.asinMedianCartAddPrice?.amount) agg.cartAddData.asinMedianCartAddPrices.push(raw.cartAddData.asinMedianCartAddPrice.amount);
+            const cartAddTotalMedianPrice = getNested(raw, 'cartAddData.totalMedianCartAddPrice.amount');
+            if (typeof cartAddTotalMedianPrice === 'number') agg.cartAddData.totalMedianCartAddPrices.push(cartAddTotalMedianPrice);
+            const cartAddAsinMedianPrice = getNested(raw, 'cartAddData.asinMedianCartAddPrice.amount');
+            if (typeof cartAddAsinMedianPrice === 'number') agg.cartAddData.asinMedianCartAddPrices.push(cartAddAsinMedianPrice);
             agg.cartAddData.totalSameDayShippingCartAddCount += raw.cartAddData?.totalSameDayShippingCartAddCount || 0;
             agg.cartAddData.totalOneDayShippingCartAddCount += raw.cartAddData?.totalOneDayShippingCartAddCount || 0;
             agg.cartAddData.totalTwoDayShippingCartAddCount += raw.cartAddData?.totalTwoDayShippingCartAddCount || 0;
             
             agg.purchaseData.totalPurchaseCount += raw.purchaseData?.totalPurchaseCount || 0;
             agg.purchaseData.asinPurchaseCount += raw.purchaseData?.asinPurchaseCount || 0;
-            if(raw.purchaseData?.totalMedianPurchasePrice?.amount) agg.purchaseData.totalMedianPurchasePrices.push(raw.purchaseData.totalMedianPurchasePrice.amount);
-            if(raw.purchaseData?.asinMedianPurchasePrice?.amount) agg.purchaseData.asinMedianPurchasePrices.push(raw.purchaseData.asinMedianPurchasePrice.amount);
+            const purchaseTotalMedianPrice = getNested(raw, 'purchaseData.totalMedianPurchasePrice.amount');
+            if (typeof purchaseTotalMedianPrice === 'number') agg.purchaseData.totalMedianPurchasePrices.push(purchaseTotalMedianPrice);
+            const purchaseAsinMedianPrice = getNested(raw, 'purchaseData.asinMedianPurchasePrice.amount');
+            if (typeof purchaseAsinMedianPrice === 'number') agg.purchaseData.asinMedianPurchasePrices.push(purchaseAsinMedianPrice);
             agg.purchaseData.totalSameDayShippingPurchaseCount += raw.purchaseData?.totalSameDayShippingPurchaseCount || 0;
             agg.purchaseData.totalOneDayShippingPurchaseCount += raw.purchaseData?.totalOneDayShippingPurchaseCount || 0;
             agg.purchaseData.totalTwoDayShippingPurchaseCount += raw.purchaseData?.totalTwoDayShippingPurchaseCount || 0;
@@ -296,7 +302,7 @@ router.get('/query-performance-history', async (req, res) => {
                 date_trunc('week', report_date + interval '1 day')::date - interval '1 day' as week_start_date,
                 SUM(impressions)::int as sp_impressions,
                 SUM(clicks)::int as sp_clicks,
-                SUM(seven_day_total_orders)::int as sp_orders
+                SUM(purchases_7d)::int as sp_orders
             FROM sponsored_products_search_term_report
             WHERE customer_search_term = $1
               AND report_date BETWEEN $2 AND $3
@@ -336,27 +342,27 @@ router.get('/query-performance-history', async (req, res) => {
                     impressions: {
                         totalCount: raw.impressionData?.totalQueryImpressionCount,
                         asinCount: raw.impressionData?.asinImpressionCount,
-                        asinShare: normalizePercent(raw.impressionData?.asinImpressionShare),
+                        asinShare: normalizePercent(getNested(raw, 'impressionData.asinImpressionShare')),
                     },
                     clicks: {
                         totalCount: raw.clickData?.totalClickCount,
-                        clickRate: normalizePercent(raw.clickData?.totalClickRate),
+                        clickRate: normalizePercent(getNested(raw, 'clickData.totalClickRate')),
                         asinCount: raw.clickData?.asinClickCount,
-                        asinShare: normalizePercent(raw.clickData?.asinClickShare),
-                        totalMedianPrice: raw.clickData?.totalMedianClickPrice?.amount,
-                        asinMedianPrice: raw.clickData?.asinMedianClickPrice?.amount,
+                        asinShare: normalizePercent(getNested(raw, 'clickData.asinClickShare')),
+                        totalMedianPrice: getNested(raw, 'clickData.totalMedianClickPrice.amount'),
+                        asinMedianPrice: getNested(raw, 'clickData.asinMedianClickPrice.amount'),
                     },
                     cartAdds: {
                         totalCount: raw.cartAddData?.totalCartAddCount,
-                        cartAddRate: normalizePercent(raw.cartAddData?.totalCartAddRate),
+                        cartAddRate: normalizePercent(getNested(raw, 'cartAddData.totalCartAddRate')),
                         asinCount: raw.cartAddData?.asinCartAddCount,
-                        asinShare: normalizePercent(raw.cartAddData?.asinCartAddShare),
+                        asinShare: normalizePercent(getNested(raw, 'cartAddData.asinCartAddShare')),
                     },
                     purchases: {
                         totalCount: raw.purchaseData?.totalPurchaseCount,
-                        purchaseRate: normalizePercent(raw.purchaseData?.totalPurchaseRate),
+                        purchaseRate: normalizePercent(getNested(raw, 'purchaseData.totalPurchaseRate')),
                         asinCount: raw.purchaseData?.asinCount,
-                        asinShare: normalizePercent(raw.purchaseData?.asinShare),
+                        asinShare: normalizePercent(getNested(raw, 'purchaseData.asinShare')),
                     },
                 };
                 const value = getNested(transformed, metricId);

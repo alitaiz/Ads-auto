@@ -2,12 +2,16 @@
 import express from 'express';
 import pool from '../db.js';
 import { GoogleGenAI } from '@google/genai';
+import { OpenAI } from 'openai';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const conversations = new Map(); // In-memory store for conversation history
+
+// In-memory store now holds an object with history and the provider
+const conversations = new Map();
 
 // --- Tool Endpoints (for Frontend to pre-load data) ---
 
@@ -265,39 +269,7 @@ router.post('/ai/tool/sales-traffic', async (req, res) => {
     }
 });
 
-// --- Main Chat Endpoint ---
-
-router.post('/ai/chat', async (req, res) => {
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Transfer-Encoding', 'chunked');
-
-    try {
-        let { question, conversationId, context } = req.body;
-        
-        if (!question) {
-            throw new Error('Question is required.');
-        }
-
-        const systemInstruction = context.systemInstruction || 'You are an expert Amazon PPC Analyst.';
-
-        let history = [];
-        if (conversationId && conversations.has(conversationId)) {
-            history = conversations.get(conversationId);
-        } else {
-            conversationId = uuidv4();
-        }
-        
-        const chat = ai.chats.create({
-            model: 'gemini-2.5-flash',
-            history: history,
-            config: {
-                systemInstruction: systemInstruction
-            }
-        });
-        
-        let currentMessage;
-        if (history.length === 0) {
-            currentMessage = `
+const buildContextString = (context) => `
 Here is the data context for my question. Please analyze it before answering, paying close attention to the different date ranges for each data source.
 
 **Product Information:**
@@ -311,13 +283,43 @@ Here is the data context for my question. Please analyze it before answering, pa
 - Search Term Data (Date Range: ${context.performanceData.searchTermData.dateRange?.startDate} to ${context.performanceData.searchTermData.dateRange?.endDate}): ${JSON.stringify(context.performanceData.searchTermData.data, null, 2) || 'Not provided'}
 - Stream Data (Date Range: ${context.performanceData.streamData.dateRange?.startDate} to ${context.performanceData.streamData.dateRange?.endDate}): ${JSON.stringify(context.performanceData.streamData.data, null, 2) || 'Not provided'}
 - Sales & Traffic Data (Date Range: ${context.performanceData.salesTrafficData.dateRange?.startDate} to ${context.performanceData.salesTrafficData.dateRange?.endDate}): ${JSON.stringify(context.performanceData.salesTrafficData.data, null, 2) || 'Not provided'}
-
-**My Initial Question:**
-${question}
 `;
+
+// --- Main Chat Endpoints ---
+
+router.post('/ai/chat', async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    try {
+        let { question, conversationId, context } = req.body;
+        
+        if (!question) throw new Error('Question is required.');
+
+        const systemInstruction = context.systemInstruction || 'You are an expert Amazon PPC Analyst.';
+
+        let history = [];
+        if (conversationId && conversations.has(conversationId)) {
+            const convData = conversations.get(conversationId);
+            // If the provider is different, start a new conversation
+            if (convData.provider === 'gemini') {
+                history = convData.history;
+            } else {
+                conversationId = uuidv4(); // Reset for provider switch
+            }
         } else {
-            currentMessage = question;
+            conversationId = uuidv4();
         }
+        
+        const chat = ai.chats.create({
+            model: 'gemini-flash-latest',
+            history: history,
+            config: { systemInstruction }
+        });
+        
+        let currentMessage = (history.length === 0) 
+            ? `${buildContextString(context)}\n**My Initial Question:**\n${question}` 
+            : question;
 
         const resultStream = await chat.sendMessageStream({ message: currentMessage });
 
@@ -341,14 +343,82 @@ ${question}
             { role: 'user', parts: [{ text: currentMessage }] },
             { role: 'model', parts: [{ text: fullResponseText }] }
         ];
-        conversations.set(conversationId, newHistory);
+        conversations.set(conversationId, { history: newHistory, provider: 'gemini' });
         
         res.end();
 
     } catch (error) {
-        console.error("AI chat error:", error);
+        console.error("Gemini chat error:", error);
         res.status(500).end(JSON.stringify({ error: error.message }));
     }
 });
+
+router.post('/ai/chat-gpt', async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    try {
+        let { question, conversationId, context } = req.body;
+        if (!question) throw new Error('Question is required.');
+
+        const systemInstruction = context.systemInstruction || 'You are an expert Amazon PPC Analyst.';
+
+        let history = [];
+        if (conversationId && conversations.has(conversationId)) {
+            const convData = conversations.get(conversationId);
+            if (convData.provider === 'openai') {
+                history = convData.history;
+            } else {
+                conversationId = uuidv4();
+            }
+        } else {
+            conversationId = uuidv4();
+        }
+
+        const messages = [{ role: 'system', content: systemInstruction }];
+        if (history.length === 0) {
+            const contextMessage = `${buildContextString(context)}\n**My Initial Question:**\n${question}`;
+            messages.push({ role: 'user', content: contextMessage });
+        } else {
+            messages.push(...history);
+            messages.push({ role: 'user', content: question });
+        }
+        
+        const stream = await openai.chat.completions.create({
+            model: 'gpt-4o',
+            messages: messages,
+            stream: true,
+        });
+
+        let fullResponseText = '';
+        let firstChunk = true;
+        for await (const chunk of stream) {
+            const content = chunk.choices[0]?.delta?.content || '';
+            if (content) {
+                fullResponseText += content;
+                if (firstChunk) {
+                    res.write(JSON.stringify({ conversationId, content }) + '\n');
+                    firstChunk = false;
+                } else {
+                    res.write(JSON.stringify({ content }) + '\n');
+                }
+            }
+        }
+
+        const newHistory = [
+            ...history,
+            messages[messages.length - 1], // The user message
+            { role: 'assistant', content: fullResponseText }
+        ];
+        conversations.set(conversationId, { history: newHistory, provider: 'openai' });
+        
+        res.end();
+
+    } catch (error) {
+        console.error("OpenAI chat error:", error);
+        res.status(500).end(JSON.stringify({ error: error.message }));
+    }
+});
+
 
 export default router;

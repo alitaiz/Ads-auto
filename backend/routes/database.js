@@ -135,6 +135,40 @@ router.post('/database/sales-traffic', async (req, res) => {
     }
 });
 
+// POST /api/database/query-performance: Queries the Search Query Performance table.
+router.post('/database/query-performance', async (req, res) => {
+    const { startDate, endDate, asin, limit = 100 } = req.body;
+
+    if (!startDate || !endDate) {
+        return res.status(400).json({ error: 'startDate and endDate are required.' });
+    }
+
+    try {
+        let query = `
+            SELECT id, start_date, end_date, asin, search_query, performance_data
+            FROM query_performance_data
+            WHERE start_date >= $1 AND start_date <= $2
+        `;
+        const params = [startDate, endDate];
+
+        if (asin && asin.trim() !== '') {
+            params.push(asin.trim());
+            query += ` AND asin = $${params.length}`;
+        }
+
+        query += ` ORDER BY start_date DESC, (performance_data->'searchQueryData'->>'searchQueryVolume')::numeric DESC NULLS LAST`;
+
+        params.push(parseInt(limit, 10));
+        query += ` LIMIT $${params.length}`;
+
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('[DB Viewer - Query Performance] Query execution error:', error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 
 // NEW ENDPOINT: Check for missing dates in a range for a specific report type
 router.post('/database/check-missing-dates', async (req, res) => {

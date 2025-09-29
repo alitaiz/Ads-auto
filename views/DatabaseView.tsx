@@ -1,3 +1,4 @@
+// views/DatabaseView.tsx
 import React, { useState } from 'react';
 
 const styles: { [key: string]: React.CSSProperties } = {
@@ -149,7 +150,7 @@ const styles: { [key: string]: React.CSSProperties } = {
     },
 };
 
-type ViewType = 'streamEvents' | 'searchTermReport' | 'salesTrafficReport';
+type ViewType = 'streamEvents' | 'searchTermReport' | 'salesTrafficReport' | 'queryPerformance';
 
 interface StreamFilters {
     eventType: string;
@@ -175,11 +176,20 @@ interface SalesTrafficFilters {
     limit: number;
 }
 
-const getYesterday = () => {
+interface QueryPerformanceFilters {
+    startDate: string;
+    endDate: string;
+    asin: string;
+    limit: number;
+}
+
+const getDaysAgo = (days: number) => {
     const d = new Date();
-    d.setDate(d.getDate() - 2); // Default to 2 days ago for data availability
+    d.setDate(d.getDate() - days);
     return d.toISOString().split('T')[0];
 };
+
+const getYesterday = () => getDaysAgo(2); // Default to 2 days ago for data availability
 
 export function DatabaseView() {
     const [currentView, setCurrentView] = useState<ViewType>('searchTermReport');
@@ -197,6 +207,10 @@ export function DatabaseView() {
     const [salesTrafficFilters, setSalesTrafficFilters] = useState<SalesTrafficFilters>({
         startDate: getYesterday(), endDate: getYesterday(), limit: 100,
     });
+    
+    const [queryPerformanceFilters, setQueryPerformanceFilters] = useState<QueryPerformanceFilters>({
+        startDate: getDaysAgo(30), endDate: getDaysAgo(0), asin: '', limit: 100,
+    });
 
     const [results, setResults] = useState<any[]>([]);
     const [columns, setColumns] = useState<string[]>([]);
@@ -210,10 +224,11 @@ export function DatabaseView() {
         if (view === 'streamEvents') setStreamFilters(prev => ({ ...prev, [field]: value }));
         else if (view === 'searchTermReport') setSearchTermFilters(prev => ({ ...prev, [field]: value }));
         else if (view === 'salesTrafficReport') setSalesTrafficFilters(prev => ({ ...prev, [field]: value }));
+        else if (view === 'queryPerformance') setQueryPerformanceFilters(prev => ({ ...prev, [field]: value }));
     };
 
     const checkForMissingDates = async () => {
-        if (currentView === 'streamEvents') return; // Not applicable for stream events
+        if (currentView === 'streamEvents' || currentView === 'queryPerformance') return;
 
         const body = {
             source: currentView,
@@ -261,6 +276,10 @@ export function DatabaseView() {
             case 'salesTrafficReport':
                 endpoint = '/api/database/sales-traffic';
                 body = salesTrafficFilters;
+                break;
+            case 'queryPerformance':
+                endpoint = '/api/database/query-performance';
+                body = queryPerformanceFilters;
                 break;
         }
 
@@ -315,6 +334,29 @@ export function DatabaseView() {
 
     const renderFilters = () => {
         switch(currentView) {
+            case 'queryPerformance':
+                return (
+                    <div style={styles.filterGrid}>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="qp-startDate">Start Date (Week Start)</label>
+                            <input type="date" id="qp-startDate" style={styles.input} value={queryPerformanceFilters.startDate} onChange={e => handleFilterChange('queryPerformance', 'startDate', e.target.value)} />
+                        </div>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="qp-endDate">End Date (Week Start)</label>
+                            <input type="date" id="qp-endDate" style={styles.input} value={queryPerformanceFilters.endDate} onChange={e => handleFilterChange('queryPerformance', 'endDate', e.target.value)} />
+                        </div>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="qp-asin">ASIN (Optional)</label>
+                            <input type="text" id="qp-asin" style={styles.input} placeholder="e.g., B0..." value={queryPerformanceFilters.asin} onChange={e => handleFilterChange('queryPerformance', 'asin', e.target.value)} />
+                        </div>
+                        <div style={styles.filterGroup}>
+                            <label style={styles.label} htmlFor="qp-limit">Result Limit</label>
+                            <select id="qp-limit" style={styles.input} value={queryPerformanceFilters.limit} onChange={e => handleFilterChange('queryPerformance', 'limit', Number(e.target.value))}>
+                                <option value="100">100 rows</option><option value="500">500 rows</option><option value="1000">1000 rows</option>
+                            </select>
+                        </div>
+                    </div>
+                );
             case 'searchTermReport':
                 return (
                     <div style={styles.filterGrid}>
@@ -425,6 +467,7 @@ export function DatabaseView() {
                     <button type="button" style={currentView === 'streamEvents' ? {...styles.viewButton, ...styles.viewButtonActive} : styles.viewButton} onClick={() => setCurrentView('streamEvents')}>Stream Events</button>
                     <button type="button" style={currentView === 'searchTermReport' ? {...styles.viewButton, ...styles.viewButtonActive} : styles.viewButton} onClick={() => setCurrentView('searchTermReport')}>SP Search Term Report</button>
                     <button type="button" style={currentView === 'salesTrafficReport' ? {...styles.viewButton, ...styles.viewButtonActive} : styles.viewButton} onClick={() => setCurrentView('salesTrafficReport')}>Sales & Traffic Report</button>
+                    <button type="button" style={currentView === 'queryPerformance' ? {...styles.viewButton, ...styles.viewButtonActive} : styles.viewButton} onClick={() => setCurrentView('queryPerformance')}>Search Query Performance</button>
                 </div>
                 
                 {renderFilters()}

@@ -1,4 +1,3 @@
-
 // scripts/fetch_query_performance.js
 import pkg from 'pg';
 const { Pool } = pkg;
@@ -48,7 +47,7 @@ const getAccessToken = async () => {
     return data.access_token;
 };
 
-const createReport = async (accessToken, asins, reportingPeriod) => {
+const createReport = async (accessToken, asins, startDateStr, endDateStr) => {
     const response = await fetch(`${SP_API_ENDPOINT}/reports/2021-06-30/reports`, {
         method: 'POST',
         headers: { 'x-amz-access-token': accessToken, 'Content-Type': 'application/json' },
@@ -56,10 +55,12 @@ const createReport = async (accessToken, asins, reportingPeriod) => {
             reportType: REPORT_TYPE,
             reportOptions: {
                 asinGranularity: 'SKU',
-                reportingPeriod,
+                reportingPeriod: 'WEEKLY',
             },
-            dataStartTime: reportingPeriod.split('--')[0] + 'T00:00:00.000Z',
+            dataStartTime: `${startDateStr}T00:00:00Z`,
+            dataEndTime: `${endDateStr}T23:59:59Z`,
             marketplaceIds: [SP_API_MARKETPLACE_ID],
+            asins: asins,
         }),
     });
     const data = await response.json();
@@ -108,10 +109,7 @@ const fetchAndProcessReport = async (asins, weekStartDateStr, weekEndDateStr) =>
     const accessToken = await getAccessToken();
     console.log('[Fetcher] 🔑 Access Token obtained.');
     
-    // The Brand Analytics API now requires a specific date range format for the `reportingPeriod` option.
-    const reportingPeriod = `P7D--${weekEndDateStr}`;
-
-    const reportId = await createReport(accessToken, asins, reportingPeriod);
+    const reportId = await createReport(accessToken, asins, weekStartDateStr, weekEndDateStr);
     console.log(`[Fetcher] 📝 Report created with ID: ${reportId}`);
     const reportDocumentId = await pollForReport(accessToken, reportId);
     console.log(`[Fetcher] ✅ Report is ready. Document ID: ${reportDocumentId}`);

@@ -495,7 +495,8 @@ router.post('/ai/chat', async (req, res) => {
         }
 
         const chat = ai.chats.create({
-            model: 'gemini-2.5-flash',
+            // User requested to use the latest model as of 2025-09-29. Do not revert to gemini-2.5-flash.
+            model: 'gemini-flash-latest',
             history: history,
             config: { systemInstruction }
         });

@@ -1,13 +1,13 @@
 // views/AICopilotView.tsx
-import React, { useState, useRef, useEffect, useContext, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useContext, useCallback, useMemo } from 'react';
 import { marked } from 'marked';
 import { DataCacheContext } from '../contexts/DataCacheContext';
 import { ChatMessage, AICopilotCache, LoadedDataInfo, PerformanceFilterOptions } from '../types';
 
 const styles: { [key: string]: React.CSSProperties } = {
     container: { display: 'grid', gridTemplateColumns: '280px 1fr 1.5fr', gap: '20px', height: 'calc(100vh - 100px)', padding: '20px' },
-    historyPanel: { display: 'flex', flexDirection: 'column', gap: '10px', padding: '15px', backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)', overflowY: 'auto' },
-    leftPanel: { display: 'flex', flexDirection: 'column', gap: '15px', padding: '20px', backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)', overflowY: 'auto' },
+    historyPanel: { display: 'flex', flexDirection: 'column', gap: '10px', padding: '15px', backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)', overflowY: 'auto', transition: 'width 0.3s ease, padding 0.3s ease' },
+    leftPanel: { display: 'flex', flexDirection: 'column', gap: '15px', padding: '20px', backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)', overflowY: 'auto', transition: 'width 0.3s ease, padding 0.3s ease' },
     rightPanel: { display: 'flex', flexDirection: 'column', backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)' },
     formGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
     label: { fontWeight: 500, fontSize: '0.9rem' },
@@ -89,6 +89,26 @@ const styles: { [key: string]: React.CSSProperties } = {
         margin: 0,
         pointerEvents: 'none' // Prevent double-clicking
     },
+    // New Styles for Collapsible Panels
+    collapseButton: { background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '1.5rem', padding: '0 5px', lineHeight: 1 },
+    expandButton: {
+        padding: '10px',
+        border: '1px solid var(--primary-color)',
+        color: 'var(--primary-color)',
+        background: 'white',
+        borderRadius: '4px',
+        cursor: 'pointer',
+        fontWeight: 500,
+        width: '48px',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '8px'
+    },
+    expandButtonIcon: { fontSize: '1.5rem' },
+    expandButtonText: { writingMode: 'vertical-rl', textOrientation: 'mixed', fontWeight: 600 },
 };
 
 // ... (systemPromptTemplates remains the same)
@@ -174,6 +194,14 @@ export function AICopilotView() {
     const [conversationHistory, setConversationHistory] = useState<any[]>([]);
     const [profileId, setProfileId] = useState<string | null>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
+
+    const [isHistoryVisible, setIsHistoryVisible] = useState(true);
+    const [isControlsVisible, setIsControlsVisible] = useState(true);
+
+    const containerStyle = useMemo(() => ({
+        ...styles.container,
+        gridTemplateColumns: `${isHistoryVisible ? '280px' : 'auto'} ${isControlsVisible ? '1fr' : 'auto'} 1.5fr`,
+    }), [isHistoryVisible, isControlsVisible]);
 
     useEffect(() => {
         const storedProfileId = localStorage.getItem('selectedProfileId');
@@ -573,146 +601,180 @@ export function AICopilotView() {
     };
 
     return (
-        <div style={styles.container}>
-            <div style={styles.historyPanel}>
-                <div style={styles.historyHeader}>
-                    <button style={{...styles.toolButton, ...styles.newChatButton}} onClick={handleNewChat}>+ New Chat</button>
-                </div>
-                <ul style={styles.historyList}>
-                    {conversationHistory.map(conv => (
-                        <li key={conv.id}
-                            style={conv.id === aiCache.chat.conversationId ? {...styles.historyItem, ...styles.historyItemActive} : styles.historyItem}
-                            onClick={() => handleSelectConversation(conv.id)}
-                            title={conv.title}
-                        >
-                            <span style={styles.historyItemText}>{conv.title}</span>
-                            <button
-                                style={styles.deleteButton}
-                                onClick={(e) => { e.stopPropagation(); handleDeleteConversation(conv.id); }}
-                                title="Delete conversation"
-                            >
-                                &times;
-                            </button>
-                        </li>
-                    ))}
-                </ul>
-            </div>
-            <div style={styles.leftPanel}>
-                <h2>AI Co-Pilot Control Panel</h2>
-                <div style={styles.formGroup}>
-                    <label style={styles.label}>ASIN</label>
-                    <input style={styles.input} value={aiCache.productInfo.asin} onChange={e => setProductInfo('asin', e.target.value)} placeholder="e.g., B0DD45VPSL" />
-                </div>
-                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px'}}>
-                    <div style={styles.formGroup}>
-                        <label style={styles.label}>Sale Price</label>
-                        <input type="number" style={styles.input} value={aiCache.productInfo.salePrice} onChange={e => setProductInfo('salePrice', e.target.value)} placeholder="e.g., 29.99" />
-                    </div>
-                    <div style={styles.formGroup}>
-                        <label style={styles.label}>Product Cost</label>
-                        <input type="number" style={styles.input} value={aiCache.productInfo.cost} onChange={e => setProductInfo('cost', e.target.value)} placeholder="e.g., 7.50" />
-                    </div>
-                    <div style={styles.formGroup}>
-                        <label style={styles.label}>Amazon Fee</label>
-                        <input type="number" style={styles.input} value={totalAmazonFee > 0 ? totalAmazonFee.toFixed(2) : ''} onChange={handleAmazonFeeChange} placeholder="e.g., 11.00" title="Total of FBA Fee + Referral Fee" />
-                    </div>
-                </div>
-
-                <hr style={{border: 'none', borderTop: '1px solid var(--border-color)', margin: '10px 0'}}/>
-                
-                <div style={styles.toolCard}>
-                    <h3 style={styles.toolTitle}>AI Configuration</h3>
-                     <div style={{...styles.formGroup, marginTop: '10px'}}>
-                        <label style={styles.label}>System Prompt Template</label>
-                        <select
-                            style={styles.input}
-                            value={selectedTemplateName}
-                            onChange={handleTemplateChange}
-                        >
-                            {systemPromptTemplates.map(template => (
-                                <option key={template.name} value={template.name}>
-                                    {template.name}
-                                </option>
-                            ))}
-                            <option value="Custom">Custom</option>
-                        </select>
-                    </div>
-                    <div style={{...styles.formGroup, marginTop: '10px'}}>
-                        <label style={styles.label}>System Message (Prompt)</label>
-                        <textarea
-                            style={styles.textarea}
-                            value={aiCache.chat.systemInstruction}
-                            onChange={e => setSystemInstruction(e.target.value)}
-                            placeholder="Define the AI's role, context, and instructions here..."
-                        />
-                    </div>
-                </div>
-
-
-                <div style={styles.toolCard}>
-                    <div style={styles.toolHeader}>
-                        <h3 style={styles.toolTitle}>Load Performance Data</h3>
-                    </div>
-                    <div style={styles.formGroup}>
-                        <label style={styles.label}>Date Range (for ST, Stream, S&T)</label>
-                        <div style={styles.dateInputContainer}>
-                            <input type="date" style={styles.input} value={aiCache.dateRange.startDate} onChange={e => setDateRange('startDate', e.target.value)} />
-                            <input type="date" style={styles.input} value={aiCache.dateRange.endDate} onChange={e => setDateRange('endDate', e.target.value)} />
+        <div style={containerStyle}>
+            <div style={isHistoryVisible ? styles.historyPanel : {...styles.historyPanel, padding: '10px', width: 'auto', overflow: 'hidden' }}>
+                {isHistoryVisible ? (
+                    <>
+                        <div style={{...styles.historyHeader, display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                            <button style={{...styles.toolButton, ...styles.newChatButton}} onClick={handleNewChat}>+ New Chat</button>
+                            <button 
+                                onClick={() => setIsHistoryVisible(false)} 
+                                title="Hide History" 
+                                style={styles.collapseButton}
+                                onMouseOver={(e) => (e.currentTarget.style.color = 'var(--primary-color)')}
+                                onMouseOut={(e) => (e.currentTarget.style.color = '#888')}
+                            >«</button>
                         </div>
-                    </div>
-                    <div style={{marginTop: '15px', display: 'flex', flexDirection: 'column', gap: '15px'}}>
-                        <ToolButton tool="st" onRun={handleLoadData} onView={handleViewData} loading={loading.st} dataInfo={aiCache.loadedData.searchTermData} error={error.st} name="Search Term Report" />
-                        <ToolButton tool="stream" onRun={handleLoadData} onView={handleViewData} loading={loading.stream} dataInfo={aiCache.loadedData.streamData} error={error.stream} name="Stream Data" />
-                        <ToolButton tool="sat" onRun={handleLoadData} onView={handleViewData} loading={loading.sat} dataInfo={aiCache.loadedData.salesTrafficData} error={error.sat} name="Sales & Traffic" />
-                         <div style={{borderTop: '1px dashed var(--border-color)', paddingTop: '15px'}}>
-                            <div style={{...styles.formGroup, marginBottom: '15px'}}>
-                                <label style={styles.label}>Search Query Performance Week</label>
-                                <div style={styles.sqpDropdown} ref={sqpDropdownRef}>
+                        <ul style={styles.historyList}>
+                            {conversationHistory.map(conv => (
+                                <li key={conv.id}
+                                    style={conv.id === aiCache.chat.conversationId ? {...styles.historyItem, ...styles.historyItemActive} : styles.historyItem}
+                                    onClick={() => handleSelectConversation(conv.id)}
+                                    title={conv.title}
+                                >
+                                    <span style={styles.historyItemText}>{conv.title}</span>
                                     <button
-                                        type="button"
-                                        style={styles.sqpDropdownButton}
-                                        onClick={() => setIsSqpDropdownOpen(prev => !prev)}
-                                        disabled={sqpFilterOptions.length === 0}
-                                        aria-haspopup="listbox"
-                                        aria-expanded={isSqpDropdownOpen}
+                                        style={styles.deleteButton}
+                                        onClick={(e) => { e.stopPropagation(); handleDeleteConversation(conv.id); }}
+                                        title="Delete conversation"
                                     >
-                                        <span>{getSqpButtonText()}</span>
-                                        <span style={{transform: isSqpDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s'}}>▼</span>
+                                        &times;
                                     </button>
-                                    {isSqpDropdownOpen && (
-                                        <div style={styles.sqpDropdownPanel} role="listbox">
-                                            {sqpFilterOptions.length === 0 ? (
-                                                <div style={styles.sqpDropdownItem}>Loading weeks...</div>
-                                            ) : (
-                                                sqpFilterOptions.map(week => (
-                                                    <div
-                                                        key={week.value}
-                                                        style={hoveredWeek === week.value ? {...styles.sqpDropdownItem, ...styles.sqpDropdownItemHover} : styles.sqpDropdownItem}
-                                                        onMouseEnter={() => setHoveredWeek(week.value)}
-                                                        onMouseLeave={() => setHoveredWeek(null)}
-                                                        onClick={() => handleSqpWeekToggle(week.value)}
-                                                        role="option"
-                                                        aria-selected={selectedWeeks.includes(week.value)}
-                                                    >
-                                                        <input
-                                                            type="checkbox"
-                                                            style={styles.checkbox}
-                                                            checked={selectedWeeks.includes(week.value)}
-                                                            readOnly
-                                                            tabIndex={-1}
-                                                        />
-                                                        <span style={{cursor: 'pointer'}}>{week.label}</span>
-                                                    </div>
-                                                ))
-                                            )}
-                                        </div>
-                                    )}
+                                </li>
+                            ))}
+                        </ul>
+                    </>
+                ) : (
+                    <button onClick={() => setIsHistoryVisible(true)} title="Show History" style={styles.expandButton}>
+                        <span style={styles.expandButtonIcon}>»</span>
+                        <span style={styles.expandButtonText}>History</span>
+                    </button>
+                )}
+            </div>
+            <div style={isControlsVisible ? styles.leftPanel : {...styles.leftPanel, padding: '10px', width: 'auto', overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
+                {isControlsVisible ? (
+                    <>
+                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                            <h2 style={{margin: 0}}>AI Co-Pilot Control Panel</h2>
+                            <button 
+                                onClick={() => setIsControlsVisible(false)} 
+                                title="Hide Controls" 
+                                style={styles.collapseButton}
+                                onMouseOver={(e) => (e.currentTarget.style.color = 'var(--primary-color)')}
+                                onMouseOut={(e) => (e.currentTarget.style.color = '#888')}
+                            >«</button>
+                        </div>
+                        <div style={styles.formGroup}>
+                            <label style={styles.label}>ASIN</label>
+                            <input style={styles.input} value={aiCache.productInfo.asin} onChange={e => setProductInfo('asin', e.target.value)} placeholder="e.g., B0DD45VPSL" />
+                        </div>
+                        <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px'}}>
+                            <div style={styles.formGroup}>
+                                <label style={styles.label}>Sale Price</label>
+                                <input type="number" style={styles.input} value={aiCache.productInfo.salePrice} onChange={e => setProductInfo('salePrice', e.target.value)} placeholder="e.g., 29.99" />
+                            </div>
+                            <div style={styles.formGroup}>
+                                <label style={styles.label}>Product Cost</label>
+                                <input type="number" style={styles.input} value={aiCache.productInfo.cost} onChange={e => setProductInfo('cost', e.target.value)} placeholder="e.g., 7.50" />
+                            </div>
+                            <div style={styles.formGroup}>
+                                <label style={styles.label}>Amazon Fee</label>
+                                <input type="number" style={styles.input} value={totalAmazonFee > 0 ? totalAmazonFee.toFixed(2) : ''} onChange={handleAmazonFeeChange} placeholder="e.g., 11.00" title="Total of FBA Fee + Referral Fee" />
+                            </div>
+                        </div>
+
+                        <hr style={{border: 'none', borderTop: '1px solid var(--border-color)', margin: '10px 0'}}/>
+                        
+                        <div style={styles.toolCard}>
+                            <h3 style={styles.toolTitle}>AI Configuration</h3>
+                             <div style={{...styles.formGroup, marginTop: '10px'}}>
+                                <label style={styles.label}>System Prompt Template</label>
+                                <select
+                                    style={styles.input}
+                                    value={selectedTemplateName}
+                                    onChange={handleTemplateChange}
+                                >
+                                    {systemPromptTemplates.map(template => (
+                                        <option key={template.name} value={template.name}>
+                                            {template.name}
+                                        </option>
+                                    ))}
+                                    <option value="Custom">Custom</option>
+                                </select>
+                            </div>
+                            <div style={{...styles.formGroup, marginTop: '10px'}}>
+                                <label style={styles.label}>System Message (Prompt)</label>
+                                <textarea
+                                    style={styles.textarea}
+                                    value={aiCache.chat.systemInstruction}
+                                    onChange={e => setSystemInstruction(e.target.value)}
+                                    placeholder="Define the AI's role, context, and instructions here..."
+                                />
+                            </div>
+                        </div>
+
+
+                        <div style={styles.toolCard}>
+                            <div style={styles.toolHeader}>
+                                <h3 style={styles.toolTitle}>Load Performance Data</h3>
+                            </div>
+                            <div style={styles.formGroup}>
+                                <label style={styles.label}>Date Range (for ST, Stream, S&T)</label>
+                                <div style={styles.dateInputContainer}>
+                                    <input type="date" style={styles.input} value={aiCache.dateRange.startDate} onChange={e => setDateRange('startDate', e.target.value)} />
+                                    <input type="date" style={styles.input} value={aiCache.dateRange.endDate} onChange={e => setDateRange('endDate', e.target.value)} />
                                 </div>
                             </div>
-                            <ToolButton tool="sqp" onRun={handleLoadData} onView={handleViewData} loading={loading.sqp} dataInfo={aiCache.loadedData.searchQueryPerformanceData} error={error.sqp} name="Search Query Performance" />
+                            <div style={{marginTop: '15px', display: 'flex', flexDirection: 'column', gap: '15px'}}>
+                                <ToolButton tool="st" onRun={handleLoadData} onView={handleViewData} loading={loading.st} dataInfo={aiCache.loadedData.searchTermData} error={error.st} name="Search Term Report" />
+                                <ToolButton tool="stream" onRun={handleLoadData} onView={handleViewData} loading={loading.stream} dataInfo={aiCache.loadedData.streamData} error={error.stream} name="Stream Data" />
+                                <ToolButton tool="sat" onRun={handleLoadData} onView={handleViewData} loading={loading.sat} dataInfo={aiCache.loadedData.salesTrafficData} error={error.sat} name="Sales & Traffic" />
+                                 <div style={{borderTop: '1px dashed var(--border-color)', paddingTop: '15px'}}>
+                                    <div style={{...styles.formGroup, marginBottom: '15px'}}>
+                                        <label style={styles.label}>Search Query Performance Week</label>
+                                        <div style={styles.sqpDropdown} ref={sqpDropdownRef}>
+                                            <button
+                                                type="button"
+                                                style={styles.sqpDropdownButton}
+                                                onClick={() => setIsSqpDropdownOpen(prev => !prev)}
+                                                disabled={sqpFilterOptions.length === 0}
+                                                aria-haspopup="listbox"
+                                                aria-expanded={isSqpDropdownOpen}
+                                            >
+                                                <span>{getSqpButtonText()}</span>
+                                                <span style={{transform: isSqpDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s'}}>▼</span>
+                                            </button>
+                                            {isSqpDropdownOpen && (
+                                                <div style={styles.sqpDropdownPanel} role="listbox">
+                                                    {sqpFilterOptions.length === 0 ? (
+                                                        <div style={styles.sqpDropdownItem}>Loading weeks...</div>
+                                                    ) : (
+                                                        sqpFilterOptions.map(week => (
+                                                            <div
+                                                                key={week.value}
+                                                                style={hoveredWeek === week.value ? {...styles.sqpDropdownItem, ...styles.sqpDropdownItemHover} : styles.sqpDropdownItem}
+                                                                onMouseEnter={() => setHoveredWeek(week.value)}
+                                                                onMouseLeave={() => setHoveredWeek(null)}
+                                                                onClick={() => handleSqpWeekToggle(week.value)}
+                                                                role="option"
+                                                                aria-selected={selectedWeeks.includes(week.value)}
+                                                            >
+                                                                <input
+                                                                    type="checkbox"
+                                                                    style={styles.checkbox}
+                                                                    checked={selectedWeeks.includes(week.value)}
+                                                                    readOnly
+                                                                    tabIndex={-1}
+                                                                />
+                                                                <span style={{cursor: 'pointer'}}>{week.label}</span>
+                                                            </div>
+                                                        ))
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <ToolButton tool="sqp" onRun={handleLoadData} onView={handleViewData} loading={loading.sqp} dataInfo={aiCache.loadedData.searchQueryPerformanceData} error={error.sqp} name="Search Query Performance" />
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                </div>
+                    </>
+                ) : (
+                    <button onClick={() => setIsControlsVisible(true)} title="Show Controls" style={styles.expandButton}>
+                        <span style={styles.expandButtonIcon}>»</span>
+                        <span style={styles.expandButtonText}>Controls</span>
+                    </button>
+                )}
             </div>
             <div style={styles.rightPanel}>
                 <div style={styles.chatWindow}>

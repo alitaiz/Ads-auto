@@ -157,25 +157,44 @@ export interface SalesAndTrafficData {
     unitsOrdered?: number;
     orderedProductSales?: number;
     totalOrderItems?: number;
+    averageSalesPerOrderItem?: number;
     // B2B Sales Metrics
     unitsOrderedB2B?: number;
     orderedProductSalesB2B?: number;
     totalOrderItemsB2B?: number;
+    averageSalesPerOrderItemB2B?: number;
     // Traffic Metrics
     sessions?: number;
     pageViews?: number;
     buyBoxPercentage?: number;
     unitSessionPercentage?: number;
+    sessionPercentage?: number;
+    pageViewsPercentage?: number;
     // B2B Traffic Metrics
     sessionsB2B?: number;
     pageViewsB2B?: number;
     buyBoxPercentageB2B?: number;
     unitSessionPercentageB2B?: number;
+    sessionPercentageB2B?: number;
+    pageViewsPercentageB2B?: number;
     // Detailed Traffic Breakdowns
     browserSessions?: number;
     mobileAppSessions?: number;
     browserPageViews?: number;
     mobileAppPageViews?: number;
+    browserSessionPercentage?: number;
+    mobileAppSessionPercentage?: number;
+    browserPageViewsPercentage?: number;
+    mobileAppPageViewsPercentage?: number;
+    // B2B Detailed Traffic Breakdowns
+    browserSessionsB2B?: number;
+    mobileAppSessionsB2B?: number;
+    browserPageViewsB2B?: number;
+    mobileAppPageViewsB2B?: number;
+    browserSessionPercentageB2B?: number;
+    mobileAppSessionPercentageB2B?: number;
+    browserPageViewsPercentageB2B?: number;
+    mobileAppPageViewsPercentageB2B?: number;
 }
 
 export interface SPSearchTermReportData {

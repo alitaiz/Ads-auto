@@ -18,12 +18,13 @@ const getNested = (obj, path) => path.split('.').reduce((p, c) => (p && typeof p
  * @param {any} value - The value to normalize.
  * @returns {number | any} The normalized decimal, or the original value.
  */
-const normalizePercent = (value) => (typeof value === 'number' ? value / 100 : value);
+const normalizePercent = (value) => (typeof value === 'number' ? value / 100 : undefined);
 
 const transformSalesData = (row) => {
     if (!row) return null;
     const sales = row.sales_data || {};
     const traffic = row.traffic_data || {};
+
     return {
         parentAsin: row.parent_asin,
         childAsin: row.child_asin,
@@ -32,25 +33,44 @@ const transformSalesData = (row) => {
         unitsOrdered: sales.unitsOrdered,
         orderedProductSales: sales.orderedProductSales?.amount,
         totalOrderItems: sales.totalOrderItems,
+        averageSalesPerOrderItem: sales.averageSalesPerOrderItem?.amount,
         // B2B Sales Metrics
         unitsOrderedB2B: sales.unitsOrderedB2B,
         orderedProductSalesB2B: sales.orderedProductSalesB2B?.amount,
         totalOrderItemsB2B: sales.totalOrderItemsB2B,
+        averageSalesPerOrderItemB2B: sales.averageSalesPerOrderItemB2B?.amount,
         // Traffic Metrics
         sessions: traffic.sessions,
         pageViews: traffic.pageViews,
         buyBoxPercentage: normalizePercent(traffic.buyBoxPercentage),
         unitSessionPercentage: normalizePercent(traffic.unitSessionPercentage),
+        sessionPercentage: normalizePercent(traffic.sessionPercentage),
+        pageViewsPercentage: normalizePercent(traffic.pageViewsPercentage),
         // B2B Traffic Metrics
         sessionsB2B: traffic.sessionsB2B,
         pageViewsB2B: traffic.pageViewsB2B,
         buyBoxPercentageB2B: normalizePercent(traffic.buyBoxPercentageB2B),
         unitSessionPercentageB2B: normalizePercent(traffic.unitSessionPercentageB2B),
+        sessionPercentageB2B: normalizePercent(traffic.sessionPercentageB2B),
+        pageViewsPercentageB2B: normalizePercent(traffic.pageViewsPercentageB2B),
         // Detailed Traffic Breakdowns
         browserSessions: traffic.browserSessions,
         mobileAppSessions: traffic.mobileAppSessions,
         browserPageViews: traffic.browserPageViews,
         mobileAppPageViews: traffic.mobileAppPageViews,
+        browserSessionPercentage: normalizePercent(traffic.browserSessionPercentage),
+        mobileAppSessionPercentage: normalizePercent(traffic.mobileAppSessionPercentage),
+        browserPageViewsPercentage: normalizePercent(traffic.browserPageViewsPercentage),
+        mobileAppPageViewsPercentage: normalizePercent(traffic.mobileAppPageViewsPercentage),
+        // B2B Detailed Traffic Breakdowns
+        browserSessionsB2B: traffic.browserSessionsB2B,
+        mobileAppSessionsB2B: traffic.mobileAppSessionsB2B,
+        browserPageViewsB2B: traffic.browserPageViewsB2B,
+        mobileAppPageViewsB2B: traffic.mobileAppPageViewsB2B,
+        browserSessionPercentageB2B: normalizePercent(traffic.browserSessionPercentageB2B),
+        mobileAppSessionPercentageB2B: normalizePercent(traffic.mobileAppSessionPercentageB2B),
+        browserPageViewsPercentageB2B: normalizePercent(traffic.browserPageViewsPercentageB2B),
+        mobileAppPageViewsPercentageB2B: normalizePercent(traffic.mobileAppPageViewsPercentageB2B),
     };
 };
 

@@ -6,7 +6,7 @@ import { DataCacheContext } from '../contexts/DataCacheContext';
 const styles: { [key: string]: React.CSSProperties } = {
     viewContainer: {
         padding: '20px',
-        maxWidth: '1600px',
+        maxWidth: '100%', // Use full width
         margin: '0 auto',
     },
     header: {
@@ -73,6 +73,7 @@ const styles: { [key: string]: React.CSSProperties } = {
     },
     table: {
         width: '100%',
+        minWidth: '2800px', // Set a min-width to handle all columns
         borderCollapse: 'collapse',
     },
     th: {
@@ -215,28 +216,41 @@ export function SalesAndTrafficView() {
         }
         return sortableItems;
     }, [salesData, sortConfig]);
-
+    
+    // Comprehensive column definitions
     const columns = [
-        { id: 'childAsin', label: 'Child ASIN', sortable: false },
-        { id: 'sku', label: 'SKU', sortable: true },
-        { id: 'orderedProductSales', label: 'Ordered Sales', format: formatPrice, sortable: true },
-        { id: 'unitsOrdered', label: 'Units Ordered', format: formatNumber, sortable: true },
-        { id: 'totalOrderItems', label: 'Total Items', format: formatNumber, sortable: true },
-        { id: 'sessions', label: 'Sessions', format: formatNumber, sortable: true },
-        { id: 'pageViews', label: 'Page Views', format: formatNumber, sortable: true },
-        { id: 'unitSessionPercentage', label: 'Unit Session %', format: formatPercent, sortable: true },
-        { id: 'buyBoxPercentage', label: 'Buy Box %', format: formatPercent, sortable: true },
-        { id: 'orderedProductSalesB2B', label: 'Sales (B2B)', format: formatPrice, sortable: true },
-        { id: 'unitsOrderedB2B', label: 'Units (B2B)', format: formatNumber, sortable: true },
-        { id: 'sessionsB2B', label: 'Sessions (B2B)', format: formatNumber, sortable: true },
-        { id: 'pageViewsB2B', label: 'Page Views (B2B)', format: formatNumber, sortable: true },
-        { id: 'unitSessionPercentageB2B', label: 'Unit Session % (B2B)', format: formatPercent, sortable: true },
-        { id: 'buyBoxPercentageB2B', label: 'Buy Box % (B2B)', format: formatPercent, sortable: true },
-        { id: 'browserSessions', label: 'Browser Sessions', format: formatNumber, sortable: true },
-        { id: 'mobileAppSessions', label: 'Mobile Sessions', format: formatNumber, sortable: true },
-        { id: 'browserPageViews', label: 'Browser Views', format: formatNumber, sortable: true },
-        { id: 'mobileAppPageViews', label: 'Mobile Views', format: formatNumber, sortable: true },
-    ];
+        // IDs
+        { id: 'childAsin', label: 'Child ASIN' },
+        { id: 'sku', label: 'SKU' },
+        // Main Sales
+        { id: 'orderedProductSales', label: 'Ordered Sales', format: formatPrice },
+        { id: 'unitsOrdered', label: 'Units Ordered', format: formatNumber },
+        { id: 'totalOrderItems', label: 'Total Items', format: formatNumber },
+        { id: 'averageSalesPerOrderItem', label: 'Avg Sale/Item', format: formatPrice },
+        // Main Traffic
+        { id: 'sessions', label: 'Sessions', format: formatNumber },
+        { id: 'pageViews', label: 'Page Views', format: formatNumber },
+        { id: 'unitSessionPercentage', label: 'Unit Session %', format: formatPercent },
+        { id: 'sessionPercentage', label: 'Session %', format: formatPercent },
+        { id: 'pageViewsPercentage', label: 'Page View %', format: formatPercent },
+        { id: 'buyBoxPercentage', label: 'Buy Box %', format: formatPercent },
+        // B2B Sales
+        { id: 'orderedProductSalesB2B', label: 'Sales (B2B)', format: formatPrice },
+        { id: 'unitsOrderedB2B', label: 'Units (B2B)', format: formatNumber },
+        { id: 'totalOrderItemsB2B', label: 'Items (B2B)', format: formatNumber },
+        { id: 'averageSalesPerOrderItemB2B', label: 'Avg Sale/Item (B2B)', format: formatPrice },
+        // B2B Traffic
+        { id: 'sessionsB2B', label: 'Sessions (B2B)', format: formatNumber },
+        { id: 'pageViewsB2B', label: 'Page Views (B2B)', format: formatNumber },
+        { id: 'unitSessionPercentageB2B', label: 'Unit Session % (B2B)', format: formatPercent },
+        { id: 'buyBoxPercentageB2B', label: 'Buy Box % (B2B)', format: formatPercent },
+        // Device Traffic
+        { id: 'browserSessions', label: 'Browser Sessions', format: formatNumber },
+        { id: 'mobileAppSessions', label: 'Mobile Sessions', format: formatNumber },
+        { id: 'browserPageViews', label: 'Browser Views', format: formatNumber },
+        { id: 'mobileAppPageViews', label: 'Mobile Views', format: formatNumber },
+    ].map(c => ({...c, sortable: c.id !== 'childAsin'})); // Make all metric columns sortable
+
 
     const renderContent = () => {
         if (loading) return <div style={styles.message}>Loading data...</div>;

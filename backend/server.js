@@ -22,8 +22,8 @@ const port = process.env.PORT || 4001;
 // --- Middlewares ---
 // Enable Cross-Origin Resource Sharing for all routes
 app.use(cors());
-// Enable parsing of JSON request bodies
-app.use(express.json());
+// Enable parsing of JSON request bodies with an increased limit to prevent "PayloadTooLargeError"
+app.use(express.json({ limit: '50mb' }));
 
 // --- API Routes ---
 // Mount the various API routers to their respective base paths.

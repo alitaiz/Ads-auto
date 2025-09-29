@@ -432,13 +432,20 @@ export function AICopilotView() {
         abortControllerRef.current = controller;
 
         try {
+            // Refactored payload: Send data parameters instead of raw data
             const payload = {
                 question: questionToAsk,
                 conversationId: aiCache.chat.conversationId,
                 context: {
                     productInfo: aiCache.productInfo,
-                    performanceData: aiCache.loadedData,
                     systemInstruction: aiCache.chat.systemInstruction,
+                },
+                dataParameters: {
+                    asin: aiCache.productInfo.asin,
+                    searchTermDateRange: aiCache.loadedData.searchTermData.data ? aiCache.loadedData.searchTermData.dateRange : null,
+                    streamDateRange: aiCache.loadedData.streamData.data ? aiCache.loadedData.streamData.dateRange : null,
+                    salesTrafficDateRange: aiCache.loadedData.salesTrafficData.data ? aiCache.loadedData.salesTrafficData.dateRange : null,
+                    searchQueryPerformanceWeeks: aiCache.loadedData.searchQueryPerformanceData.data ? selectedWeeks : null,
                 },
                 profileId,
                 provider: aiProvider,

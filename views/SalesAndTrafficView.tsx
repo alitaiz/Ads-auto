@@ -217,13 +217,27 @@ export function SalesAndTrafficView() {
     }, [salesData, sortConfig]);
 
     const columns = [
-        { id: 'childAsin', label: 'Child ASIN' },
-        { id: 'sessions', label: 'Sessions', format: formatNumber },
-        { id: 'pageViews', label: 'Page Views', format: formatNumber },
-        { id: 'unitSessionPercentage', label: 'Unit Session %', format: formatPercent },
-        { id: 'unitsOrdered', label: 'Units Ordered', format: formatNumber },
-        { id: 'orderedProductSales', label: 'Ordered Product Sales', format: formatPrice },
-        { id: 'totalOrderItems', label: 'Total Order Items', format: formatNumber },
+        { id: 'childAsin', label: 'Child ASIN', sortable: false },
+        { id: 'sku', label: 'SKU', sortable: true },
+        { id: 'parentAsin', label: 'Parent ASIN', sortable: false },
+        { id: 'orderedProductSales', label: 'Ordered Sales', format: formatPrice, sortable: true },
+        { id: 'unitsOrdered', label: 'Units Ordered', format: formatNumber, sortable: true },
+        { id: 'sessions', label: 'Sessions', format: formatNumber, sortable: true },
+        { id: 'pageViews', label: 'Page Views', format: formatNumber, sortable: true },
+        { id: 'unitSessionPercentage', label: 'Unit Session %', format: formatPercent, sortable: true },
+        { id: 'buyBoxPercentage', label: 'Buy Box %', format: formatPercent, sortable: true },
+        { id: 'orderedProductSalesB2B', label: 'Sales (B2B)', format: formatPrice, sortable: true },
+        { id: 'unitsOrderedB2B', label: 'Units (B2B)', format: formatNumber, sortable: true },
+        { id: 'sessionsB2B', label: 'Sessions (B2B)', format: formatNumber, sortable: true },
+        { id: 'pageViewsB2B', label: 'Page Views (B2B)', format: formatNumber, sortable: true },
+        { id: 'unitSessionPercentageB2B', label: 'Unit Session % (B2B)', format: formatPercent, sortable: true },
+        { id: 'buyBoxPercentageB2B', label: 'Buy Box % (B2B)', format: formatPercent, sortable: true },
+        { id: 'browserSessions', label: 'Browser Sessions', format: formatNumber, sortable: true },
+        { id: 'mobileAppSessions', label: 'Mobile Sessions', format: formatNumber, sortable: true },
+        { id: 'browserPageViews', label: 'Browser Views', format: formatNumber, sortable: true },
+        { id: 'mobileAppPageViews', label: 'Mobile Views', format: formatNumber, sortable: true },
+        { id: 'totalOrderItems', label: 'Total Items', format: formatNumber, sortable: true },
+        { id: 'averageSalesPerOrderItem', label: 'Avg Sales/Item', format: formatPrice, sortable: true },
     ];
 
     const renderContent = () => {
@@ -237,7 +251,7 @@ export function SalesAndTrafficView() {
                 <thead>
                     <tr>
                         {columns.map(col => (
-                             <th key={col.id} style={{...styles.th, cursor: 'pointer'}} onClick={() => requestSort(col.id)}>
+                             <th key={col.id} style={{...styles.th, cursor: col.sortable ? 'pointer' : 'default'}} onClick={() => col.sortable && requestSort(col.id)}>
                                 {col.label} {sortConfig.key === col.id ? (sortConfig.direction === 'ascending' ? '▲' : '▼') : ''}
                             </th>
                         ))}

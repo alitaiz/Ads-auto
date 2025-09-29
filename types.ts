@@ -153,14 +153,28 @@ export interface SalesAndTrafficData {
     parentAsin: string;
     childAsin: string;
     sku: string | null;
+    // Sales Metrics
     unitsOrdered?: number;
     orderedProductSales?: number;
-    sessions?: number;
-    pageViews?: number;
-    featuredOfferPercentage?: number;
-    unitSessionPercentage?: number;
     totalOrderItems?: number;
     averageSalesPerOrderItem?: number;
+    unitsOrderedB2B?: number;
+    orderedProductSalesB2B?: number;
+    totalOrderItemsB2B?: number;
+    averageSalesPerOrderItemB2B?: number;
+    // Traffic Metrics
+    sessions?: number;
+    pageViews?: number;
+    unitSessionPercentage?: number;
+    buyBoxPercentage?: number; // Renamed from featuredOfferPercentage
+    sessionsB2B?: number;
+    pageViewsB2B?: number;
+    unitSessionPercentageB2B?: number;
+    buyBoxPercentageB2B?: number;
+    browserSessions?: number;
+    mobileAppSessions?: number;
+    browserPageViews?: number;
+    mobileAppPageViews?: number;
 }
 
 export interface SPSearchTermReportData {

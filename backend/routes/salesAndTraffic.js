@@ -1,3 +1,4 @@
+// backend/routes/salesAndTraffic.js
 import express from 'express';
 import pool from '../db.js';
 
@@ -19,6 +20,38 @@ const getNested = (obj, path) => path.split('.').reduce((p, c) => (p && typeof p
  */
 const normalizePercent = (value) => (typeof value === 'number' ? value / 100 : value);
 
+const transformSalesData = (row) => {
+    if (!row) return null;
+    const sales = row.sales_data || {};
+    const traffic = row.traffic_data || {};
+    return {
+        parentAsin: row.parent_asin,
+        childAsin: row.child_asin,
+        sku: row.sku,
+        // Sales Metrics
+        unitsOrdered: sales.unitsOrdered,
+        orderedProductSales: sales.orderedProductSales?.amount,
+        totalOrderItems: sales.totalOrderItems,
+        averageSalesPerOrderItem: sales.averageSalesPerOrderItem?.amount,
+        unitsOrderedB2B: sales.unitsOrderedB2B,
+        orderedProductSalesB2B: sales.orderedProductSalesB2B?.amount,
+        totalOrderItemsB2B: sales.totalOrderItemsB2B,
+        averageSalesPerOrderItemB2B: sales.averageSalesPerOrderItemB2B?.amount,
+        // Traffic Metrics
+        sessions: traffic.sessions,
+        pageViews: traffic.pageViews,
+        unitSessionPercentage: normalizePercent(traffic.unitSessionPercentage),
+        buyBoxPercentage: normalizePercent(traffic.buyBoxPercentage),
+        sessionsB2B: traffic.sessionsB2B,
+        pageViewsB2B: traffic.pageViewsB2B,
+        unitSessionPercentageB2B: normalizePercent(traffic.unitSessionPercentageB2B),
+        buyBoxPercentageB2B: normalizePercent(traffic.buyBoxPercentageB2B),
+        browserSessions: traffic.browserSessions,
+        mobileAppSessions: traffic.mobileAppSessions,
+        browserPageViews: traffic.browserPageViews,
+        mobileAppPageViews: traffic.mobileAppPageViews,
+    };
+};
 
 // --- Sales & Traffic Endpoints ---
 
@@ -43,34 +76,6 @@ router.get('/sales-and-traffic-filters', async (req, res) => {
     }
 });
 
-const transformSalesData = (row) => {
-    if (!row) return null;
-    const sales = row.sales_data || {};
-    const traffic = row.traffic_data || {};
-    return {
-        parentAsin: row.parent_asin,
-        childAsin: row.child_asin,
-        sku: row.sku,
-        // Sales Metrics
-        unitsOrdered: sales.unitsOrdered,
-        unitsOrderedB2B: sales.unitsOrderedB2B,
-        orderedProductSales: sales.orderedProductSales?.amount,
-        orderedProductSalesB2B: sales.orderedProductSalesB2B?.amount,
-        totalOrderItems: sales.totalOrderItems,
-        totalOrderItemsB2B: sales.totalOrderItemsB2B,
-        averageSalesPerOrderItem: sales.averageSalesPerOrderItem?.amount,
-        averageSalesPerOrderItemB2B: sales.averageSalesPerOrderItemB2B?.amount,
-        // Traffic Metrics
-        browserSessions: traffic.browserSessions,
-        mobileAppSessions: traffic.mobileAppSessions,
-        sessions: traffic.sessions,
-        browserPageViews: traffic.browserPageViews,
-        mobileAppPageViews: traffic.mobileAppPageViews,
-        pageViews: traffic.pageViews,
-        featuredOfferPercentage: normalizePercent(traffic.featuredOfferPercentage),
-        unitSessionPercentage: normalizePercent(traffic.unitSessionPercentage),
-    };
-};
 
 router.get('/sales-and-traffic', async (req, res) => {
     const { asin, date } = req.query;

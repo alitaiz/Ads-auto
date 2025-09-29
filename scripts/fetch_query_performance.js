@@ -26,8 +26,9 @@ const pool = new Pool({
 });
 
 const SP_API_ENDPOINT = 'https://sellingpartnerapi-na.amazon.com';
-const REPORT_TYPE = 'GET_SEARCH_QUERY_PERFORMANCE_REPORT';
-const ASIN_CHUNK_SIZE = 10; // Amazon API limit for this report
+// CORRECTED: This is the official report type for Brand Analytics Search Query Performance.
+const REPORT_TYPE = 'GET_BRAND_ANALYTICS_SEARCH_QUERY_PERFORMANCE_REPORT';
+const ASIN_CHUNK_SIZE = 10;
 
 // --- SP-API Client Logic ---
 
@@ -47,6 +48,7 @@ const getAccessToken = async () => {
     return data.access_token;
 };
 
+// CORRECTED: The request body structure for Brand Analytics reports is different.
 const createReport = async (accessToken, asins, startDateStr, endDateStr) => {
     const response = await fetch(`${SP_API_ENDPOINT}/reports/2021-06-30/reports`, {
         method: 'POST',
@@ -54,19 +56,20 @@ const createReport = async (accessToken, asins, startDateStr, endDateStr) => {
         body: JSON.stringify({
             reportType: REPORT_TYPE,
             reportOptions: {
-                asinGranularity: 'SKU',
-                reportingPeriod: 'WEEKLY',
+                reportPeriod: 'WEEK',
+                // The ASINs are passed as a single space-separated string under the 'asin' key
+                asin: asins.join(' ') 
             },
-            dataStartTime: `${startDateStr}T00:00:00Z`,
-            dataEndTime: `${endDateStr}T23:59:59Z`,
+            dataStartTime: startDateStr,
+            dataEndTime: endDateStr,
             marketplaceIds: [SP_API_MARKETPLACE_ID],
-            asins: asins,
         }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(`Failed to create report: ${JSON.stringify(data.errors)}`);
     return data.reportId;
 };
+
 
 const pollForReport = async (accessToken, reportId) => {
     let status = '';
@@ -101,7 +104,8 @@ const downloadAndParseReport = async (accessToken, reportDocumentId) => {
     const fileResponse = await fetch(docData.url);
     const buffer = await fileResponse.arrayBuffer();
     const decompressedData = zlib.gunzipSync(Buffer.from(buffer)).toString('utf-8');
-    return JSON.parse(decompressedData);
+    // The data is nested under `dataByAsin` for this report type
+    return JSON.parse(decompressedData).dataByAsin || [];
 };
 
 const fetchAndProcessReport = async (asins, weekStartDateStr, weekEndDateStr) => {
@@ -114,12 +118,12 @@ const fetchAndProcessReport = async (asins, weekStartDateStr, weekEndDateStr) =>
     const reportDocumentId = await pollForReport(accessToken, reportId);
     console.log(`[Fetcher] ✅ Report is ready. Document ID: ${reportDocumentId}`);
     const data = await downloadAndParseReport(accessToken, reportDocumentId);
-    console.log(`[Fetcher] 📊 Downloaded and parsed ${data.searchQueryPerformance?.length || 0} query performance records.`);
+    console.log(`[Fetcher] 📊 Downloaded and parsed ${data.length} query performance records.`);
     return data;
 };
 
 const saveDataToDB = async (client, reportData, weekStartDate, weekEndDate) => {
-    if (!reportData || !reportData.searchQueryPerformance) {
+    if (!reportData || reportData.length === 0) {
         console.log('[DB] No data found in the report to save.');
         return;
     }
@@ -129,7 +133,7 @@ const saveDataToDB = async (client, reportData, weekStartDate, weekEndDate) => {
         ON CONFLICT (asin, start_date, search_query) DO NOTHING;
     `;
     let insertedCount = 0;
-    for (const item of reportData.searchQueryPerformance) {
+    for (const item of reportData) {
         const res = await client.query(query, [
             weekStartDate.toISOString().split('T')[0],
             weekEndDate.toISOString().split('T')[0],
@@ -139,7 +143,7 @@ const saveDataToDB = async (client, reportData, weekStartDate, weekEndDate) => {
         ]);
         if (res.rowCount > 0) insertedCount++;
     }
-    console.log(`[DB] 💾 Inserted ${insertedCount} new records out of ${reportData.searchQueryPerformance.length} total from the report.`);
+    console.log(`[DB] 💾 Inserted ${insertedCount} new records out of ${reportData.length} total from the report.`);
 };
 
 // --- Helper & Orchestration Logic ---
@@ -161,11 +165,11 @@ const getExistingAsinsForWeek = async (client, startDate) => {
 };
 
 const getWeekDateRange = (year, week) => {
-    const d = new Date(year, 0, 1);
-    d.setDate(d.getDate() + (week - 1) * 7 - d.getDay()); // Start of week (Sunday)
+    const d = new Date(Date.UTC(year, 0, 1));
+    d.setUTCDate(d.getUTCDate() + (week - 1) * 7 - d.getUTCDay()); // Start of week (Sunday)
     const startDate = new Date(d);
     const endDate = new Date(d);
-    endDate.setDate(d.getDate() + 6);
+    endDate.setUTCDate(d.getUTCDate() + 6);
     return { startDate, endDate };
 };
 

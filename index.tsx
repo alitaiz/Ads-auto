@@ -11,6 +11,7 @@ import { DatabaseView } from './views/DatabaseView';
 import { AutomationView } from './views/AutomationView';
 import { AICopilotView } from './views/AICopilotView';
 import { DataViewer } from './views/components/DataViewer';
+import { SearchQueryPerformanceView } from './views/SearchQueryPerformanceView';
 import { DataCacheProvider } from './contexts/DataCacheContext';
 
 // Basic global styles
@@ -66,6 +67,7 @@ function App() {
           <Route path="campaigns" element={<PPCManagementView />} />
           <Route path="campaigns/:campaignId/adgroups" element={<AdGroupView />} />
           <Route path="adgroups/:adGroupId/keywords" element={<KeywordView />} />
+          <Route path="query-performance" element={<SearchQueryPerformanceView />} />
           <Route path="sp-search-terms" element={<SPSearchTermsView />} />
           <Route path="sales-and-traffic" element={<SalesAndTrafficView />} />
           <Route path="database" element={<DatabaseView />} />

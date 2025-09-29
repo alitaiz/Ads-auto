@@ -1,0 +1,32 @@
+-- Migration: Create Search Query Performance Data Table
+-- This script creates the table to store weekly Search Query Performance report data.
+
+CREATE TABLE IF NOT EXISTS query_performance_data (
+    id SERIAL PRIMARY KEY,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    asin VARCHAR(50) NOT NULL,
+    search_query TEXT NOT NULL,
+    performance_data JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Add a unique constraint to prevent duplicate rows for the same ASIN, week, and query.
+ALTER TABLE query_performance_data
+DROP CONSTRAINT IF EXISTS unique_query_performance_entry;
+
+ALTER TABLE query_performance_data
+ADD CONSTRAINT unique_query_performance_entry
+UNIQUE (asin, start_date, search_query);
+
+-- Add indexes for faster lookups
+CREATE INDEX IF NOT EXISTS idx_qpd_asin ON query_performance_data(asin);
+CREATE INDEX IF NOT EXISTS idx_qpd_start_date ON query_performance_data(start_date);
+CREATE INDEX IF NOT EXISTS idx_qpd_search_query ON query_performance_data(search_query);
+
+-- =============================================================================
+-- Grant Permissions to Application User
+-- =============================================================================
+-- IMPORTANT: Replace 'yourdbuser' with the actual DB_USER from your .env file.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE query_performance_data TO yourdbuser;
+GRANT USAGE, SELECT ON SEQUENCE query_performance_data_id_seq TO yourdbuser;

@@ -14,7 +14,8 @@
     "request:sb-search-terms": "node scripts/3.request_sb_search_term_reports.js",
     "request:sd-targeting": "node scripts/4.request_sd_targeting_reports.js",
     "process:pending-reports": "node scripts/2.process_pending_reports.js",
-    "fetch:sales-traffic": "node scripts/fetch_sales_and_traffic.js"
+    "fetch:sales-traffic": "node scripts/fetch_sales_and_traffic.js",
+    "fetch:query-performance": "node scripts/fetch_query_performance.js"
   },
   "dependencies": {
     "@google/genai": "^1.19.0",

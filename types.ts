@@ -299,3 +299,42 @@ export interface AppDataCache {
     salesAndTraffic: SalesAndTrafficCache;
     aiCopilot: AICopilotCache;
 }
+
+// --- New types for Search Query Performance View ---
+
+export interface PerformanceChartConfig {
+    type: 'performance';
+    asin: string;
+    searchQuery: string;
+    metricId: string;
+    metricLabel: string;
+    metricFormat: 'number' | 'percent' | 'price';
+}
+
+export type AppChartConfig = PerformanceChartConfig;
+
+export interface QueryPerformanceData {
+    searchQuery: string;
+    searchQueryScore: number;
+    searchQueryVolume: number;
+    impressions: { totalCount: number; asinCount: number; asinShare: number; };
+    clicks: { clickRate: number; totalCount: number; asinCount: number; asinShare: number; totalMedianPrice: string; asinMedianPrice: string; sameDayShippingCount: number; oneDayShippingCount: number; twoDayShippingCount: number; };
+    cartAdds: { cartAddRate: number; totalCount: number; asinCount: number; asinShare: number; totalMedianPrice: string; asinMedianPrice: string; sameDayShippingCount: number; oneDayShippingCount: number; twoDayShippingCount: number; };
+    purchases: { purchaseRate: number; totalCount: number; asinCount: number; asinShare: number; totalMedianPrice: string; asinMedianPrice: string; sameDayShippingCount: number; oneDayShippingCount: number; twoDayShippingCount: number; };
+    hasSPData?: boolean;
+}
+
+export interface PerformanceFilterOptions {
+    asins: string[];
+    weeks: { value: string; label: string }[];
+}
+
+export interface ProductDetails {
+    asin: string;
+    title?: string;
+    price?: string;
+    imageUrl?: string;
+    bulletPoints?: string[];
+    error?: string;
+    rank?: string;
+}

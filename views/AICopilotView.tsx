@@ -1,9 +1,8 @@
 // views/AICopilotView.tsx
-import React, { useState, useRef, useEffect, useContext, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useContext, useCallback } from 'react';
 import { marked } from 'marked';
 import { DataCacheContext } from '../contexts/DataCacheContext';
-import { ChatMessage, AICopilotCache, LoadedDataInfo, PerformanceFilterOptions, QueryPerformanceData } from '../types';
-import { formatNumber, formatPercent } from '../utils';
+import { ChatMessage, AICopilotCache, LoadedDataInfo, PerformanceFilterOptions } from '../types';
 
 const styles: { [key: string]: React.CSSProperties } = {
     container: { display: 'grid', gridTemplateColumns: '280px 1fr 1.5fr', gap: '20px', height: 'calc(100vh - 100px)', padding: '20px' },
@@ -23,7 +22,7 @@ const styles: { [key: string]: React.CSSProperties } = {
     chatWindow: { flex: 1, padding: '20px', overflowY: 'auto', borderBottom: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column' },
     chatInputForm: { display: 'flex', padding: '10px', gap: '10px', alignItems: 'center' },
     chatInput: { flex: 1, padding: '10px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '1rem' },
-    sendButton: { padding: '10px 20px', backgroundColor: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', height: '44px' },
+    sendButton: { padding: '10px 20px', backgroundColor: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', height: '44px', minWidth: '80px' },
     message: { marginBottom: '15px', padding: '10px 15px', borderRadius: '10px', maxWidth: '85%' },
     userMessage: { backgroundColor: '#e6f7ff', alignSelf: 'flex-end', borderBottomRightRadius: '0px' },
     aiMessage: { backgroundColor: '#f0f2f2', alignSelf: 'flex-start', borderBottomLeftRadius: '0px' },
@@ -36,13 +35,60 @@ const styles: { [key: string]: React.CSSProperties } = {
     historyList: { listStyle: 'none', margin: 0, padding: 0, overflowY: 'auto', flex: 1 },
     historyItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', borderRadius: '4px', cursor: 'pointer', marginBottom: '5px' },
     historyItemActive: { backgroundColor: 'var(--primary-hover-color)', color: 'white' },
-    historyItemText: { flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-    deleteButton: { background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.2rem', padding: '0 5px' },
+    historyItemText: { flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: '8px' },
+    deleteButton: { background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.2rem', padding: '0 5px', flexShrink: 0 },
     // SQP Table Styles
     tableContainer: { overflowX: 'auto', marginTop: '10px', border: '1px solid var(--border-color)', borderRadius: '4px' },
     table: { width: '100%', borderCollapse: 'collapse' },
     th: { padding: '10px', textAlign: 'left', borderBottom: '2px solid var(--border-color)', backgroundColor: '#f8f9fa', fontWeight: 600, cursor: 'pointer', userSelect: 'none' },
     td: { padding: '10px', borderBottom: '1px solid var(--border-color)', whiteSpace: 'nowrap' },
+    // Custom Dropdown for SQP
+    sqpDropdown: { position: 'relative', userSelect: 'none' },
+    sqpDropdownButton: { 
+        width: '100%', 
+        padding: '8px 12px', 
+        border: '1px solid #ccc', 
+        borderRadius: '4px', 
+        backgroundColor: 'white', 
+        textAlign: 'left',
+        cursor: 'pointer',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        fontSize: '1rem',
+        fontFamily: 'inherit',
+        color: 'inherit'
+    },
+    sqpDropdownPanel: {
+        position: 'absolute',
+        top: '100%',
+        left: 0,
+        right: 0,
+        backgroundColor: 'white',
+        border: '1px solid #ccc',
+        borderRadius: '4px',
+        marginTop: '4px',
+        maxHeight: '200px',
+        overflowY: 'auto',
+        zIndex: 10,
+        boxShadow: '0 2px 5px rgba(0,0,0,0.15)'
+    },
+    sqpDropdownItem: {
+        padding: '8px 12px',
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px'
+    },
+    sqpDropdownItemHover: {
+        backgroundColor: '#f0f2f2'
+    },
+    checkbox: {
+        width: '16px',
+        height: '16px',
+        margin: 0,
+        pointerEvents: 'none' // Prevent double-clicking
+    },
 };
 
 // ... (systemPromptTemplates remains the same)
@@ -120,9 +166,14 @@ export function AICopilotView() {
     const [aiProvider, setAiProvider] = useState<'gemini' | 'openai'>('gemini');
     const [sqpFilterOptions, setSqpFilterOptions] = useState<PerformanceFilterOptions['weeks']>([]);
     const [selectedWeeks, setSelectedWeeks] = useState<string[]>([]);
+    
+    const [isSqpDropdownOpen, setIsSqpDropdownOpen] = useState(false);
+    const [hoveredWeek, setHoveredWeek] = useState<string | null>(null);
+    const sqpDropdownRef = useRef<HTMLDivElement>(null);
 
     const [conversationHistory, setConversationHistory] = useState<any[]>([]);
     const [profileId, setProfileId] = useState<string | null>(null);
+    const abortControllerRef = useRef<AbortController | null>(null);
 
     useEffect(() => {
         const storedProfileId = localStorage.getItem('selectedProfileId');
@@ -173,6 +224,18 @@ export function AICopilotView() {
         fetchSqpFilters();
     }, [selectedWeeks.length]);
 
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (sqpDropdownRef.current && !sqpDropdownRef.current.contains(event.target as Node)) {
+                setIsSqpDropdownOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, []);
+
     const setProductInfo = (key: keyof AICopilotCache['productInfo'], value: string) => {
         updateAiCache(prev => ({ ...prev, productInfo: { ...prev.productInfo, [key]: value } }));
     };
@@ -204,7 +267,7 @@ export function AICopilotView() {
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [aiCache.chat.messages]);
+    }, [aiCache.chat.messages, loading.chat]);
 
     const handleLoadData = async (tool: 'st' | 'stream' | 'sat' | 'sqp') => {
         setLoading(prev => ({ ...prev, [tool]: true }));
@@ -294,6 +357,29 @@ export function AICopilotView() {
             window.open(`#/data-viewer/${key}`, '_blank');
         }
     };
+    
+    const handleStopConversation = () => {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            updateAiCache(prev => {
+                const lastMessage = prev.chat.messages[prev.chat.messages.length - 1];
+                if (lastMessage?.sender === 'ai') {
+                    const updatedMessages = [...prev.chat.messages];
+                    updatedMessages[updatedMessages.length - 1] = {
+                        ...lastMessage,
+                        text: lastMessage.text + "\n\n*Generation stopped by user.*"
+                    };
+                    return { ...prev, chat: { ...prev.chat, messages: updatedMessages } };
+                } else if (lastMessage?.sender === 'user') {
+                     const stopMessage: ChatMessage = {
+                        id: Date.now(), sender: 'ai', text: '*Generation stopped by user.*'
+                    };
+                    return { ...prev, chat: { ...prev.chat, messages: [...prev.chat.messages, stopMessage] }};
+                }
+                return prev;
+            });
+        }
+    };
 
     const handleStartConversation = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -314,6 +400,9 @@ export function AICopilotView() {
         setError(prev => ({...prev, chat: ''}));
         setCurrentQuestion('');
 
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+
         try {
             const payload = {
                 question: questionToAsk,
@@ -332,6 +421,7 @@ export function AICopilotView() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
+                signal: controller.signal,
             });
 
             if (!response.body) throw new Error("Streaming response not available.");
@@ -371,8 +461,8 @@ export function AICopilotView() {
                                 };
                             });
 
-                            if(parsed.conversationId) { // This means a new conversation was created
-                                fetchHistory(); // Refresh history list
+                            if(parsed.conversationId) {
+                                fetchHistory();
                             }
                         }
 
@@ -395,8 +485,13 @@ export function AICopilotView() {
                 }
             }
         } catch (err) {
-            setError(prev => ({...prev, chat: err instanceof Error ? err.message : 'An unknown error occurred'}));
+            if (err.name === 'AbortError') {
+                console.log('Fetch was aborted by user.');
+            } else {
+                setError(prev => ({...prev, chat: err instanceof Error ? err.message : 'An unknown error occurred'}));
+            }
         } finally {
+             abortControllerRef.current = null;
              setLoading(prev => ({...prev, chat: false}));
         }
     };
@@ -413,7 +508,7 @@ export function AICopilotView() {
             const res = await fetch(`/api/ai/conversations/${id}`);
             if (!res.ok) throw new Error("Failed to load conversation.");
             const data = await res.json();
-            const provider = data.provider || 'gemini'; // Default to gemini if not present
+            const provider = data.provider || 'gemini';
             
             updateAiCache(prev => ({
                 ...prev,
@@ -429,15 +524,34 @@ export function AICopilotView() {
         try {
             const res = await fetch(`/api/ai/conversations/${id}`, { method: 'DELETE' });
             if (!res.ok) throw new Error("Failed to delete conversation.");
-            fetchHistory(); // Refresh list
+            fetchHistory();
             if (aiCache.chat.conversationId === id) {
                 handleNewChat();
             }
         } catch (e) { console.error(e); }
     };
     
-    // Calculations for the Amazon Fee field
-    const { salePrice, cost, fbaFee, referralFeePercent } = aiCache.productInfo;
+    const handleSqpWeekToggle = (weekValue: string) => {
+        setSelectedWeeks(prev => {
+            const newSelection = new Set(prev);
+            if (newSelection.has(weekValue)) {
+                newSelection.delete(weekValue);
+            } else {
+                newSelection.add(weekValue);
+            }
+            return Array.from(newSelection);
+        });
+    };
+    
+    const getSqpButtonText = () => {
+        if (selectedWeeks.length === 0) return "Select weeks...";
+        if (selectedWeeks.length === 1) {
+            return sqpFilterOptions.find(w => w.value === selectedWeeks[0])?.label || selectedWeeks[0];
+        }
+        return `${selectedWeeks.length} weeks selected`;
+    };
+
+    const { salePrice, fbaFee, referralFeePercent } = aiCache.productInfo;
     const salePriceNum = parseFloat(salePrice) || 0;
     const fbaFeeNum = parseFloat(fbaFee) || 0;
     const referralFeePercentNum = parseFloat(referralFeePercent) || 15;
@@ -455,7 +569,6 @@ export function AICopilotView() {
         const currentCalculatedReferralFee = currentSalePriceNum * (currentReferralFeePercentNum / 100);
         const newFbaFee = newTotalFee - currentCalculatedReferralFee;
 
-        // Store only the FBA fee portion in state to keep backend logic consistent
         setProductInfo('fbaFee', newFbaFee.toFixed(2));
     };
 
@@ -554,29 +667,55 @@ export function AICopilotView() {
                          <div style={{borderTop: '1px dashed var(--border-color)', paddingTop: '15px'}}>
                             <div style={{...styles.formGroup, marginBottom: '15px'}}>
                                 <label style={styles.label}>Search Query Performance Week</label>
-                                <select 
-                                    multiple
-                                    style={{...styles.input, height: '120px'}} 
-                                    value={selectedWeeks} 
-                                    onChange={e => setSelectedWeeks(Array.from(e.target.selectedOptions, option => option.value))}
-                                    disabled={sqpFilterOptions.length === 0}>
-                                    {sqpFilterOptions.length === 0 && <option>Loading weeks...</option>}
-                                    {sqpFilterOptions.map(week => <option key={week.value} value={week.value}>{week.label}</option>)}
-                                </select>
+                                <div style={styles.sqpDropdown} ref={sqpDropdownRef}>
+                                    <button
+                                        type="button"
+                                        style={styles.sqpDropdownButton}
+                                        onClick={() => setIsSqpDropdownOpen(prev => !prev)}
+                                        disabled={sqpFilterOptions.length === 0}
+                                        aria-haspopup="listbox"
+                                        aria-expanded={isSqpDropdownOpen}
+                                    >
+                                        <span>{getSqpButtonText()}</span>
+                                        <span style={{transform: isSqpDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s'}}>▼</span>
+                                    </button>
+                                    {isSqpDropdownOpen && (
+                                        <div style={styles.sqpDropdownPanel} role="listbox">
+                                            {sqpFilterOptions.length === 0 ? (
+                                                <div style={styles.sqpDropdownItem}>Loading weeks...</div>
+                                            ) : (
+                                                sqpFilterOptions.map(week => (
+                                                    <div
+                                                        key={week.value}
+                                                        style={hoveredWeek === week.value ? {...styles.sqpDropdownItem, ...styles.sqpDropdownItemHover} : styles.sqpDropdownItem}
+                                                        onMouseEnter={() => setHoveredWeek(week.value)}
+                                                        onMouseLeave={() => setHoveredWeek(null)}
+                                                        onClick={() => handleSqpWeekToggle(week.value)}
+                                                        role="option"
+                                                        aria-selected={selectedWeeks.includes(week.value)}
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            style={styles.checkbox}
+                                                            checked={selectedWeeks.includes(week.value)}
+                                                            readOnly
+                                                            tabIndex={-1}
+                                                        />
+                                                        <span style={{cursor: 'pointer'}}>{week.label}</span>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                             <ToolButton tool="sqp" onRun={handleLoadData} onView={handleViewData} loading={loading.sqp} dataInfo={aiCache.loadedData.searchQueryPerformanceData} error={error.sqp} name="Search Query Performance" />
                         </div>
                     </div>
                 </div>
-                 {aiCache.loadedData.searchQueryPerformanceData.data && aiCache.loadedData.searchQueryPerformanceData.data.length > 0 && (
-                    <div style={{...styles.toolCard, marginTop: '20px'}}>
-                        <h3 style={styles.toolTitle}>Loaded Search Query Performance Data</h3>
-                        <SQPDataTable data={aiCache.loadedData.searchQueryPerformanceData.data} />
-                    </div>
-                )}
             </div>
             <div style={styles.rightPanel}>
-                <div style={styles.chatWindow} ref={chatEndRef}>
+                <div style={styles.chatWindow}>
                     {aiCache.chat.messages.length === 0 && <p style={{textAlign: 'center', color: '#888'}}>Load data and ask a question to start your conversation.</p>}
                     {aiCache.chat.messages.map(msg => (
                         <div key={msg.id} style={{...styles.message, ...(msg.sender === 'user' ? styles.userMessage : styles.aiMessage)}}>
@@ -592,6 +731,7 @@ export function AICopilotView() {
                         <div style={{...styles.message, ...styles.aiMessage}}><em style={{color: '#666'}}>AI is thinking...</em></div>
                     )}
                     {error.chat && <div style={{...styles.message, ...styles.aiMessage, backgroundColor: '#fdd', color: 'var(--danger-color)'}}>{error.chat}</div>}
+                    <div ref={chatEndRef} />
                 </div>
                 <form style={styles.chatInputForm} onSubmit={handleStartConversation}>
                     <input style={styles.chatInput} value={currentQuestion} onChange={e => setCurrentQuestion(e.target.value)} placeholder="Ask a question about the loaded data..." disabled={loading.chat} />
@@ -601,11 +741,20 @@ export function AICopilotView() {
                             value={aiProvider}
                             onChange={(e) => setAiProvider(e.target.value as any)}
                             aria-label="Select AI Provider"
+                            disabled={loading.chat}
                         >
                            <option value="gemini">Gemini</option>
                            <option value="openai">ChatGPT</option>
                         </select>
-                        <button type="submit" style={styles.sendButton} disabled={loading.chat || !currentQuestion.trim()}>Send</button>
+                        {loading.chat ? (
+                            <button type="button" onClick={handleStopConversation} style={{...styles.sendButton, backgroundColor: 'var(--danger-color)'}}>
+                                Stop
+                            </button>
+                        ) : (
+                            <button type="submit" style={styles.sendButton} disabled={!currentQuestion.trim()}>
+                                Send
+                            </button>
+                        )}
                     </div>
                 </form>
             </div>
@@ -616,7 +765,6 @@ export function AICopilotView() {
 const ToolButton = ({ tool, onRun, onView, loading, dataInfo, error, name }: { tool: 'st' | 'stream' | 'sat' | 'sqp', onRun: (tool: 'st' | 'stream' | 'sat' | 'sqp') => void, onView: (tool: 'st' | 'stream' | 'sat' | 'sqp') => void, loading: boolean, dataInfo: LoadedDataInfo, error: string, name: string }) => {
     
     const formatDate = (dateStr: string) => {
-        // Add 'T00:00:00Z' to treat the date as UTC, avoiding timezone shifts from local interpretation.
         return new Date(dateStr + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
     };
 
@@ -643,80 +791,6 @@ const ToolButton = ({ tool, onRun, onView, loading, dataInfo, error, name }: { t
                     ✅ Loaded {Array.isArray(dataInfo.data) ? `${dataInfo.data.length} records` : 'data'}{dateRangeText}.
                 </button>
             )}
-        </div>
-    );
-};
-
-
-// --- SQP Data Table Component ---
-const getNestedValue = (obj: any, path: string) => {
-    return path.split('.').reduce((p, c) => (p && p[c] !== undefined) ? p[c] : 0, obj);
-};
-
-const allColumns = [
-    { id: 'searchQuery', label: 'Search Query', formatter: (val: any) => String(val) },
-    { id: 'searchQueryVolume', label: 'Volume', formatter: formatNumber },
-    { id: 'impressions.asinShare', label: 'Impr. Share', formatter: formatPercent },
-    { id: 'clicks.asinShare', label: 'Click Share', formatter: formatPercent },
-    { id: 'cartAdds.asinShare', label: 'Cart Add Share', formatter: formatPercent },
-    { id: 'purchases.asinShare', label: 'Purchase Share', formatter: formatPercent },
-    { id: 'impressions.totalCount', label: 'Total Impr.', formatter: formatNumber },
-    { id: 'clicks.totalCount', label: 'Total Clicks', formatter: formatNumber },
-    { id: 'cartAdds.totalCount', label: 'Total Carts', formatter: formatNumber },
-    { id: 'purchases.totalCount', label: 'Total Purchases', formatter: formatNumber },
-];
-
-
-const SQPDataTable = ({ data }: { data: QueryPerformanceData[] }) => {
-    const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'ascending' | 'descending' } | null>({ key: 'searchQueryVolume', direction: 'descending' });
-
-    const requestSort = (key: string) => {
-        let direction: 'ascending' | 'descending' = 'descending';
-        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'descending') {
-            direction = 'ascending';
-        }
-        setSortConfig({ key, direction });
-    };
-
-    const sortedData = useMemo(() => {
-        let sortableItems = [...data];
-        if (sortConfig !== null) {
-            sortableItems.sort((a, b) => {
-                const aValue = getNestedValue(a, sortConfig.key);
-                const bValue = getNestedValue(b, sortConfig.key);
-                if (aValue < bValue) return sortConfig.direction === 'ascending' ? -1 : 1;
-                if (aValue > bValue) return sortConfig.direction === 'ascending' ? 1 : -1;
-                return 0;
-            });
-        }
-        return sortableItems;
-    }, [data, sortConfig]);
-
-    return (
-        <div style={styles.tableContainer}>
-            <table style={styles.table}>
-                <thead>
-                    <tr>
-                        {allColumns.map(col => (
-                            <th key={col.id} style={styles.th} onClick={() => requestSort(col.id)}>
-                                {col.label}
-                                {sortConfig?.key === col.id ? (sortConfig.direction === 'descending' ? ' ▼' : ' ▲') : ''}
-                            </th>
-                        ))}
-                    </tr>
-                </thead>
-                <tbody>
-                    {sortedData.map(item => (
-                        <tr key={item.searchQuery}>
-                            {allColumns.map(col => (
-                                <td key={col.id} style={styles.td} title={String(getNestedValue(item, col.id))}>
-                                    {col.formatter(getNestedValue(item, col.id))}
-                                </td>
-                            ))}
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
         </div>
     );
 };

@@ -33,7 +33,36 @@ router.get('/:id', async (req, res) => {
         if (rows.length === 0) {
             return res.status(404).json({ error: 'Conversation not found.' });
         }
-        res.json(rows[0]);
+        
+        const { history: nativeHistory, provider } = rows[0];
+
+        const transformHistory = (history, convId, provider) => {
+            if (!Array.isArray(history)) return [];
+
+            if (provider === 'openai') {
+                return history
+                    .filter(msg => msg.role === 'user' || msg.role === 'assistant')
+                    .map((msg, index) => ({
+                        id: `hist-${convId}-${index}`,
+                        sender: msg.role === 'user' ? 'user' : 'ai',
+                        text: msg.content || ''
+                    }));
+            }
+            
+            // Default to Gemini format
+            return history
+                .filter(msg => msg.role === 'user' || msg.role === 'model')
+                .map((msg, index) => ({
+                    id: `hist-${convId}-${index}`,
+                    sender: msg.role === 'user' ? 'user' : 'ai',
+                    text: msg.parts?.[0]?.text || ''
+                }));
+        };
+        
+        const transformedHistory = transformHistory(nativeHistory, id, provider);
+        
+        res.json({ history: transformedHistory, provider });
+
     } catch (error) {
         console.error(`Failed to fetch conversation ${id}:`, error);
         res.status(500).json({ error: 'Internal server error' });

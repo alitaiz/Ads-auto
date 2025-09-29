@@ -219,9 +219,9 @@ export function SalesAndTrafficView() {
     const columns = [
         { id: 'childAsin', label: 'Child ASIN', sortable: false },
         { id: 'sku', label: 'SKU', sortable: true },
-        { id: 'parentAsin', label: 'Parent ASIN', sortable: false },
         { id: 'orderedProductSales', label: 'Ordered Sales', format: formatPrice, sortable: true },
         { id: 'unitsOrdered', label: 'Units Ordered', format: formatNumber, sortable: true },
+        { id: 'totalOrderItems', label: 'Total Items', format: formatNumber, sortable: true },
         { id: 'sessions', label: 'Sessions', format: formatNumber, sortable: true },
         { id: 'pageViews', label: 'Page Views', format: formatNumber, sortable: true },
         { id: 'unitSessionPercentage', label: 'Unit Session %', format: formatPercent, sortable: true },
@@ -236,8 +236,6 @@ export function SalesAndTrafficView() {
         { id: 'mobileAppSessions', label: 'Mobile Sessions', format: formatNumber, sortable: true },
         { id: 'browserPageViews', label: 'Browser Views', format: formatNumber, sortable: true },
         { id: 'mobileAppPageViews', label: 'Mobile Views', format: formatNumber, sortable: true },
-        { id: 'totalOrderItems', label: 'Total Items', format: formatNumber, sortable: true },
-        { id: 'averageSalesPerOrderItem', label: 'Avg Sales/Item', format: formatPrice, sortable: true },
     ];
 
     const renderContent = () => {

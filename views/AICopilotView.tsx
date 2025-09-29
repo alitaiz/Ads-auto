@@ -19,7 +19,7 @@ const styles: { [key: string]: React.CSSProperties } = {
     toolButton: { padding: '8px 12px', border: '1px solid var(--primary-color)', color: 'var(--primary-color)', background: 'white', borderRadius: '4px', cursor: 'pointer', fontWeight: 500 },
     toolStatus: { fontSize: '0.8rem', color: '#666', fontStyle: 'italic' },
     chatWindow: { flex: 1, padding: '20px', overflowY: 'auto', borderBottom: '1px solid var(--border-color)' },
-    chatInputForm: { display: 'flex', padding: '10px', gap: '10px' },
+    chatInputForm: { display: 'flex', padding: '10px', gap: '10px', alignItems: 'center' },
     chatInput: { flex: 1, padding: '10px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '1rem' },
     sendButton: { padding: '10px 20px', backgroundColor: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' },
     message: { marginBottom: '15px', padding: '10px 15px', borderRadius: '10px', maxWidth: '85%' },
@@ -94,11 +94,10 @@ export function AICopilotView() {
     const { cache, setCache } = useContext(DataCacheContext);
     const aiCache = cache.aiCopilot;
     
-    // State to manage the dropdown selection independently
     const [selectedTemplateName, setSelectedTemplateName] = useState('Default PPC Expert Analyst');
+    const [aiProvider, setAiProvider] = useState<'gemini' | 'openai'>('gemini');
 
     useEffect(() => {
-        // Sync dropdown with the actual system instruction from cache on load or change
         const matchingTemplate = systemPromptTemplates.find(t => t.prompt === aiCache.chat.systemInstruction);
         setSelectedTemplateName(matchingTemplate ? matchingTemplate.name : "Custom");
     }, [aiCache.chat.systemInstruction]);
@@ -128,6 +127,13 @@ export function AICopilotView() {
                 setChatInfo('systemInstruction', selectedTemplate.prompt);
             }
         }
+    };
+    
+    const handleProviderChange = (newProvider: 'gemini' | 'openai') => {
+        setAiProvider(newProvider);
+        // Clear conversation to prevent context mixing between models
+        setChatInfo('conversationId', null);
+        setChatInfo('messages', []);
     };
 
     const setDateRange = (key: keyof AICopilotCache['dateRange'], value: string) => {
@@ -179,7 +185,6 @@ export function AICopilotView() {
             const responseData = await response.json();
             if (!response.ok) throw new Error(responseData.error || 'Failed to load data.');
             
-            // Update cache with data and the specific date range from the API response
             updateAiCache(prev => ({
                 ...prev,
                 loadedData: {
@@ -240,7 +245,8 @@ export function AICopilotView() {
                 }
             };
 
-            const response = await fetch('/api/ai/chat', {
+            const endpoint = aiProvider === 'gemini' ? '/api/ai/chat' : '/api/ai/chat-gpt';
+            const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
@@ -326,8 +332,19 @@ export function AICopilotView() {
                 <hr style={{border: 'none', borderTop: '1px solid var(--border-color)', margin: '10px 0'}}/>
                 
                 <div style={styles.toolCard}>
-                    <h3 style={styles.toolTitle}>AI Persona</h3>
+                    <h3 style={styles.toolTitle}>AI Configuration</h3>
                      <div style={styles.formGroup}>
+                        <label style={styles.label}>AI Provider</label>
+                        <select
+                            style={styles.input}
+                            value={aiProvider}
+                            onChange={(e) => handleProviderChange(e.target.value as any)}
+                        >
+                           <option value="gemini">Gemini</option>
+                           <option value="openai">ChatGPT</option>
+                        </select>
+                    </div>
+                     <div style={{...styles.formGroup, marginTop: '10px'}}>
                         <label style={styles.label}>System Prompt Template</label>
                         <select
                             style={styles.input}

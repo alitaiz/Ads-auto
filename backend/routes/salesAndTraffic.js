@@ -32,20 +32,21 @@ const transformSalesData = (row) => {
         unitsOrdered: sales.unitsOrdered,
         orderedProductSales: sales.orderedProductSales?.amount,
         totalOrderItems: sales.totalOrderItems,
-        averageSalesPerOrderItem: sales.averageSalesPerOrderItem?.amount,
+        // B2B Sales Metrics
         unitsOrderedB2B: sales.unitsOrderedB2B,
         orderedProductSalesB2B: sales.orderedProductSalesB2B?.amount,
         totalOrderItemsB2B: sales.totalOrderItemsB2B,
-        averageSalesPerOrderItemB2B: sales.averageSalesPerOrderItemB2B?.amount,
         // Traffic Metrics
         sessions: traffic.sessions,
         pageViews: traffic.pageViews,
-        unitSessionPercentage: normalizePercent(traffic.unitSessionPercentage),
         buyBoxPercentage: normalizePercent(traffic.buyBoxPercentage),
+        unitSessionPercentage: normalizePercent(traffic.unitSessionPercentage),
+        // B2B Traffic Metrics
         sessionsB2B: traffic.sessionsB2B,
         pageViewsB2B: traffic.pageViewsB2B,
-        unitSessionPercentageB2B: normalizePercent(traffic.unitSessionPercentageB2B),
         buyBoxPercentageB2B: normalizePercent(traffic.buyBoxPercentageB2B),
+        unitSessionPercentageB2B: normalizePercent(traffic.unitSessionPercentageB2B),
+        // Detailed Traffic Breakdowns
         browserSessions: traffic.browserSessions,
         mobileAppSessions: traffic.mobileAppSessions,
         browserPageViews: traffic.browserPageViews,

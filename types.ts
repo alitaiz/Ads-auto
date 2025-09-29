@@ -157,20 +157,21 @@ export interface SalesAndTrafficData {
     unitsOrdered?: number;
     orderedProductSales?: number;
     totalOrderItems?: number;
-    averageSalesPerOrderItem?: number;
+    // B2B Sales Metrics
     unitsOrderedB2B?: number;
     orderedProductSalesB2B?: number;
     totalOrderItemsB2B?: number;
-    averageSalesPerOrderItemB2B?: number;
     // Traffic Metrics
     sessions?: number;
     pageViews?: number;
+    buyBoxPercentage?: number;
     unitSessionPercentage?: number;
-    buyBoxPercentage?: number; // Renamed from featuredOfferPercentage
+    // B2B Traffic Metrics
     sessionsB2B?: number;
     pageViewsB2B?: number;
-    unitSessionPercentageB2B?: number;
     buyBoxPercentageB2B?: number;
+    unitSessionPercentageB2B?: number;
+    // Detailed Traffic Breakdowns
     browserSessions?: number;
     mobileAppSessions?: number;
     browserPageViews?: number;

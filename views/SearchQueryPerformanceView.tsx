@@ -1,5 +1,5 @@
 // views/SearchQueryPerformanceView.tsx
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
     QueryPerformanceData,
     PerformanceFilterOptions,
@@ -46,8 +46,8 @@ const styles: { [key: string]: React.CSSProperties } = {
         overflowX: 'auto',
     },
     table: { width: '100%', minWidth: '1800px', borderCollapse: 'collapse' },
-    th: { padding: '12px 15px', textAlign: 'left', borderBottom: '2px solid var(--border-color)', backgroundColor: '#f8f9fa', fontWeight: 600, cursor: 'pointer', userSelect: 'none' },
-    td: { padding: '12px 15px', borderBottom: '1px solid var(--border-color)', whiteSpace: 'nowrap' },
+    th: { padding: '12px 15px', textAlign: 'left', borderBottom: '2px solid var(--border-color)', backgroundColor: '#f8f9fa', fontWeight: 600, userSelect: 'none', position: 'relative', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+    td: { padding: '12px 15px', borderBottom: '1px solid var(--border-color)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
     clickableCell: { cursor: 'pointer', textDecoration: 'underline', color: 'var(--primary-color)' },
     message: { textAlign: 'center', padding: '50px', fontSize: '1.2rem', color: '#666' },
     error: { color: 'var(--danger-color)', padding: '20px', backgroundColor: '#fdd', borderRadius: 'var(--border-radius)', marginTop: '20px' },
@@ -71,64 +71,147 @@ interface ColumnConfig {
     defaultVisible: boolean;
     formatter: (val: any) => string;
     metricFormat?: 'number' | 'percent' | 'price';
+    defaultWidth: number;
 }
 
 const allColumns: ColumnConfig[] = [
     // --- Primary Columns (Default Visible) ---
-    { id: 'searchQuery', label: 'Search Query', defaultVisible: true, formatter: (val) => String(val) },
-    { id: 'searchQueryVolume', label: 'Search Volume', defaultVisible: true, formatter: formatNumber, metricFormat: 'number' },
-    { id: 'impressions.asinShare', label: 'Impression Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent' },
-    { id: 'clicks.clickRate', label: 'Click Rate', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent' },
-    { id: 'clicks.asinShare', label: 'Click Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent' },
-    { id: 'cartAdds.cartAddRate', label: 'Add to Cart Rate', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent' },
-    { id: 'cartAdds.asinShare', label: 'Add to Cart Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent' },
-    { id: 'purchases.purchaseRate', label: 'Purchase Rate', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent' },
-    { id: 'purchases.asinShare', label: 'Purchase Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent' },
+    { id: 'searchQuery', label: 'Search Query', defaultVisible: true, formatter: (val) => String(val), defaultWidth: 300 },
+    { id: 'searchQueryVolume', label: 'Search Volume', defaultVisible: true, formatter: formatNumber, metricFormat: 'number', defaultWidth: 140 },
+    { id: 'impressions.asinShare', label: 'Impression Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent', defaultWidth: 150 },
+    { id: 'clicks.clickRate', label: 'Click Rate', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent', defaultWidth: 120 },
+    { id: 'clicks.asinShare', label: 'Click Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent', defaultWidth: 120 },
+    { id: 'cartAdds.cartAddRate', label: 'Add to Cart Rate', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent', defaultWidth: 150 },
+    { id: 'cartAdds.asinShare', label: 'Add to Cart Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent', defaultWidth: 150 },
+    { id: 'purchases.purchaseRate', label: 'Purchase Rate', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent', defaultWidth: 140 },
+    { id: 'purchases.asinShare', label: 'Purchase Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent', defaultWidth: 140 },
     
     // --- General ---
-    { id: 'searchQueryScore', label: 'Search Query Score', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'searchQueryScore', label: 'Search Query Score', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 160 },
     
     // --- Impressions ---
-    { id: 'impressions.totalCount', label: 'Total Impressions', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
-    { id: 'impressions.asinCount', label: 'ASIN Impressions', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'impressions.totalCount', label: 'Total Impressions', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 150 },
+    { id: 'impressions.asinCount', label: 'ASIN Impressions', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 150 },
 
     // --- Clicks ---
-    { id: 'clicks.totalCount', label: 'Total Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
-    { id: 'clicks.asinCount', label: 'ASIN Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
-    { id: 'clicks.totalMedianPrice', label: 'Total Median Click Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price' },
-    { id: 'clicks.asinMedianPrice', label: 'ASIN Median Click Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price' },
+    { id: 'clicks.totalCount', label: 'Total Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 120 },
+    { id: 'clicks.asinCount', label: 'ASIN Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 120 },
+    { id: 'clicks.totalMedianPrice', label: 'Total Median Click Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price', defaultWidth: 200 },
+    { id: 'clicks.asinMedianPrice', label: 'ASIN Median Click Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price', defaultWidth: 200 },
 
     // --- Cart Adds ---
-    { id: 'cartAdds.totalCount', label: 'Total Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
-    { id: 'cartAdds.asinCount', label: 'ASIN Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
-    { id: 'cartAdds.totalMedianPrice', label: 'Total Median Cart Add Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price' },
-    { id: 'cartAdds.asinMedianPrice', label: 'ASIN Median Cart Add Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price' },
+    { id: 'cartAdds.totalCount', label: 'Total Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 140 },
+    { id: 'cartAdds.asinCount', label: 'ASIN Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 140 },
+    { id: 'cartAdds.totalMedianPrice', label: 'Total Median Cart Add Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price', defaultWidth: 220 },
+    { id: 'cartAdds.asinMedianPrice', label: 'ASIN Median Cart Add Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price', defaultWidth: 220 },
 
     // --- Purchases ---
-    { id: 'purchases.totalCount', label: 'Total Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
-    { id: 'purchases.asinCount', label: 'ASIN Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
-    { id: 'purchases.totalMedianPrice', label: 'Total Median Purchase Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price' },
-    { id: 'purchases.asinMedianPrice', label: 'ASIN Median Purchase Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price' },
+    { id: 'purchases.totalCount', label: 'Total Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 140 },
+    { id: 'purchases.asinCount', label: 'ASIN Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 140 },
+    { id: 'purchases.totalMedianPrice', label: 'Total Median Purchase Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price', defaultWidth: 220 },
+    { id: 'purchases.asinMedianPrice', label: 'ASIN Median Purchase Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price', defaultWidth: 220 },
 
     // --- Shipping Speed (Clicks) ---
-    { id: 'clicks.sameDayShippingCount', label: 'Same-Day Shipping Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
-    { id: 'clicks.oneDayShippingCount', label: '1-Day Shipping Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
-    { id: 'clicks.twoDayShippingCount', label: '2-Day Shipping Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'clicks.sameDayShippingCount', label: 'Same-Day Shipping Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 200 },
+    { id: 'clicks.oneDayShippingCount', label: '1-Day Shipping Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 200 },
+    { id: 'clicks.twoDayShippingCount', label: '2-Day Shipping Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 200 },
 
     // --- Shipping Speed (Cart Adds) ---
-    { id: 'cartAdds.sameDayShippingCount', label: 'Same-Day Shipping Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
-    { id: 'cartAdds.oneDayShippingCount', label: '1-Day Shipping Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
-    { id: 'cartAdds.twoDayShippingCount', label: '2-Day Shipping Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'cartAdds.sameDayShippingCount', label: 'Same-Day Shipping Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 220 },
+    { id: 'cartAdds.oneDayShippingCount', label: '1-Day Shipping Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 220 },
+    { id: 'cartAdds.twoDayShippingCount', label: '2-Day Shipping Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 220 },
     
     // --- Shipping Speed (Purchases) ---
-    { id: 'purchases.sameDayShippingCount', label: 'Same-Day Shipping Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
-    { id: 'purchases.oneDayShippingCount', label: '1-Day Shipping Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
-    { id: 'purchases.twoDayShippingCount', label: '2-Day Shipping Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'purchases.sameDayShippingCount', label: 'Same-Day Shipping Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 220 },
+    { id: 'purchases.oneDayShippingCount', label: '1-Day Shipping Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 220 },
+    { id: 'purchases.twoDayShippingCount', label: '2-Day Shipping Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 220 },
 ];
 
 const getNestedValue = (obj: any, path: string) => {
     return path.split('.').reduce((p, c) => (p && p[c] !== undefined) ? p[c] : 0, obj);
 };
+
+const resizerStyles: { [key: string]: React.CSSProperties } = {
+  resizer: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    height: '100%',
+    width: '5px',
+    cursor: 'col-resize',
+    userSelect: 'none',
+    touchAction: 'none',
+  },
+  resizing: {
+    background: 'var(--primary-color)',
+    opacity: 0.5,
+  }
+};
+
+function useResizableColumns(initialWidths: number[]) {
+    const [widths, setWidths] = useState(initialWidths);
+    const [resizingColumnIndex, setResizingColumnIndex] = useState<number | null>(null);
+    const currentColumnIndex = useRef<number | null>(null);
+    const startX = useRef(0);
+    const startWidth = useRef(0);
+
+    useEffect(() => {
+        setWidths(initialWidths);
+    }, [initialWidths]);
+
+    const handleMouseDown = useCallback((index: number, e: React.MouseEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        currentColumnIndex.current = index;
+        setResizingColumnIndex(index);
+        startX.current = e.clientX;
+        startWidth.current = widths[index];
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+    }, [widths]);
+
+    const handleMouseMove = useCallback((e: MouseEvent) => {
+        if (currentColumnIndex.current === null) return;
+        
+        const deltaX = e.clientX - startX.current;
+        const newWidth = Math.max(startWidth.current + deltaX, 80); // Minimum width 80px
+
+        setWidths(prevWidths => {
+            const newWidths = [...prevWidths];
+            newWidths[currentColumnIndex.current!] = newWidth;
+            return newWidths;
+        });
+    }, []);
+
+    const handleMouseUp = useCallback(() => {
+        currentColumnIndex.current = null;
+        setResizingColumnIndex(null);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    }, []);
+
+    useEffect(() => {
+        window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('mouseup', handleMouseUp);
+
+        return () => {
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+        };
+    }, [handleMouseMove, handleMouseUp]);
+
+    return { widths, getHeaderProps: handleMouseDown, resizingColumnIndex };
+}
+
+const ResizableTh = ({ children, index, getHeaderProps, resizingColumnIndex }: { children: React.ReactNode, index: number, getHeaderProps: (index: number, e: React.MouseEvent<HTMLDivElement>) => void, resizingColumnIndex: number | null }) => (
+    <th style={styles.th}>
+        {children}
+        <div
+            style={{...resizerStyles.resizer, ...(resizingColumnIndex === index ? resizerStyles.resizing : {})}}
+            onMouseDown={(e) => getHeaderProps(index, e)}
+        />
+    </th>
+);
+
 
 export function SearchQueryPerformanceView() {
     const [filterOptions, setFilterOptions] = useState<PerformanceFilterOptions>({ asins: [], weeks: [] });
@@ -146,6 +229,13 @@ export function SearchQueryPerformanceView() {
     const [visibleColumns, setVisibleColumns] = useState<ColumnConfig[]>(
         allColumns.filter(c => c.defaultVisible)
     );
+
+    const initialWidths = useMemo(() => {
+        return visibleColumns.map(col => col.defaultWidth);
+    }, [visibleColumns]);
+
+    const { widths, getHeaderProps, resizingColumnIndex } = useResizableColumns(initialWidths);
+
 
     useEffect(() => {
         const fetchFilters = async () => {
@@ -241,16 +331,6 @@ export function SearchQueryPerformanceView() {
         });
     };
 
-    const renderHeader = (col: ColumnConfig) => {
-        const isSorted = sortConfig?.key === col.id;
-        const directionIcon = sortConfig?.direction === 'descending' ? '▼' : '▲';
-        return (
-            <th style={styles.th} onClick={() => requestSort(col.id)}>
-                {col.label} {isSorted && directionIcon}
-            </th>
-        );
-    };
-
     const renderClickableCell = (item: QueryPerformanceData, col: ColumnConfig) => {
         const value = getNestedValue(item, col.id);
         const canBeClicked = !!col.metricFormat;
@@ -258,6 +338,7 @@ export function SearchQueryPerformanceView() {
             <td
                 style={{ ...styles.td, ...(canBeClicked && styles.clickableCell) }}
                 onClick={() => canBeClicked && handleCellClick(item.searchQuery, col)}
+                title={String(value)}
             >
                 {col.formatter(value)}
             </td>
@@ -316,10 +397,29 @@ export function SearchQueryPerformanceView() {
                 {loading.data ? <div style={styles.message}>Loading performance data...</div> :
                  !hasApplied ? <div style={styles.message}>Select filters and click "Apply" to view data.</div> :
                  sortedData.length === 0 ? <div style={styles.message}>No data found for the selected ASIN and week.</div> : (
-                    <table style={styles.table}>
+                    <table style={{...styles.table, tableLayout: 'fixed'}}>
+                        <colgroup>
+                            {widths.map((width, index) => (
+                                <col key={index} style={{ width: `${width}px` }} />
+                            ))}
+                        </colgroup>
                         <thead>
                             <tr>
-                                {visibleColumns.map(col => renderHeader(col))}
+                                {visibleColumns.map((col, index) => {
+                                    const isSorted = sortConfig?.key === col.id;
+                                    const directionIcon = sortConfig?.direction === 'descending' ? '▼' : '▲';
+                                    return (
+                                        <ResizableTh key={col.id} index={index} getHeaderProps={getHeaderProps} resizingColumnIndex={resizingColumnIndex}>
+                                            <div
+                                                onClick={() => requestSort(col.id)}
+                                                style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}
+                                            >
+                                                {col.label}
+                                                {isSorted && <span style={{ marginLeft: '5px' }}>{directionIcon}</span>}
+                                            </div>
+                                        </ResizableTh>
+                                    );
+                                })}
                             </tr>
                         </thead>
                         <tbody>
@@ -328,7 +428,7 @@ export function SearchQueryPerformanceView() {
                                     {visibleColumns.map(col => {
                                         if (col.id === 'searchQuery') {
                                             return (
-                                                <td key={col.id} style={styles.td}>
+                                                <td key={col.id} style={styles.td} title={item.searchQuery}>
                                                     {item.searchQuery}
                                                     {item.hasSPData && <span style={styles.spBadge}>SP</span>}
                                                 </td>

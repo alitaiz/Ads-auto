@@ -40,7 +40,8 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
             setError(null);
             try {
                 const params = new URLSearchParams({
-                    ...dateRange,
+                    startDate: dateRange.start,
+                    endDate: dateRange.end,
                     metricId: config.metricId,
                     searchQuery: config.searchQuery,
                     asin: config.asin,

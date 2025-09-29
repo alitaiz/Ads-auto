@@ -13,6 +13,8 @@ import {
   Legend,
   Filler,
   ChartTypeRegistry,
+  LineController,
+  BarController,
 } from 'chart.js';
 import { AppChartConfig } from '../../types';
 
@@ -25,7 +27,9 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  Filler
+  Filler,
+  LineController,
+  BarController
 );
 
 const styles: { [key: string]: React.CSSProperties } = {

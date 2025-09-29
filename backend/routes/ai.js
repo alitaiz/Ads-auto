@@ -531,7 +531,20 @@ router.post('/ai/chat', async (req, res) => {
 
     } catch (error) {
         console.error("Gemini chat error:", error);
-        res.status(500).end(JSON.stringify({ error: error.message }));
+        let userFriendlyMessage = "An unexpected error occurred with the AI service. Please try again.";
+
+        // Check for specific API errors from @google/genai
+        if (error.status === 503 || (error.message && (error.message.includes('UNAVAILABLE') || error.message.includes('overloaded')))) {
+            userFriendlyMessage = "The AI model is currently overloaded or unavailable. Please try again in a few moments.";
+        } else if (error.message && error.message.includes('API_KEY_INVALID')) {
+            userFriendlyMessage = "The AI service API key is invalid. Please check the server configuration.";
+        } else if (error.name === 'AbortError') {
+            // Not an error, just user action. Silently end the response.
+            console.log('Gemini stream aborted by client.');
+            return res.end();
+        }
+        
+        res.status(500).end(JSON.stringify({ error: userFriendlyMessage }));
     } finally {
         if (client) client.release();
     }
@@ -636,7 +649,33 @@ router.post('/ai/chat-gpt', async (req, res) => {
 
     } catch (error) {
         console.error("OpenAI chat error:", error);
-        res.status(500).end(JSON.stringify({ error: error.message }));
+        let userFriendlyMessage = "An unexpected error occurred with the AI service. Please try again.";
+
+        if (error.name === 'AbortError') {
+            console.log('OpenAI stream aborted by client.');
+            return res.end();
+        }
+
+        // OpenAI SDK errors often have a status property
+        if (error.status) {
+            switch (error.status) {
+                case 401:
+                    userFriendlyMessage = "Authentication error with the OpenAI service. Please check the server configuration.";
+                    break;
+                case 429:
+                    userFriendlyMessage = "The OpenAI service has reached its rate limit or is overloaded. Please try again later.";
+                    break;
+                case 500:
+                case 503:
+                    userFriendlyMessage = "The OpenAI service is currently experiencing issues. Please try again in a few moments.";
+                    break;
+                default:
+                    // Use the error message from OpenAI if available
+                    userFriendlyMessage = error.message || `An error occurred with the AI service (Status: ${error.status}).`;
+            }
+        }
+        
+        res.status(500).end(JSON.stringify({ error: userFriendlyMessage }));
     } finally {
         if (client) client.release();
     }

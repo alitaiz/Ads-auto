@@ -18,9 +18,6 @@ async function fetchSearchTermDataForAI(asin, dateRange) {
     }
     const { startDate, endDate } = dateRange;
     try {
-        const dateRangeQuery = `...`; // Re-use existing logic
-        const query = `...`; // Re-use existing logic
-        
         const dateRangeResult = await pool.query(`
             SELECT MIN(report_date) as "minDate", MAX(report_date) as "maxDate"
             FROM (
@@ -65,7 +62,6 @@ async function fetchStreamDataForAI(asin, dateRange) {
     }
     const { startDate, endDate } = dateRange;
     try {
-        const campaignIdQuery = `...`; // Re-use existing logic
         const campaignIdResult = await pool.query(`
             SELECT DISTINCT campaign_id::bigint FROM sponsored_products_search_term_report WHERE asin = $1 AND report_date >= $2
             UNION
@@ -76,11 +72,18 @@ async function fetchStreamDataForAI(asin, dateRange) {
         const campaignIds = campaignIdResult.rows.map(r => r.campaign_id);
         if (campaignIds.length === 0) return { data: [], dateRange };
         
-        const dateRangeQuery = `...`;
-        const dateRangeResult = await pool.query(`...`, [campaignIds, startDate, endDate]);
+        // FIX: The placeholder query was causing a syntax error.
+        // This new query correctly finds the actual date range of available stream data.
+        const dateRangeResult = await pool.query(`
+            SELECT
+                MIN(((COALESCE(event_data ->> 'time_window_start', event_data ->> 'timeWindowStart'))::timestamptz AT TIME ZONE 'America/Los_Angeles')::date) as "minDate",
+                MAX(((COALESCE(event_data ->> 'time_window_start', event_data ->> 'timeWindowStart'))::timestamptz AT TIME ZONE 'America/Los_Angeles')::date) as "maxDate"
+            FROM raw_stream_events
+            WHERE (COALESCE(event_data->>'campaignId', event_data->>'campaign_id'))::bigint = ANY($1::bigint[])
+              AND ((COALESCE(event_data ->> 'time_window_start', event_data ->> 'timeWindowStart'))::timestamptz AT TIME ZONE 'America/Los_Angeles')::date BETWEEN $2::date AND $3::date
+        `, [campaignIds, startDate, endDate]);
         const { minDate, maxDate } = dateRangeResult.rows[0] || {};
 
-        const streamQuery = `...`; // Re-use existing logic
         const { rows } = await pool.query(`
              WITH all_events AS (
                 SELECT event_type, (COALESCE(event_data->>'campaignId', event_data->>'campaign_id'))::bigint AS campaign_id, (COALESCE(event_data->>'adGroupId', event_data->>'ad_group_id'))::bigint AS ad_group_id, (COALESCE(event_data->>'keywordId', event_data->>'keyword_id', event_data->>'targetId', event_data->>'target_id'))::bigint AS entity_id, COALESCE(event_data->>'keywordText', event_data->>'keyword_text', event_data->>'targeting_text', event_data->>'targetingExpression') AS entity_text, event_data
@@ -112,7 +115,6 @@ async function fetchSalesTrafficDataForAI(asin, dateRange) {
     }
     const { startDate, endDate } = dateRange;
     try {
-        const dateRangeQuery = `...`; // Re-use existing logic
         const dateRangeResult = await pool.query(`
             SELECT MIN(report_date) as "minDate", MAX(report_date) as "maxDate"
             FROM sales_and_traffic_by_asin
@@ -120,9 +122,33 @@ async function fetchSalesTrafficDataForAI(asin, dateRange) {
         `, [asin, startDate, endDate]);
         const { minDate, maxDate } = dateRangeResult.rows[0] || {};
 
-        const query = `...`; // Re-use existing logic
+        // FIX: The placeholder query was causing a syntax error.
+        // This query aggregates key sales and traffic metrics by day for the specified ASIN.
         const { rows } = await pool.query(`
-             WITH daily_data AS (...) SELECT ... FROM daily_data;
+            WITH daily_data AS (
+                SELECT
+                    report_date,
+                    SUM((sales_data->>'unitsOrdered')::int) as "unitsOrdered",
+                    SUM((sales_data->>'orderedProductSales'->>'amount')::numeric) as "orderedProductSales",
+                    SUM((traffic_data->>'sessions')::int) as "sessions",
+                    SUM((traffic_data->>'pageViews')::int) as "pageViews",
+                    -- Calculate weighted average for unit session percentage to be accurate
+                    SUM((traffic_data->>'sessions')::int * (traffic_data->>'unitSessionPercentage')::numeric) as "weightedUnitSessionTotal",
+                    SUM((traffic_data->>'sessions')::int) as "totalSessionsForAvg"
+                FROM sales_and_traffic_by_asin
+                WHERE child_asin = $1 AND report_date BETWEEN $2 AND $3
+                GROUP BY report_date
+            )
+            SELECT
+                report_date,
+                "unitsOrdered",
+                "orderedProductSales",
+                "sessions",
+                "pageViews",
+                -- Finalize the weighted average calculation, and normalize to a decimal (e.g., 0.15 for 15%)
+                ("weightedUnitSessionTotal" / NULLIF("totalSessionsForAvg", 0)) / 100 as "avgUnitSessionPercentage"
+            FROM daily_data
+            ORDER BY report_date ASC;
         `, [asin, startDate, endDate]);
         
         return {
@@ -144,7 +170,6 @@ async function fetchSqpDataForAI(asin, weeks) {
         return { data: [], dateRange: null };
     }
     try {
-        const query = `...`; // Re-use existing logic
         const { rows } = await pool.query(`
              SELECT search_query, performance_data
              FROM query_performance_data

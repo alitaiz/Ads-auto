@@ -52,7 +52,7 @@ export async function getSpApiAccessToken() {
 /**
  * A wrapper for making authenticated requests to the SP-API.
  */
-async function spApiRequest({ method, url, data, params }) {
+export async function spApiRequest({ method, url, data, params }) {
     const accessToken = await getSpApiAccessToken();
     try {
         const response = await axios({

@@ -1,5 +1,4 @@
 // views/SearchQueryPerformanceView.tsx
-
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
     QueryPerformanceData,
@@ -24,10 +23,12 @@ const styles: { [key: string]: React.CSSProperties } = {
         borderRadius: 'var(--border-radius)',
         boxShadow: 'var(--box-shadow)',
         marginBottom: '20px',
+        flexWrap: 'wrap',
     },
     controlGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
     label: { fontSize: '0.9rem', fontWeight: 500 },
     select: { padding: '10px', borderRadius: '4px', border: '1px solid var(--border-color)', minWidth: '250px' },
+    input: { padding: '10px', borderRadius: '4px', border: '1px solid var(--border-color)', minWidth: '250px' },
     primaryButton: { padding: '10px 20px', border: 'none', borderRadius: '4px', backgroundColor: 'var(--primary-color)', color: 'white', cursor: 'pointer' },
     productDetailsContainer: {
         display: 'flex', gap: '20px', alignItems: 'center',
@@ -51,9 +52,79 @@ const styles: { [key: string]: React.CSSProperties } = {
     message: { textAlign: 'center', padding: '50px', fontSize: '1.2rem', color: '#666' },
     error: { color: 'var(--danger-color)', padding: '20px', backgroundColor: '#fdd', borderRadius: 'var(--border-radius)', marginTop: '20px' },
     spBadge: { backgroundColor: '#28a745', color: 'white', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', marginLeft: '8px' },
+    customizeButton: { marginLeft: 'auto', padding: '10px 15px', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'white', cursor: 'pointer' },
+    modalBackdrop: { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1050 },
+    modalContent: { backgroundColor: 'white', padding: '20px', borderRadius: '8px', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' },
+    modalHeader: { fontSize: '1.5rem', margin: '0 0 15px 0' },
+    modalBody: { overflowY: 'auto', flex: 1, padding: '10px' },
+    modalFooter: { paddingTop: '15px', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'flex-end', gap: '10px' },
+    columnGroup: { marginBottom: '15px' },
+    columnGroupTitle: { fontWeight: 'bold', borderBottom: '1px solid #eee', paddingBottom: '5px', marginBottom: '10px' },
+    columnCheckbox: { display: 'block', marginBottom: '8px' },
 };
 
-type SortableKeys = keyof QueryPerformanceData | 'impressions.asinShare' | 'clicks.clickRate' | 'clicks.asinShare' | 'cartAdds.cartAddRate' | 'cartAdds.asinShare' | 'purchases.purchaseRate' | 'purchases.asinShare';
+type SortableKeys = keyof QueryPerformanceData | string;
+
+interface ColumnConfig {
+    id: string;
+    label: string;
+    defaultVisible: boolean;
+    formatter: (val: any) => string;
+    metricFormat?: 'number' | 'percent' | 'price';
+}
+
+const allColumns: ColumnConfig[] = [
+    // --- Primary Columns (Default Visible) ---
+    { id: 'searchQuery', label: 'Search Query', defaultVisible: true, formatter: (val) => String(val) },
+    { id: 'searchQueryVolume', label: 'Search Volume', defaultVisible: true, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'impressions.asinShare', label: 'Impression Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent' },
+    { id: 'clicks.clickRate', label: 'Click Rate', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent' },
+    { id: 'clicks.asinShare', label: 'Click Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent' },
+    { id: 'cartAdds.cartAddRate', label: 'Add to Cart Rate', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent' },
+    { id: 'cartAdds.asinShare', label: 'Add to Cart Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent' },
+    { id: 'purchases.purchaseRate', label: 'Purchase Rate', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent' },
+    { id: 'purchases.asinShare', label: 'Purchase Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent' },
+    
+    // --- General ---
+    { id: 'searchQueryScore', label: 'Search Query Score', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    
+    // --- Impressions ---
+    { id: 'impressions.totalCount', label: 'Total Impressions', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'impressions.asinCount', label: 'ASIN Impressions', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+
+    // --- Clicks ---
+    { id: 'clicks.totalCount', label: 'Total Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'clicks.asinCount', label: 'ASIN Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'clicks.totalMedianPrice', label: 'Total Median Click Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price' },
+    { id: 'clicks.asinMedianPrice', label: 'ASIN Median Click Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price' },
+
+    // --- Cart Adds ---
+    { id: 'cartAdds.totalCount', label: 'Total Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'cartAdds.asinCount', label: 'ASIN Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'cartAdds.totalMedianPrice', label: 'Total Median Cart Add Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price' },
+    { id: 'cartAdds.asinMedianPrice', label: 'ASIN Median Cart Add Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price' },
+
+    // --- Purchases ---
+    { id: 'purchases.totalCount', label: 'Total Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'purchases.asinCount', label: 'ASIN Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'purchases.totalMedianPrice', label: 'Total Median Purchase Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price' },
+    { id: 'purchases.asinMedianPrice', label: 'ASIN Median Purchase Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price' },
+
+    // --- Shipping Speed (Clicks) ---
+    { id: 'clicks.sameDayShippingCount', label: 'Same-Day Shipping Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'clicks.oneDayShippingCount', label: '1-Day Shipping Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'clicks.twoDayShippingCount', label: '2-Day Shipping Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+
+    // --- Shipping Speed (Cart Adds) ---
+    { id: 'cartAdds.sameDayShippingCount', label: 'Same-Day Shipping Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'cartAdds.oneDayShippingCount', label: '1-Day Shipping Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'cartAdds.twoDayShippingCount', label: '2-Day Shipping Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    
+    // --- Shipping Speed (Purchases) ---
+    { id: 'purchases.sameDayShippingCount', label: 'Same-Day Shipping Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'purchases.oneDayShippingCount', label: '1-Day Shipping Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+    { id: 'purchases.twoDayShippingCount', label: '2-Day Shipping Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number' },
+];
 
 const getNestedValue = (obj: any, path: string) => {
     return path.split('.').reduce((p, c) => (p && p[c] !== undefined) ? p[c] : 0, obj);
@@ -70,6 +141,11 @@ export function SearchQueryPerformanceView() {
     const [hasApplied, setHasApplied] = useState(false);
     const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' } | null>({ key: 'searchQueryVolume', direction: 'descending' });
     const [chartConfig, setChartConfig] = useState<AppChartConfig | null>(null);
+    const [isCustomizeModalOpen, setCustomizeModalOpen] = useState(false);
+    
+    const [visibleColumns, setVisibleColumns] = useState<ColumnConfig[]>(
+        allColumns.filter(c => c.defaultVisible)
+    );
 
     useEffect(() => {
         const fetchFilters = async () => {
@@ -153,46 +229,51 @@ export function SearchQueryPerformanceView() {
         setSortConfig({ key, direction });
     };
 
-    const handleCellClick = (searchQuery: string, metricId: string, metricLabel: string, metricFormat: 'number' | 'percent' | 'price') => {
+    const handleCellClick = (searchQuery: string, col: ColumnConfig) => {
+        if (!col.metricFormat) return; // Don't open chart for non-metric columns
         setChartConfig({
             type: 'performance',
             asin: selectedAsin,
             searchQuery,
-            metricId,
-            metricLabel,
-            metricFormat,
+            metricId: col.id,
+            metricLabel: col.label,
+            metricFormat: col.metricFormat,
         });
     };
 
-    const renderHeader = (id: SortableKeys, label: string) => {
-        const isSorted = sortConfig?.key === id;
+    const renderHeader = (col: ColumnConfig) => {
+        const isSorted = sortConfig?.key === col.id;
         const directionIcon = sortConfig?.direction === 'descending' ? '▼' : '▲';
         return (
-            <th style={styles.th} onClick={() => requestSort(id)}>
-                {label} {isSorted && directionIcon}
+            <th style={styles.th} onClick={() => requestSort(col.id)}>
+                {col.label} {isSorted && directionIcon}
             </th>
         );
     };
 
-    const renderClickableCell = (
-        value: number | undefined | null,
-        searchQuery: string,
-        metricId: string,
-        metricLabel: string,
-        metricFormat: 'number' | 'percent' | 'price',
-        formatter: (val: number) => string
-    ) => (
-        <td
-            style={{ ...styles.td, ...styles.clickableCell }}
-            onClick={() => handleCellClick(searchQuery, metricId, metricLabel, metricFormat)}
-        >
-            {formatter(value ?? 0)}
-        </td>
-    );
+    const renderClickableCell = (item: QueryPerformanceData, col: ColumnConfig) => {
+        const value = getNestedValue(item, col.id);
+        const canBeClicked = !!col.metricFormat;
+        return (
+            <td
+                style={{ ...styles.td, ...(canBeClicked && styles.clickableCell) }}
+                onClick={() => canBeClicked && handleCellClick(item.searchQuery, col)}
+            >
+                {col.formatter(value)}
+            </td>
+        );
+    };
+
+    const handleSaveCustomization = (newVisibleIds: Set<string>) => {
+        const newVisibleColumns = allColumns.filter(c => newVisibleIds.has(c.id));
+        setVisibleColumns(newVisibleColumns);
+        setCustomizeModalOpen(false);
+    };
 
     return (
         <div style={styles.viewContainer}>
             {chartConfig && <ChartModal config={chartConfig} dateRange={{start: selectedWeek, end: selectedWeek}} onClose={() => setChartConfig(null)} />}
+            {isCustomizeModalOpen && <CustomizeColumnsModal allColumns={allColumns} visibleColumnIds={new Set(visibleColumns.map(c => c.id))} onSave={handleSaveCustomization} onClose={() => setCustomizeModalOpen(false)} />}
             
             <header style={styles.header}>
                 <h1 style={styles.title}>Search Query Performance</h1>
@@ -202,9 +283,10 @@ export function SearchQueryPerformanceView() {
             <div style={styles.controlsContainer}>
                 <div style={styles.controlGroup}>
                     <label style={styles.label} htmlFor="asin-select">ASIN</label>
-                    <select id="asin-select" style={styles.select} value={selectedAsin} onChange={e => setSelectedAsin(e.target.value)} disabled={loading.filters}>
-                        {loading.filters ? <option>Loading ASINs...</option> : filterOptions.asins.map(asin => <option key={asin} value={asin}>{asin}</option>)}
-                    </select>
+                    <input list="asin-options" id="asin-select" style={styles.input} value={selectedAsin} onChange={e => setSelectedAsin(e.target.value)} disabled={loading.filters} placeholder="Select or type an ASIN" />
+                    <datalist id="asin-options">
+                        {filterOptions.asins.map(asin => <option key={asin} value={asin} />)}
+                    </datalist>
                 </div>
                 <div style={styles.controlGroup}>
                     <label style={styles.label} htmlFor="week-select">Week</label>
@@ -213,8 +295,9 @@ export function SearchQueryPerformanceView() {
                     </select>
                 </div>
                 <button style={styles.primaryButton} onClick={handleApplyFilters} disabled={loading.filters || loading.data}>
-                    {loading.data ? 'Loading...' : 'Apply Filters'}
+                    {loading.data ? 'Loading...' : 'Apply'}
                 </button>
+                <button style={styles.customizeButton} onClick={() => setCustomizeModalOpen(true)}>Customize Columns</button>
             </div>
             
             {error && <div style={styles.error}>{error}</div>}
@@ -236,32 +319,23 @@ export function SearchQueryPerformanceView() {
                     <table style={styles.table}>
                         <thead>
                             <tr>
-                                {renderHeader('searchQuery', 'Search Query')}
-                                {renderHeader('searchQueryVolume', 'Search Volume')}
-                                {renderHeader('impressions.asinShare', 'Impression Share')}
-                                {renderHeader('clicks.clickRate', 'Click Rate')}
-                                {renderHeader('clicks.asinShare', 'Click Share')}
-                                {renderHeader('cartAdds.cartAddRate', 'Add to Cart Rate')}
-                                {renderHeader('cartAdds.asinShare', 'Add to Cart Share')}
-                                {renderHeader('purchases.purchaseRate', 'Purchase Rate')}
-                                {renderHeader('purchases.asinShare', 'Purchase Share')}
+                                {visibleColumns.map(col => renderHeader(col))}
                             </tr>
                         </thead>
                         <tbody>
                             {sortedData.map(item => (
                                 <tr key={item.searchQuery}>
-                                    <td style={styles.td}>
-                                        {item.searchQuery}
-                                        {item.hasSPData && <span style={styles.spBadge}>SP</span>}
-                                    </td>
-                                    {renderClickableCell(item.searchQueryVolume, item.searchQuery, 'searchQueryVolume', 'Search Volume', 'number', formatNumber)}
-                                    {renderClickableCell(item.impressions.asinShare, item.searchQuery, 'impressions.asinShare', 'Impression Share', 'percent', formatPercent)}
-                                    {renderClickableCell(item.clicks.clickRate, item.searchQuery, 'clicks.clickRate', 'Click Rate', 'percent', formatPercent)}
-                                    {renderClickableCell(item.clicks.asinShare, item.searchQuery, 'clicks.asinShare', 'Click Share', 'percent', formatPercent)}
-                                    {renderClickableCell(item.cartAdds.cartAddRate, item.searchQuery, 'cartAdds.cartAddRate', 'Add to Cart Rate', 'percent', formatPercent)}
-                                    {renderClickableCell(item.cartAdds.asinShare, item.searchQuery, 'cartAdds.asinShare', 'Add to Cart Share', 'percent', formatPercent)}
-                                    {renderClickableCell(item.purchases.purchaseRate, item.searchQuery, 'purchases.purchaseRate', 'Purchase Rate', 'percent', formatPercent)}
-                                    {renderClickableCell(item.purchases.asinShare, item.searchQuery, 'purchases.asinShare', 'Purchase Share', 'percent', formatPercent)}
+                                    {visibleColumns.map(col => {
+                                        if (col.id === 'searchQuery') {
+                                            return (
+                                                <td key={col.id} style={styles.td}>
+                                                    {item.searchQuery}
+                                                    {item.hasSPData && <span style={styles.spBadge}>SP</span>}
+                                                </td>
+                                            );
+                                        }
+                                        return renderClickableCell(item, col);
+                                    })}
                                 </tr>
                             ))}
                         </tbody>
@@ -271,3 +345,59 @@ export function SearchQueryPerformanceView() {
         </div>
     );
 }
+
+const CustomizeColumnsModal = ({ allColumns, visibleColumnIds, onSave, onClose }: { allColumns: ColumnConfig[], visibleColumnIds: Set<string>, onSave: (newVisible: Set<string>) => void, onClose: () => void }) => {
+    const [selected, setSelected] = useState(visibleColumnIds);
+
+    const handleToggle = (id: string) => {
+        setSelected(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(id)) newSet.delete(id);
+            else newSet.add(id);
+            return newSet;
+        });
+    };
+    
+    const groups = {
+        'General': ['searchQuery', 'searchQueryVolume', 'searchQueryScore'],
+        'Impressions': ['impressions.asinShare', 'impressions.totalCount', 'impressions.asinCount'],
+        'Clicks': ['clicks.clickRate', 'clicks.asinShare', 'clicks.totalCount', 'clicks.asinCount', 'clicks.totalMedianPrice', 'clicks.asinMedianPrice'],
+        'Cart Adds': ['cartAdds.cartAddRate', 'cartAdds.asinShare', 'cartAdds.totalCount', 'cartAdds.asinCount', 'cartAdds.totalMedianPrice', 'cartAdds.asinMedianPrice'],
+        'Purchases': ['purchases.purchaseRate', 'purchases.asinShare', 'purchases.totalCount', 'purchases.asinCount', 'purchases.totalMedianPrice', 'purchases.asinMedianPrice'],
+        'Shipping Speed (Clicks)': ['clicks.sameDayShippingCount', 'clicks.oneDayShippingCount', 'clicks.twoDayShippingCount'],
+        'Shipping Speed (Cart Adds)': ['cartAdds.sameDayShippingCount', 'cartAdds.oneDayShippingCount', 'cartAdds.twoDayShippingCount'],
+        'Shipping Speed (Purchases)': ['purchases.sameDayShippingCount', 'purchases.oneDayShippingCount', 'purchases.twoDayShippingCount']
+    };
+
+    return (
+        <div style={styles.modalBackdrop}>
+            <div style={styles.modalContent}>
+                <h2 style={styles.modalHeader}>Customize Columns</h2>
+                <div style={styles.modalBody}>
+                    {Object.entries(groups).map(([groupName, ids]) => (
+                        <div key={groupName} style={styles.columnGroup}>
+                            <h3 style={styles.columnGroupTitle}>{groupName}</h3>
+                            {allColumns
+                                .filter(c => ids.includes(c.id))
+                                .map(col => (
+                                    <label key={col.id} style={styles.columnCheckbox}>
+                                        <input
+                                            type="checkbox"
+                                            checked={selected.has(col.id)}
+                                            onChange={() => handleToggle(col.id)}
+                                            disabled={col.id === 'searchQuery'}
+                                        />
+                                        <span style={{ marginLeft: '8px' }}>{col.label}</span>
+                                    </label>
+                            ))}
+                        </div>
+                    ))}
+                </div>
+                <div style={styles.modalFooter}>
+                    <button onClick={onClose} style={{...styles.primaryButton, backgroundColor: '#6c757d'}}>Cancel</button>
+                    <button onClick={() => onSave(selected)} style={styles.primaryButton}>Save</button>
+                </div>
+            </div>
+        </div>
+    );
+};

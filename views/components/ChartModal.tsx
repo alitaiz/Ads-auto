@@ -11,6 +11,7 @@ import {
   Title,
   Tooltip,
   Legend,
+  Filler,
 } from 'chart.js';
 import { AppChartConfig } from '../../types';
 
@@ -22,7 +23,8 @@ ChartJS.register(
   BarElement,
   Title,
   Tooltip,
-  Legend
+  Legend,
+  Filler
 );
 
 const styles: { [key: string]: React.CSSProperties } = {

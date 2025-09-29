@@ -246,15 +246,77 @@ router.post('/ai/tool/sales-traffic', async (req, res) => {
         const { minDate, maxDate } = dateRangeResult.rows[0] || {};
 
         const query = `
+            WITH daily_data AS (
+                SELECT
+                    -- Sales Metrics
+                    COALESCE((sales_data->>'unitsOrdered')::integer, 0) AS unitsOrdered,
+                    COALESCE((sales_data->'orderedProductSales'->>'amount')::numeric, 0.0) AS orderedProductSales,
+                    COALESCE((sales_data->>'totalOrderItems')::integer, 0) AS totalOrderItems,
+                    COALESCE((sales_data->>'unitsOrderedB2B')::integer, 0) AS unitsOrderedB2B,
+                    COALESCE((sales_data->'orderedProductSalesB2B'->>'amount')::numeric, 0.0) AS orderedProductSalesB2B,
+                    COALESCE((sales_data->>'totalOrderItemsB2B')::integer, 0) AS totalOrderItemsB2B,
+
+                    -- Traffic Metrics
+                    COALESCE((traffic_data->>'sessions')::integer, 0) AS sessions,
+                    COALESCE((traffic_data->>'pageViews')::integer, 0) AS pageViews,
+                    COALESCE((traffic_data->>'buyBoxPercentage')::numeric, 0.0) AS buyBoxPercentage,
+                    COALESCE((traffic_data->>'sessionsB2B')::integer, 0) AS sessionsB2B,
+                    COALESCE((traffic_data->>'pageViewsB2B')::integer, 0) AS pageViewsB2B,
+                    COALESCE((traffic_data->>'buyBoxPercentageB2B')::numeric, 0.0) AS buyBoxPercentageB2B,
+                    COALESCE((traffic_data->>'browserSessions')::integer, 0) AS browserSessions,
+                    COALESCE((traffic_data->>'mobileAppSessions')::integer, 0) AS mobileAppSessions,
+                    COALESCE((traffic_data->>'browserPageViews')::integer, 0) AS browserPageViews,
+                    COALESCE((traffic_data->>'mobileAppPageViews')::integer, 0) AS mobileAppPageViews,
+                    COALESCE((traffic_data->>'browserSessionsB2B')::integer, 0) AS browserSessionsB2B,
+                    COALESCE((traffic_data->>'mobileAppSessionsB2B')::integer, 0) AS mobileAppSessionsB2B,
+                    COALESCE((traffic_data->>'browserPageViewsB2B')::integer, 0) AS browserPageViewsB2B,
+                    COALESCE((traffic_data->>'mobileAppPageViewsB2B')::integer, 0) AS mobileAppPageViewsB2B
+                FROM sales_and_traffic_by_asin
+                WHERE child_asin = $1 AND report_date BETWEEN $2 AND $3
+            )
             SELECT
-                SUM(COALESCE((traffic_data->>'sessions')::integer, 0)) AS total_sessions,
-                SUM(COALESCE((traffic_data->>'pageViews')::integer, 0)) AS total_page_views,
-                SUM(COALESCE((sales_data->>'unitsOrdered')::integer, 0)) AS total_units_ordered,
-                SUM(COALESCE((sales_data->'orderedProductSales'->>'amount')::numeric, 0.0)) AS total_ordered_product_sales,
-                SUM(COALESCE((sales_data->>'totalOrderItems')::integer, 0)) AS total_order_items,
-                ROUND(COALESCE(SUM(COALESCE((sales_data->>'unitsOrdered')::numeric, 0)) / NULLIF(SUM(COALESCE((traffic_data->>'sessions')::numeric, 0)), 0), 0.0) * 100, 2) AS overall_unit_session_percentage
-            FROM sales_and_traffic_by_asin
-            WHERE child_asin = $1 AND report_date BETWEEN $2 AND $3;
+                -- Aggregated Sales
+                SUM(unitsOrdered) AS "unitsOrdered",
+                SUM(orderedProductSales) AS "orderedProductSales",
+                SUM(totalOrderItems) AS "totalOrderItems",
+                SUM(unitsOrderedB2B) AS "unitsOrderedB2B",
+                SUM(orderedProductSalesB2B) AS "orderedProductSalesB2B",
+                SUM(totalOrderItemsB2B) AS "totalOrderItemsB2B",
+
+                -- Aggregated Traffic
+                SUM(sessions) AS "sessions",
+                SUM(pageViews) AS "pageViews",
+                SUM(sessionsB2B) AS "sessionsB2B",
+                SUM(pageViewsB2B) AS "pageViewsB2B",
+                SUM(browserSessions) AS "browserSessions",
+                SUM(mobileAppSessions) AS "mobileAppSessions",
+                SUM(browserPageViews) AS "browserPageViews",
+                SUM(mobileAppPageViews) AS "mobileAppPageViews",
+                SUM(browserSessionsB2B) AS "browserSessionsB2B",
+                SUM(mobileAppSessionsB2B) AS "mobileAppSessionsB2B",
+                SUM(browserPageViewsB2B) AS "browserPageViewsB2B",
+                SUM(mobileAppPageViewsB2B) AS "mobileAppPageViewsB2B",
+
+                -- Calculated Metrics (Percentages and Averages)
+                ROUND(SUM(buyBoxPercentage * sessions) / NULLIF(SUM(sessions), 0), 2) AS "buyBoxPercentage",
+                ROUND(SUM(buyBoxPercentageB2B * sessionsB2B) / NULLIF(SUM(sessionsB2B), 0), 2) AS "buyBoxPercentageB2B",
+                
+                ROUND(SUM(orderedProductSales) / NULLIF(SUM(totalOrderItems), 0), 2) AS "averageSalesPerOrderItem",
+                ROUND(SUM(orderedProductSalesB2B) / NULLIF(SUM(totalOrderItemsB2B), 0), 2) AS "averageSalesPerOrderItemB2B",
+
+                ROUND(COALESCE(SUM(unitsOrdered::numeric) / NULLIF(SUM(sessions), 0.0), 0.0) * 100, 2) AS "unitSessionPercentage",
+                ROUND(COALESCE(SUM(unitsOrderedB2B::numeric) / NULLIF(SUM(sessionsB2B), 0.0), 0.0) * 100, 2) AS "unitSessionPercentageB2B",
+
+                ROUND(COALESCE(SUM(browserSessions::numeric) / NULLIF(SUM(sessions), 0.0), 0.0) * 100, 2) AS "browserSessionPercentage",
+                ROUND(COALESCE(SUM(mobileAppSessions::numeric) / NULLIF(SUM(sessions), 0.0), 0.0) * 100, 2) AS "mobileAppSessionPercentage",
+                ROUND(COALESCE(SUM(browserPageViews::numeric) / NULLIF(SUM(pageViews), 0.0), 0.0) * 100, 2) AS "browserPageViewsPercentage",
+                ROUND(COALESCE(SUM(mobileAppPageViews::numeric) / NULLIF(SUM(pageViews), 0.0), 0.0) * 100, 2) AS "mobileAppPageViewsPercentage",
+                
+                ROUND(COALESCE(SUM(browserSessionsB2B::numeric) / NULLIF(SUM(sessionsB2B), 0.0), 0.0) * 100, 2) AS "browserSessionPercentageB2B",
+                ROUND(COALESCE(SUM(mobileAppSessionsB2B::numeric) / NULLIF(SUM(sessionsB2B), 0.0), 0.0) * 100, 2) AS "mobileAppSessionPercentageB2B",
+                ROUND(COALESCE(SUM(browserPageViewsB2B::numeric) / NULLIF(SUM(pageViewsB2B), 0.0), 0.0) * 100, 2) AS "browserPageViewsPercentageB2B",
+                ROUND(COALESCE(SUM(mobileAppPageViewsB2B::numeric) / NULLIF(SUM(pageViewsB2B), 0.0), 0.0) * 100, 2) AS "mobileAppPageViewsPercentageB2B"
+            FROM daily_data;
         `;
         const { rows } = await pool.query(query, [asin, startDate, endDate]);
         res.json({
@@ -312,7 +374,7 @@ router.post('/ai/chat', async (req, res) => {
         }
         
         const chat = ai.chats.create({
-            model: 'gemini-flash-latest',
+            model: 'gemini-2.5-flash',
             history: history,
             config: { systemInstruction }
         });

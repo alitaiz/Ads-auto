@@ -374,7 +374,7 @@ router.post('/ai/chat', async (req, res) => {
         }
         
         const chat = ai.chats.create({
-            model: 'gemini-2.5-flash',
+            model: 'models/gemini-flash-latest',
             history: history,
             config: { systemInstruction }
         });

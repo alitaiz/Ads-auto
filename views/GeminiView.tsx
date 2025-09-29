@@ -87,7 +87,7 @@ export function GeminiView() {
 
         try {
             const response = await ai.models.generateContent({
-                model: 'gemini-flash-latest',
+                model: 'models/gemini-flash-latest',
                 contents: prompt,
                 config: {
                     responseMimeType: "application/json",

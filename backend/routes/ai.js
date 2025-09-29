@@ -137,36 +137,42 @@ router.post('/ai/tool/stream', async (req, res) => {
                     entity_id,
                     MAX(entity_text) as entity_text,
 
-                    -- Traffic Metrics
-                    SUM(COALESCE((event_data->>'impressions')::bigint, 0)) FILTER (WHERE event_type LIKE '%-traffic') as impressions,
-                    SUM(COALESCE((event_data->>'clicks')::bigint, 0)) FILTER (WHERE event_type LIKE '%-traffic') as clicks,
-                    SUM(COALESCE((event_data->>'cost')::numeric, 0)) FILTER (WHERE event_type LIKE '%-traffic') as spend,
+                    -- Traffic Metrics using CASE for backwards compatibility
+                    SUM(CASE WHEN event_type LIKE '%-traffic' THEN COALESCE((event_data->>'impressions')::bigint, 0) ELSE 0 END) as impressions,
+                    SUM(CASE WHEN event_type LIKE '%-traffic' THEN COALESCE((event_data->>'clicks')::bigint, 0) ELSE 0 END) as clicks,
+                    SUM(CASE WHEN event_type LIKE '%-traffic' THEN COALESCE((event_data->>'cost')::numeric, 0) ELSE 0 END) as spend,
 
                     -- 1-Day Conversions (SP Only)
-                    SUM(COALESCE((event_data->>'purchases_1d')::bigint, 0)) FILTER (WHERE event_type = 'sp-conversion') as orders_1d,
-                    SUM(COALESCE((event_data->>'sales_1d')::numeric, 0)) FILTER (WHERE event_type = 'sp-conversion') as sales_1d,
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN COALESCE((event_data->>'purchases_1d')::bigint, 0) ELSE 0 END) as orders_1d,
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN COALESCE((event_data->>'sales_1d')::numeric, 0) ELSE 0 END) as sales_1d,
                     
                     -- 7-Day Conversions (SP Only)
-                    SUM(COALESCE((event_data->>'purchases_7d')::bigint, 0)) FILTER (WHERE event_type = 'sp-conversion') as orders_7d,
-                    SUM(COALESCE((event_data->>'sales_7d')::numeric, 0)) FILTER (WHERE event_type = 'sp-conversion') as sales_7d,
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN COALESCE((event_data->>'purchases_7d')::bigint, 0) ELSE 0 END) as orders_7d,
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN COALESCE((event_data->>'sales_7d')::numeric, 0) ELSE 0 END) as sales_7d,
                     
                     -- 14-Day Conversions (SP + SB/SD)
                     SUM(
-                        COALESCE((event_data->>'purchases_14d')::bigint, 0) FILTER (WHERE event_type = 'sp-conversion') +
-                        COALESCE((event_data->>'purchases')::bigint, 0) FILTER (WHERE event_type IN ('sb-conversion', 'sd-conversion'))
+                        CASE 
+                            WHEN event_type = 'sp-conversion' THEN COALESCE((event_data->>'purchases_14d')::bigint, 0)
+                            WHEN event_type IN ('sb-conversion', 'sd-conversion') THEN COALESCE((event_data->>'purchases')::bigint, 0)
+                            ELSE 0 
+                        END
                     ) as orders_14d,
                     SUM(
-                        COALESCE((event_data->>'sales_14d')::numeric, 0) FILTER (WHERE event_type = 'sp-conversion') +
-                        COALESCE((event_data->>'sales')::numeric, 0) FILTER (WHERE event_type IN ('sb-conversion', 'sd-conversion'))
+                        CASE 
+                            WHEN event_type = 'sp-conversion' THEN COALESCE((event_data->>'sales_14d')::numeric, 0)
+                            WHEN event_type IN ('sb-conversion', 'sd-conversion') THEN COALESCE((event_data->>'sales')::numeric, 0)
+                            ELSE 0 
+                        END
                     ) as sales_14d,
 
                     -- 30-Day Conversions (SP Only)
-                    SUM(COALESCE((event_data->>'purchases_30d')::bigint, 0)) FILTER (WHERE event_type = 'sp-conversion') as orders_30d,
-                    SUM(COALESCE((event_data->>'sales_30d')::numeric, 0)) FILTER (WHERE event_type = 'sp-conversion') as sales_30d,
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN COALESCE((event_data->>'purchases_30d')::bigint, 0) ELSE 0 END) as orders_30d,
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN COALESCE((event_data->>'sales_30d')::numeric, 0) ELSE 0 END) as sales_30d,
                     
                     -- Same SKU Sales (SP Only)
-                    SUM(COALESCE((event_data->>'attributed_sales_1d_same_sku')::numeric, 0)) FILTER (WHERE event_type = 'sp-conversion') as attributed_sales_1d_same_sku,
-                    SUM(COALESCE((event_data->>'attributed_sales_7d_same_sku')::numeric, 0)) FILTER (WHERE event_type = 'sp-conversion') as attributed_sales_7d_same_sku
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN COALESCE((event_data->>'attributed_sales_1d_same_sku')::numeric, 0) ELSE 0 END) as attributed_sales_1d_same_sku,
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN COALESCE((event_data->>'attributed_sales_7d_same_sku')::numeric, 0) ELSE 0 END) as attributed_sales_7d_same_sku
 
                 FROM all_events
                 WHERE entity_id IS NOT NULL AND campaign_id IS NOT NULL AND ad_group_id IS NOT NULL

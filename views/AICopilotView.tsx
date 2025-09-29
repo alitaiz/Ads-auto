@@ -98,6 +98,8 @@ export function AICopilotView() {
     const [selectedTemplateName, setSelectedTemplateName] = useState('Default PPC Expert Analyst');
     const [aiProvider, setAiProvider] = useState<'gemini' | 'openai'>('gemini');
 
+    const currentConversation = aiCache.chat[aiProvider];
+
     useEffect(() => {
         const matchingTemplate = systemPromptTemplates.find(t => t.prompt === aiCache.chat.systemInstruction);
         setSelectedTemplateName(matchingTemplate ? matchingTemplate.name : "Custom");
@@ -115,8 +117,8 @@ export function AICopilotView() {
         updateAiCache(prev => ({ ...prev, productInfo: { ...prev.productInfo, [key]: value } }));
     };
     
-    const setChatInfo = (key: keyof AICopilotCache['chat'], value: any) => {
-         updateAiCache(prev => ({ ...prev, chat: { ...prev.chat, [key]: value } }));
+    const setSystemInstruction = (instruction: string) => {
+        updateAiCache(prev => ({ ...prev, chat: { ...prev.chat, systemInstruction: instruction } }));
     };
 
     const handleTemplateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -125,16 +127,13 @@ export function AICopilotView() {
         if (templateName !== "Custom") {
             const selectedTemplate = systemPromptTemplates.find(t => t.name === templateName);
             if (selectedTemplate) {
-                setChatInfo('systemInstruction', selectedTemplate.prompt);
+                setSystemInstruction(selectedTemplate.prompt);
             }
         }
     };
     
     const handleProviderChange = (newProvider: 'gemini' | 'openai') => {
         setAiProvider(newProvider);
-        // Clear conversation to prevent context mixing between models
-        setChatInfo('conversationId', null);
-        setChatInfo('messages', []);
     };
 
     const setDateRange = (key: keyof AICopilotCache['dateRange'], value: string) => {
@@ -149,7 +148,7 @@ export function AICopilotView() {
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [aiCache.chat.messages]);
+    }, [currentConversation.messages]);
 
     const handleLoadData = async (tool: 'st' | 'stream' | 'sat') => {
         setLoading(prev => ({ ...prev, [tool]: true }));
@@ -228,7 +227,13 @@ export function AICopilotView() {
 
         updateAiCache(prev => ({
             ...prev,
-            chat: { ...prev.chat, messages: [...prev.chat.messages, newUserMessage] }
+            chat: {
+                ...prev.chat,
+                [aiProvider]: {
+                    ...prev.chat[aiProvider],
+                    messages: [...prev.chat[aiProvider].messages, newUserMessage],
+                },
+            },
         }));
         
         setLoading(prev => ({...prev, chat: true}));
@@ -238,7 +243,7 @@ export function AICopilotView() {
         try {
             const payload = {
                 question: questionToAsk,
-                conversationId: aiCache.chat.conversationId,
+                conversationId: currentConversation.conversationId,
                 context: {
                     productInfo: aiCache.productInfo,
                     performanceData: aiCache.loadedData,
@@ -277,30 +282,39 @@ export function AICopilotView() {
                         if (isFirstChunk) {
                             isFirstChunk = false;
                             updateAiCache(prev => {
-                                const newConversationId = parsed.conversationId || prev.chat.conversationId;
+                                const newConversationId = parsed.conversationId || prev.chat[aiProvider].conversationId;
                                 const newAiMessagePlaceholder: ChatMessage = { id: currentAiMessageId, sender: 'ai', text: '' };
                                 return {
                                     ...prev,
                                     chat: {
                                         ...prev.chat,
-                                        conversationId: newConversationId,
-                                        messages: [...prev.chat.messages, newAiMessagePlaceholder]
-                                    }
+                                        [aiProvider]: {
+                                            messages: [...prev.chat[aiProvider].messages, newAiMessagePlaceholder],
+                                            conversationId: newConversationId,
+                                        },
+                                    },
                                 };
                             });
                         }
 
                         if (parsed.content) {
                             aiResponseText += parsed.content;
-                            updateAiCache(prev => ({
-                                ...prev,
-                                chat: {
-                                    ...prev.chat,
-                                    messages: prev.chat.messages.map(msg => 
-                                        msg.id === currentAiMessageId ? { ...msg, text: aiResponseText } : msg
-                                    )
-                                }
-                            }));
+                             updateAiCache(prev => {
+                                const providerChat = prev.chat[aiProvider];
+                                const updatedMessages = providerChat.messages.map(msg =>
+                                    msg.id === currentAiMessageId ? { ...msg, text: aiResponseText } : msg
+                                );
+                                return {
+                                    ...prev,
+                                    chat: {
+                                        ...prev.chat,
+                                        [aiProvider]: {
+                                            ...providerChat,
+                                            messages: updatedMessages,
+                                        },
+                                    },
+                                };
+                            });
                         }
                     } catch (e) {
                          console.error("Error parsing stream chunk:", line, e);
@@ -354,7 +368,7 @@ export function AICopilotView() {
                         <textarea
                             style={styles.textarea}
                             value={aiCache.chat.systemInstruction}
-                            onChange={e => setChatInfo('systemInstruction', e.target.value)}
+                            onChange={e => setSystemInstruction(e.target.value)}
                             placeholder="Define the AI's role, context, and instructions here..."
                         />
                     </div>
@@ -381,8 +395,8 @@ export function AICopilotView() {
             </div>
             <div style={styles.rightPanel}>
                 <div style={styles.chatWindow} ref={chatEndRef}>
-                    {aiCache.chat.messages.length === 0 && <p style={{textAlign: 'center', color: '#888'}}>Load data and ask a question to start your conversation.</p>}
-                    {aiCache.chat.messages.map(msg => (
+                    {currentConversation.messages.length === 0 && <p style={{textAlign: 'center', color: '#888'}}>Load data and ask a question to start your conversation.</p>}
+                    {currentConversation.messages.map(msg => (
                         <div key={msg.id} style={{...styles.message, ...(msg.sender === 'user' ? styles.userMessage : styles.aiMessage)}}>
                             {msg.sender === 'ai' && (
                                 <p style={styles.aiProviderName}>
@@ -392,7 +406,7 @@ export function AICopilotView() {
                              <div dangerouslySetInnerHTML={{ __html: marked.parse(msg.text) }}></div>
                         </div>
                     ))}
-                    {loading.chat && aiCache.chat.messages.length > 0 && aiCache.chat.messages[aiCache.chat.messages.length - 1].sender === 'user' && (
+                    {loading.chat && currentConversation.messages.length > 0 && currentConversation.messages[currentConversation.messages.length - 1].sender === 'user' && (
                         <div style={{...styles.message, ...styles.aiMessage}}><em style={{color: '#666'}}>AI is thinking...</em></div>
                     )}
                     {error.chat && <div style={{...styles.message, ...styles.aiMessage, backgroundColor: '#fdd', color: 'var(--danger-color)'}}>{error.chat}</div>}

@@ -64,8 +64,14 @@ const initialCacheState: AppDataCache = {
             salesTrafficData: { data: null, dateRange: null },
         },
         chat: {
-            conversationId: null,
-            messages: [],
+            gemini: {
+                conversationId: null,
+                messages: [],
+            },
+            openai: {
+                conversationId: null,
+                messages: [],
+            },
             systemInstruction: initialDefaultSystemInstruction,
         },
     },

@@ -18,15 +18,16 @@ const styles: { [key: string]: React.CSSProperties } = {
     toolTitle: { margin: 0, fontSize: '1.1rem' },
     toolButton: { padding: '8px 12px', border: '1px solid var(--primary-color)', color: 'var(--primary-color)', background: 'white', borderRadius: '4px', cursor: 'pointer', fontWeight: 500 },
     toolStatus: { fontSize: '0.8rem', color: '#666', fontStyle: 'italic' },
-    chatWindow: { flex: 1, padding: '20px', overflowY: 'auto', borderBottom: '1px solid var(--border-color)' },
+    chatWindow: { flex: 1, padding: '20px', overflowY: 'auto', borderBottom: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column' },
     chatInputForm: { display: 'flex', padding: '10px', gap: '10px', alignItems: 'center' },
     chatInput: { flex: 1, padding: '10px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '1rem' },
-    sendButton: { padding: '10px 20px', backgroundColor: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' },
+    sendButton: { padding: '10px 20px', backgroundColor: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', height: '44px' },
     message: { marginBottom: '15px', padding: '10px 15px', borderRadius: '10px', maxWidth: '85%' },
     userMessage: { backgroundColor: '#e6f7ff', alignSelf: 'flex-end', borderBottomRightRadius: '0px' },
     aiMessage: { backgroundColor: '#f0f2f2', alignSelf: 'flex-start', borderBottomLeftRadius: '0px' },
     thinking: { fontStyle: 'italic', color: '#666', padding: '5px 0' },
     error: { color: 'var(--danger-color)', fontSize: '0.9rem', marginTop: '5px' },
+    aiProviderName: { fontWeight: 'bold', margin: '0 0 8px 0', textTransform: 'capitalize', color: 'var(--primary-color)' }
 };
 
 const systemPromptTemplates = [
@@ -333,17 +334,6 @@ export function AICopilotView() {
                 
                 <div style={styles.toolCard}>
                     <h3 style={styles.toolTitle}>AI Configuration</h3>
-                     <div style={styles.formGroup}>
-                        <label style={styles.label}>AI Provider</label>
-                        <select
-                            style={styles.input}
-                            value={aiProvider}
-                            onChange={(e) => handleProviderChange(e.target.value as any)}
-                        >
-                           <option value="gemini">Gemini</option>
-                           <option value="openai">ChatGPT</option>
-                        </select>
-                    </div>
                      <div style={{...styles.formGroup, marginTop: '10px'}}>
                         <label style={styles.label}>System Prompt Template</label>
                         <select
@@ -393,7 +383,12 @@ export function AICopilotView() {
                 <div style={styles.chatWindow} ref={chatEndRef}>
                     {aiCache.chat.messages.length === 0 && <p style={{textAlign: 'center', color: '#888'}}>Load data and ask a question to start your conversation.</p>}
                     {aiCache.chat.messages.map(msg => (
-                        <div key={msg.id} style={{...styles.message, ...(msg.sender === 'user' ? styles.userMessage : styles.aiMessage), display: 'flex', flexDirection: 'column'}}>
+                        <div key={msg.id} style={{...styles.message, ...(msg.sender === 'user' ? styles.userMessage : styles.aiMessage)}}>
+                            {msg.sender === 'ai' && (
+                                <p style={styles.aiProviderName}>
+                                    {aiProvider}
+                                </p>
+                            )}
                              <div dangerouslySetInnerHTML={{ __html: marked.parse(msg.text) }}></div>
                         </div>
                     ))}
@@ -404,7 +399,18 @@ export function AICopilotView() {
                 </div>
                 <form style={styles.chatInputForm} onSubmit={handleStartConversation}>
                     <input style={styles.chatInput} value={currentQuestion} onChange={e => setCurrentQuestion(e.target.value)} placeholder="Ask a question about the loaded data..." disabled={loading.chat} />
-                    <button type="submit" style={styles.sendButton} disabled={loading.chat || !currentQuestion.trim()}>Send</button>
+                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <select
+                            style={{ ...styles.input, height: '44px', padding: '0 10px' }}
+                            value={aiProvider}
+                            onChange={(e) => handleProviderChange(e.target.value as any)}
+                            aria-label="Select AI Provider"
+                        >
+                           <option value="gemini">Gemini</option>
+                           <option value="openai">ChatGPT</option>
+                        </select>
+                        <button type="submit" style={styles.sendButton} disabled={loading.chat || !currentQuestion.trim()}>Send</button>
+                    </div>
                 </form>
             </div>
         </div>

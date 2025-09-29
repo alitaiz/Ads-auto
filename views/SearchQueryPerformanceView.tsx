@@ -1,7 +1,7 @@
 // views/SearchQueryPerformanceView.tsx
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { QueryPerformanceData, PerformanceFilterOptions, ProductDetails, PerformanceChartConfig } from '../../types';
-import { formatNumber, formatPercent, getNested } from '../../utils';
+import { QueryPerformanceData, PerformanceFilterOptions, ProductDetails, PerformanceChartConfig } from '../types';
+import { formatNumber, formatPercent, getNested } from '../utils';
 import { ChartModal } from './components/ChartModal';
 
 const styles: { [key: string]: React.CSSProperties } = {

@@ -327,68 +327,114 @@ router.post('/ai/tool/sales-traffic', async (req, res) => {
 });
 
 router.post('/ai/tool/search-query-performance', async (req, res) => {
-    const { asin, week } = req.body;
-    if (!asin || !week) {
-        return res.status(400).json({ error: 'ASIN and week are required.' });
+    const { asin, weeks } = req.body;
+    if (!asin || !Array.isArray(weeks) || weeks.length === 0) {
+        return res.status(400).json({ error: 'ASIN and a non-empty weeks array are required.' });
     }
     try {
-        const startDate = new Date(week);
-        const endDate = new Date(startDate);
-        endDate.setDate(startDate.getDate() + 6);
-
         const query = `
             SELECT 
                 search_query,
                 performance_data
             FROM query_performance_data
-            WHERE asin = $1 AND start_date = $2;
+            WHERE asin = $1 AND start_date = ANY($2::date[]);
         `;
-        const { rows } = await pool.query(query, [asin, week]);
-        
-        // The data is already aggregated by week in the DB, so we just need to transform it for the AI.
-        const transformedData = rows.map(row => {
-            const raw = row.performance_data;
-            if (!raw) return null;
-            
-            const impressions = raw.impressionData || {};
-            const clicks = raw.clickData || {};
-            const cartAdds = raw.cartAddData || {};
-            const purchases = raw.purchaseData || {};
+        const { rows } = await pool.query(query, [asin, weeks]);
 
-            return {
-                searchQuery: row.search_query,
-                searchQueryVolume: raw.searchQueryData?.searchQueryVolume,
+        const aggregationMap = new Map();
+        const getMedian = (arr) => {
+            if (!arr || arr.length === 0) return null;
+            const sorted = [...arr].sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+        };
+
+        for (const row of rows) {
+            const raw = row.performance_data;
+            if (!raw || !raw.searchQueryData) continue;
+
+            const sq = raw.searchQueryData.searchQuery;
+            if (!aggregationMap.has(sq)) {
+                aggregationMap.set(sq, {
+                    searchQueryScore: raw.searchQueryData.searchQueryScore, // Takes the score from the first encountered week
+                    searchQueryVolume: 0,
+                    impressionData: { totalQueryImpressionCount: 0, asinImpressionCount: 0 },
+                    clickData: { totalClickCount: 0, asinClickCount: 0, totalMedianClickPrices: [], asinMedianClickPrices: [] },
+                    cartAddData: { totalCartAddCount: 0, asinCartAddCount: 0, totalMedianCartAddPrices: [], asinMedianCartAddPrices: [] },
+                    purchaseData: { totalPurchaseCount: 0, asinPurchaseCount: 0, totalMedianPurchasePrices: [], asinMedianPurchasePrices: [] },
+                });
+            }
+
+            const agg = aggregationMap.get(sq);
+            agg.searchQueryVolume += raw.searchQueryData.searchQueryVolume || 0;
+            agg.impressionData.totalQueryImpressionCount += raw.impressionData?.totalQueryImpressionCount || 0;
+            agg.impressionData.asinImpressionCount += raw.impressionData?.asinImpressionCount || 0;
+            agg.clickData.totalClickCount += raw.clickData?.totalClickCount || 0;
+            agg.clickData.asinClickCount += raw.clickData?.asinClickCount || 0;
+            if(raw.clickData?.totalMedianClickPrice?.amount) agg.clickData.totalMedianClickPrices.push(raw.clickData.totalMedianClickPrice.amount);
+            if(raw.clickData?.asinMedianClickPrice?.amount) agg.clickData.asinMedianClickPrices.push(raw.clickData.asinMedianClickPrice.amount);
+            agg.cartAddData.totalCartAddCount += raw.cartAddData?.totalCartAddCount || 0;
+            agg.cartAddData.asinCartAddCount += raw.cartAddData?.asinCartAddCount || 0;
+            if(raw.cartAddData?.totalMedianCartAddPrice?.amount) agg.cartAddData.totalMedianCartAddPrices.push(raw.cartAddData.totalMedianCartAddPrice.amount);
+            if(raw.cartAddData?.asinMedianCartAddPrice?.amount) agg.cartAddData.asinMedianCartAddPrices.push(raw.cartAddData.asinMedianCartAddPrice.amount);
+            agg.purchaseData.totalPurchaseCount += raw.purchaseData?.totalPurchaseCount || 0;
+            agg.purchaseData.asinPurchaseCount += raw.purchaseData?.asinPurchaseCount || 0;
+            if(raw.purchaseData?.totalMedianPurchasePrice?.amount) agg.purchaseData.totalMedianPurchasePrices.push(raw.purchaseData.totalMedianPurchasePrice.amount);
+            if(raw.purchaseData?.asinMedianPurchasePrice?.amount) agg.purchaseData.asinMedianPurchasePrices.push(raw.purchaseData.asinMedianPurchasePrice.amount);
+        }
+
+        const transformedData = [];
+        const formatPrice = (priceObj) => priceObj ? `$${priceObj.amount.toFixed(2)}` : null;
+
+        for (const [searchQuery, agg] of aggregationMap.entries()) {
+             const currencyCode = 'USD';
+             transformedData.push({
+                searchQuery,
+                searchQueryScore: agg.searchQueryScore,
+                searchQueryVolume: agg.searchQueryVolume,
                 impressions: {
-                    totalCount: impressions.totalQueryImpressionCount,
-                    asinCount: impressions.asinImpressionCount,
-                    asinShare: impressions.asinImpressionShare,
+                    totalCount: agg.impressionData.totalQueryImpressionCount,
+                    asinCount: agg.impressionData.asinImpressionCount,
+                    asinShare: agg.impressionData.totalQueryImpressionCount > 0 ? agg.impressionData.asinImpressionCount / agg.impressionData.totalQueryImpressionCount : 0,
                 },
                 clicks: {
-                    clickRate: clicks.totalClickRate,
-                    asinShare: clicks.asinClickShare,
+                    totalCount: agg.clickData.totalClickCount,
+                    clickRate: agg.impressionData.totalQueryImpressionCount > 0 ? agg.clickData.totalClickCount / agg.impressionData.totalQueryImpressionCount : 0,
+                    asinCount: agg.clickData.asinClickCount,
+                    asinShare: agg.clickData.totalClickCount > 0 ? agg.clickData.asinClickCount / agg.clickData.totalClickCount : 0,
+                    totalMedianPrice: formatPrice(getMedian(agg.clickData.totalMedianClickPrices) != null ? { amount: getMedian(agg.clickData.totalMedianClickPrices), currencyCode } : null),
+                    asinMedianPrice: formatPrice(getMedian(agg.clickData.asinMedianClickPrices) != null ? { amount: getMedian(agg.clickData.asinMedianClickPrices), currencyCode } : null),
                 },
                 cartAdds: {
-                    cartAddRate: cartAdds.totalCartAddRate,
-                    asinShare: cartAdds.asinCartAddShare,
+                    totalCount: agg.cartAddData.totalCartAddCount,
+                    cartAddRate: agg.clickData.totalClickCount > 0 ? agg.cartAddData.totalCartAddCount / agg.clickData.totalClickCount : 0,
+                    asinCount: agg.cartAddData.asinCartAddCount,
+                    asinShare: agg.cartAddData.totalCartAddCount > 0 ? agg.cartAddData.asinCartAddCount / agg.cartAddData.totalCartAddCount : 0,
                 },
                 purchases: {
-                    purchaseRate: purchases.totalPurchaseRate,
-                    asinShare: purchases.asinShare,
-                }
-            };
-        }).filter(Boolean);
+                    totalCount: agg.purchaseData.totalPurchaseCount,
+                    purchaseRate: agg.clickData.totalClickCount > 0 ? agg.purchaseData.totalPurchaseCount / agg.clickData.totalClickCount : 0,
+                    asinCount: agg.purchaseData.asinPurchaseCount,
+                    asinShare: agg.purchaseData.totalPurchaseCount > 0 ? agg.purchaseData.asinPurchaseCount / agg.purchaseData.totalPurchaseCount : 0,
+                },
+            });
+        }
+        
+        const sortedWeeks = weeks.sort();
+        const startDate = sortedWeeks[0];
+        const lastWeekStartDate = new Date(sortedWeeks[sortedWeeks.length - 1]);
+        lastWeekStartDate.setDate(lastWeekStartDate.getDate() + 6);
+        const endDate = lastWeekStartDate.toISOString().split('T')[0];
 
         res.json({
             data: transformedData,
-            dateRange: {
-                startDate: startDate.toISOString().split('T')[0],
-                endDate: endDate.toISOString().split('T')[0],
-            }
+            dateRange: { startDate, endDate }
         });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
+
 
 const buildContextString = (context) => `
 Here is the data context for my question. Please analyze it before answering, paying close attention to the different date ranges for each data source.

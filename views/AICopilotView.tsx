@@ -1,11 +1,12 @@
 // views/AICopilotView.tsx
-import React, { useState, useRef, useEffect, useContext, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useContext, useCallback, useMemo } from 'react';
 import { marked } from 'marked';
 import { DataCacheContext } from '../contexts/DataCacheContext';
-import { ChatMessage, AICopilotCache, LoadedDataInfo, PerformanceFilterOptions } from '../types';
+import { ChatMessage, AICopilotCache, LoadedDataInfo, PerformanceFilterOptions, QueryPerformanceData } from '../types';
+import { formatNumber, formatPercent } from '../utils';
 
 const styles: { [key: string]: React.CSSProperties } = {
-    container: { display: 'grid', gridTemplateColumns: '280px 40% 1fr', gap: '20px', height: 'calc(100vh - 100px)', padding: '20px' },
+    container: { display: 'grid', gridTemplateColumns: '280px 1fr 1.5fr', gap: '20px', height: 'calc(100vh - 100px)', padding: '20px' },
     historyPanel: { display: 'flex', flexDirection: 'column', gap: '10px', padding: '15px', backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)', overflowY: 'auto' },
     leftPanel: { display: 'flex', flexDirection: 'column', gap: '15px', padding: '20px', backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)', overflowY: 'auto' },
     rightPanel: { display: 'flex', flexDirection: 'column', backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)' },
@@ -37,6 +38,11 @@ const styles: { [key: string]: React.CSSProperties } = {
     historyItemActive: { backgroundColor: 'var(--primary-hover-color)', color: 'white' },
     historyItemText: { flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
     deleteButton: { background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.2rem', padding: '0 5px' },
+    // SQP Table Styles
+    tableContainer: { overflowX: 'auto', marginTop: '10px', border: '1px solid var(--border-color)', borderRadius: '4px' },
+    table: { width: '100%', borderCollapse: 'collapse' },
+    th: { padding: '10px', textAlign: 'left', borderBottom: '2px solid var(--border-color)', backgroundColor: '#f8f9fa', fontWeight: 600, cursor: 'pointer', userSelect: 'none' },
+    td: { padding: '10px', borderBottom: '1px solid var(--border-color)', whiteSpace: 'nowrap' },
 };
 
 // ... (systemPromptTemplates remains the same)
@@ -113,7 +119,7 @@ export function AICopilotView() {
     const [selectedTemplateName, setSelectedTemplateName] = useState('Default PPC Expert Analyst');
     const [aiProvider, setAiProvider] = useState<'gemini' | 'openai'>('gemini');
     const [sqpFilterOptions, setSqpFilterOptions] = useState<PerformanceFilterOptions['weeks']>([]);
-    const [selectedWeek, setSelectedWeek] = useState('');
+    const [selectedWeeks, setSelectedWeeks] = useState<string[]>([]);
 
     const [conversationHistory, setConversationHistory] = useState<any[]>([]);
     const [profileId, setProfileId] = useState<string | null>(null);
@@ -157,15 +163,15 @@ export function AICopilotView() {
                 if (!response.ok) return;
                 const data: PerformanceFilterOptions = await response.json();
                 setSqpFilterOptions(data.weeks || []);
-                if (data.weeks.length > 0 && !selectedWeek) {
-                    setSelectedWeek(data.weeks[0].value);
+                if (data.weeks.length > 0 && selectedWeeks.length === 0) {
+                    setSelectedWeeks([data.weeks[0].value]);
                 }
             } catch (e) {
                 console.error("Failed to fetch SQP filter options", e);
             }
         };
         fetchSqpFilters();
-    }, [selectedWeek]);
+    }, [selectedWeeks.length]);
 
     const setProductInfo = (key: keyof AICopilotCache['productInfo'], value: string) => {
         updateAiCache(prev => ({ ...prev, productInfo: { ...prev.productInfo, [key]: value } }));
@@ -241,7 +247,7 @@ export function AICopilotView() {
                 dataKey = 'searchQueryPerformanceData';
                 body = {
                     asin: aiCache.productInfo.asin,
-                    week: selectedWeek
+                    weeks: selectedWeeks
                 };
                 break;
         }
@@ -548,7 +554,12 @@ export function AICopilotView() {
                          <div style={{borderTop: '1px dashed var(--border-color)', paddingTop: '15px'}}>
                             <div style={{...styles.formGroup, marginBottom: '15px'}}>
                                 <label style={styles.label}>Search Query Performance Week</label>
-                                <select style={styles.input} value={selectedWeek} onChange={e => setSelectedWeek(e.target.value)} disabled={sqpFilterOptions.length === 0}>
+                                <select 
+                                    multiple
+                                    style={{...styles.input, height: '120px'}} 
+                                    value={selectedWeeks} 
+                                    onChange={e => setSelectedWeeks(Array.from(e.target.selectedOptions, option => option.value))}
+                                    disabled={sqpFilterOptions.length === 0}>
                                     {sqpFilterOptions.length === 0 && <option>Loading weeks...</option>}
                                     {sqpFilterOptions.map(week => <option key={week.value} value={week.value}>{week.label}</option>)}
                                 </select>
@@ -557,6 +568,12 @@ export function AICopilotView() {
                         </div>
                     </div>
                 </div>
+                 {aiCache.loadedData.searchQueryPerformanceData.data && aiCache.loadedData.searchQueryPerformanceData.data.length > 0 && (
+                    <div style={{...styles.toolCard, marginTop: '20px'}}>
+                        <h3 style={styles.toolTitle}>Loaded Search Query Performance Data</h3>
+                        <SQPDataTable data={aiCache.loadedData.searchQueryPerformanceData.data} />
+                    </div>
+                )}
             </div>
             <div style={styles.rightPanel}>
                 <div style={styles.chatWindow} ref={chatEndRef}>
@@ -626,6 +643,80 @@ const ToolButton = ({ tool, onRun, onView, loading, dataInfo, error, name }: { t
                     ✅ Loaded {Array.isArray(dataInfo.data) ? `${dataInfo.data.length} records` : 'data'}{dateRangeText}.
                 </button>
             )}
+        </div>
+    );
+};
+
+
+// --- SQP Data Table Component ---
+const getNestedValue = (obj: any, path: string) => {
+    return path.split('.').reduce((p, c) => (p && p[c] !== undefined) ? p[c] : 0, obj);
+};
+
+const allColumns = [
+    { id: 'searchQuery', label: 'Search Query', formatter: (val: any) => String(val) },
+    { id: 'searchQueryVolume', label: 'Volume', formatter: formatNumber },
+    { id: 'impressions.asinShare', label: 'Impr. Share', formatter: formatPercent },
+    { id: 'clicks.asinShare', label: 'Click Share', formatter: formatPercent },
+    { id: 'cartAdds.asinShare', label: 'Cart Add Share', formatter: formatPercent },
+    { id: 'purchases.asinShare', label: 'Purchase Share', formatter: formatPercent },
+    { id: 'impressions.totalCount', label: 'Total Impr.', formatter: formatNumber },
+    { id: 'clicks.totalCount', label: 'Total Clicks', formatter: formatNumber },
+    { id: 'cartAdds.totalCount', label: 'Total Carts', formatter: formatNumber },
+    { id: 'purchases.totalCount', label: 'Total Purchases', formatter: formatNumber },
+];
+
+
+const SQPDataTable = ({ data }: { data: QueryPerformanceData[] }) => {
+    const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'ascending' | 'descending' } | null>({ key: 'searchQueryVolume', direction: 'descending' });
+
+    const requestSort = (key: string) => {
+        let direction: 'ascending' | 'descending' = 'descending';
+        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'descending') {
+            direction = 'ascending';
+        }
+        setSortConfig({ key, direction });
+    };
+
+    const sortedData = useMemo(() => {
+        let sortableItems = [...data];
+        if (sortConfig !== null) {
+            sortableItems.sort((a, b) => {
+                const aValue = getNestedValue(a, sortConfig.key);
+                const bValue = getNestedValue(b, sortConfig.key);
+                if (aValue < bValue) return sortConfig.direction === 'ascending' ? -1 : 1;
+                if (aValue > bValue) return sortConfig.direction === 'ascending' ? 1 : -1;
+                return 0;
+            });
+        }
+        return sortableItems;
+    }, [data, sortConfig]);
+
+    return (
+        <div style={styles.tableContainer}>
+            <table style={styles.table}>
+                <thead>
+                    <tr>
+                        {allColumns.map(col => (
+                            <th key={col.id} style={styles.th} onClick={() => requestSort(col.id)}>
+                                {col.label}
+                                {sortConfig?.key === col.id ? (sortConfig.direction === 'descending' ? ' ▼' : ' ▲') : ''}
+                            </th>
+                        ))}
+                    </tr>
+                </thead>
+                <tbody>
+                    {sortedData.map(item => (
+                        <tr key={item.searchQuery}>
+                            {allColumns.map(col => (
+                                <td key={col.id} style={styles.td} title={String(getNestedValue(item, col.id))}>
+                                    {col.formatter(getNestedValue(item, col.id))}
+                                </td>
+                            ))}
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
         </div>
     );
 };

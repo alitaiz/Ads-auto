@@ -359,7 +359,7 @@ export function AICopilotView() {
                         <h3 style={styles.toolTitle}>Load Performance Data</h3>
                     </div>
                     <div style={styles.formGroup}>
-                        <label style={styles.label}>Date Range (for Stream & Sales Data)</label>
+                        <label style={styles.label}>Date Range</label>
                         <div style={styles.dateInputContainer}>
                             <input type="date" style={styles.input} value={aiCache.dateRange.startDate} onChange={e => setDateRange('startDate', e.target.value)} />
                             <input type="date" style={styles.input} value={aiCache.dateRange.endDate} onChange={e => setDateRange('endDate', e.target.value)} />

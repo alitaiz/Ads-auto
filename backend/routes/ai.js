@@ -22,6 +22,19 @@ router.post('/ai/tool/search-term', async (req, res) => {
         
         console.log(`[AI Tool/SearchTerm] Using user-provided date range directly: ${reportStartDateStr} to ${reportEndDateStr}`);
 
+        const dateRangeQuery = `
+            SELECT MIN(report_date) as "minDate", MAX(report_date) as "maxDate"
+            FROM (
+                SELECT report_date FROM sponsored_products_search_term_report WHERE asin = $1 AND report_date BETWEEN $2 AND $3
+                UNION ALL
+                SELECT report_date FROM sponsored_brands_search_term_report WHERE asin = $1 AND report_date BETWEEN $2 AND $3
+                UNION ALL
+                SELECT report_date FROM sponsored_display_targeting_report WHERE asin = $1 AND report_date BETWEEN $2 AND $3
+            ) as combined_dates;
+        `;
+        const dateRangeResult = await pool.query(dateRangeQuery, [asin, reportStartDateStr, reportEndDateStr]);
+        const { minDate, maxDate } = dateRangeResult.rows[0] || {};
+
         const query = `
             WITH combined_reports AS (
                 -- Sponsored Products
@@ -77,8 +90,8 @@ router.post('/ai/tool/search-term', async (req, res) => {
         res.json({
             data: rows,
             dateRange: {
-                startDate: reportStartDateStr,
-                endDate: reportEndDateStr,
+                startDate: minDate ? new Date(minDate).toISOString().split('T')[0] : reportStartDateStr,
+                endDate: maxDate ? new Date(maxDate).toISOString().split('T')[0] : reportEndDateStr,
             }
         });
     } catch (e) {
@@ -114,6 +127,19 @@ router.post('/ai/tool/stream', async (req, res) => {
             return res.json({ data: [], dateRange: { startDate, endDate } });
         }
         console.log(`[AI Tool/Stream] Found ${campaignIds.length} campaigns for ASIN ${asin}. Fetching detailed stream data...`);
+        
+        const dateRangeQuery = `
+            SELECT
+                MIN(((COALESCE(event_data ->> 'time_window_start', event_data ->> 'timeWindowStart'))::timestamptz AT TIME ZONE 'America/Los_Angeles')::date) AS "minDate",
+                MAX(((COALESCE(event_data ->> 'time_window_start', event_data ->> 'timeWindowStart'))::timestamptz AT TIME ZONE 'America/Los_Angeles')::date) AS "maxDate"
+            FROM raw_stream_events
+            WHERE 
+                (COALESCE(event_data->>'campaignId', event_data->>'campaign_id'))::bigint = ANY($1::bigint[])
+                AND ((COALESCE(event_data ->> 'time_window_start', event_data ->> 'timeWindowStart'))::timestamptz AT TIME ZONE 'America/Los_Angeles')::date BETWEEN $2::date AND $3::date;
+        `;
+        const dateRangeResult = await pool.query(dateRangeQuery, [campaignIds, startDate, endDate]);
+        const { minDate, maxDate } = dateRangeResult.rows[0] || {};
+
 
         // Step 2: Fetch and aggregate stream events by campaign, ad group, and entity.
         const streamQuery = `
@@ -187,7 +213,13 @@ router.post('/ai/tool/stream', async (req, res) => {
         `;
 
         const { rows } = await pool.query(streamQuery, [campaignIds, startDate, endDate]);
-        res.json({ data: rows, dateRange: { startDate, endDate } });
+        res.json({
+            data: rows,
+            dateRange: {
+                startDate: minDate ? new Date(minDate).toISOString().split('T')[0] : startDate,
+                endDate: maxDate ? new Date(maxDate).toISOString().split('T')[0] : endDate
+            }
+        });
     } catch (e) {
         console.error('[AI Tool/Stream] Error fetching detailed stream data:', e);
         res.status(500).json({ error: e.message });
@@ -201,6 +233,14 @@ router.post('/ai/tool/sales-traffic', async (req, res) => {
         return res.status(400).json({ error: 'ASIN, startDate, and endDate are required.' });
     }
     try {
+        const dateRangeQuery = `
+            SELECT MIN(report_date) as "minDate", MAX(report_date) as "maxDate"
+            FROM sales_and_traffic_by_asin
+            WHERE child_asin = $1 AND report_date BETWEEN $2 AND $3;
+        `;
+        const dateRangeResult = await pool.query(dateRangeQuery, [asin, startDate, endDate]);
+        const { minDate, maxDate } = dateRangeResult.rows[0] || {};
+
         const query = `
             SELECT
                 SUM(COALESCE((traffic_data->>'sessions')::integer, 0)) AS total_sessions,
@@ -213,7 +253,13 @@ router.post('/ai/tool/sales-traffic', async (req, res) => {
             WHERE child_asin = $1 AND report_date BETWEEN $2 AND $3;
         `;
         const { rows } = await pool.query(query, [asin, startDate, endDate]);
-        res.json({ data: rows, dateRange: { startDate, endDate } });
+        res.json({
+            data: rows,
+            dateRange: {
+                startDate: minDate ? new Date(minDate).toISOString().split('T')[0] : startDate,
+                endDate: maxDate ? new Date(maxDate).toISOString().split('T')[0] : endDate
+            }
+        });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }

@@ -118,7 +118,7 @@ const systemPromptTemplates = [
         prompt: `You are an expert Amazon PPC Analyst named "Co-Pilot". Your goal is to help users analyze performance data and provide strategic advice.
 
 You will be provided with several pieces of data:
-1.  **Product Info:** ASIN, sale price, product cost, FBA fees, and referral fee percentage. This is for profitability calculations.
+1.  **Product Info:** ASIN, sale price, product cost, and a single **Total Amazon Fee**. This is for profitability calculations. Note: This total fee is passed in the 'FBA Fee' field, and 'Referral Fee' is set to 0.
 2.  **Performance Data:** This is a JSON object containing up to four data sets. Understand their differences:
 
     *   **Search Term Report Data:** This is HISTORICAL, AGGREGATED data from official reports. It has a **2-day reporting delay**. Use this for long-term trend analysis, identifying high-performing customer search terms, and finding irrelevant terms to negate. It reflects ADVERTISING performance for specific search terms.
@@ -144,20 +144,22 @@ Your Task:
     {
         name: "Profitability Guardian",
         prompt: `You are a meticulous Amazon PPC Analyst laser-focused on profitability. Your primary directive is to maximize profit from ad spend.
-1. Always calculate the break-even ACOS first using the provided product info (Sale Price - Product Cost - FBA Fee - (Sale Price * Referral Fee %)).
-2. Analyze performance data strictly through the lens of profitability. Identify keywords and campaigns that are unprofitable (ACOS > break-even ACOS).
-3. Your recommendations should prioritize cutting wasteful spend and improving the ACOS of profitable campaigns.
-4. When suggesting bid adjustments, explain *why* based on the profitability calculation. Suggest aggressive bid reductions for unprofitable terms.
-5. Be conservative about increasing spend unless ROAS is very high and there's clear evidence of profitability.`
+1.  **Product Info:** ASIN, sale price, product cost, and a single **Total Amazon Fee**. This is for profitability calculations. Note: This total fee is passed in the 'FBA Fee' field, and 'Referral Fee' is set to 0.
+2. Always calculate the break-even ACOS first using the provided product info (Sale Price - Product Cost - Total Amazon Fee). The Total Amazon Fee is provided in the 'FBA Fee' field.
+3. Analyze performance data strictly through the lens of profitability. Identify keywords and campaigns that are unprofitable (ACOS > break-even ACOS).
+4. Your recommendations should prioritize cutting wasteful spend and improving the ACOS of profitable campaigns.
+5. When suggesting bid adjustments, explain *why* based on the profitability calculation. Suggest aggressive bid reductions for unprofitable terms.
+6. Be conservative about increasing spend unless ROAS is very high and there's clear evidence of profitability.`
     },
     {
         name: "Aggressive Growth Hacker",
         prompt: `You are a bold Amazon PPC Strategist focused on aggressive growth and market share domination. Your main goal is to increase visibility and sales velocity, even if it means a temporarily higher ACOS.
-1. Identify the highest-traffic search terms from the reports, regardless of their current ACOS.
-2. Suggest strategies to increase impression share and top-of-search rank for key terms.
-3. Look for opportunities to expand into new keywords and targeting methods based on customer search patterns.
-4. Your recommendations should be biased towards increasing bids, expanding budgets, and launching new campaigns.
-5. Frame your advice in terms of capturing market share and driving sales volume to improve organic ranking (the flywheel effect).`
+1.  **Product Info:** ASIN, sale price, product cost, and a single **Total Amazon Fee**. This is for profitability calculations. Note: This total fee is passed in the 'FBA Fee' field, and 'Referral Fee' is set to 0.
+2. Identify the highest-traffic search terms from the reports, regardless of their current ACOS.
+3. Suggest strategies to increase impression share and top-of-search rank for key terms.
+4. Look for opportunities to expand into new keywords and targeting methods based on customer search patterns.
+5. Your recommendations should be biased towards increasing bids, expanding budgets, and launching new campaigns.
+6. Frame your advice in terms of capturing market share and driving sales volume to improve organic ranking (the flywheel effect).`
     },
     {
         name: "Just the Data Summarizer",
@@ -267,6 +269,14 @@ export function AICopilotView() {
     const setProductInfo = (key: keyof AICopilotCache['productInfo'], value: string) => {
         updateAiCache(prev => ({ ...prev, productInfo: { ...prev.productInfo, [key]: value } }));
     };
+
+    useEffect(() => {
+        // This ensures the referral fee is always zero for the new single-field logic,
+        // even on the initial load before the user interacts with the fee input.
+        if (aiCache.productInfo.referralFeePercent !== '0') {
+            setProductInfo('referralFeePercent', '0');
+        }
+    }, [aiCache.productInfo.referralFeePercent]);
     
     const setSystemInstruction = (instruction: string) => {
         updateAiCache(prev => ({ ...prev, chat: { ...prev.chat, systemInstruction: instruction } }));
@@ -586,27 +596,6 @@ export function AICopilotView() {
         return `${selectedWeeks.length} weeks selected`;
     };
 
-    const { salePrice, fbaFee, referralFeePercent } = aiCache.productInfo;
-    const salePriceNum = parseFloat(salePrice) || 0;
-    const fbaFeeNum = parseFloat(fbaFee) || 0;
-    const referralFeePercentNum = parseFloat(referralFeePercent) || 15;
-
-    const calculatedReferralFee = salePriceNum * (referralFeePercentNum / 100);
-    const totalAmazonFee = fbaFeeNum + calculatedReferralFee;
-
-    const handleAmazonFeeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const newTotalFee = parseFloat(e.target.value) || 0;
-        
-        const { salePrice: currentSalePrice, referralFeePercent: currentReferralFeePercent } = aiCache.productInfo;
-        const currentSalePriceNum = parseFloat(currentSalePrice) || 0;
-        const currentReferralFeePercentNum = parseFloat(currentReferralFeePercent) || 15;
-        
-        const currentCalculatedReferralFee = currentSalePriceNum * (currentReferralFeePercentNum / 100);
-        const newFbaFee = newTotalFee - currentCalculatedReferralFee;
-
-        setProductInfo('fbaFee', newFbaFee.toFixed(2));
-    };
-
     return (
         <div style={containerStyle}>
             <div style={isHistoryVisible ? styles.historyPanel : {...styles.historyPanel, padding: '10px', width: 'auto', overflow: 'hidden' }}>
@@ -665,8 +654,9 @@ export function AICopilotView() {
                             <label style={styles.label}>ASIN</label>
                             <input style={styles.input} value={aiCache.productInfo.asin} onChange={e => setProductInfo('asin', e.target.value)} placeholder="e.g., B0DD45VPSL" />
                         </div>
-                        <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px'}}>
-                            <div style={styles.formGroup}>
+                        
+                        <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px'}}>
+                             <div style={styles.formGroup}>
                                 <label style={styles.label}>Sale Price</label>
                                 <input type="number" style={styles.input} value={aiCache.productInfo.salePrice} onChange={e => setProductInfo('salePrice', e.target.value)} placeholder="e.g., 29.99" />
                             </div>
@@ -674,11 +664,24 @@ export function AICopilotView() {
                                 <label style={styles.label}>Product Cost</label>
                                 <input type="number" style={styles.input} value={aiCache.productInfo.cost} onChange={e => setProductInfo('cost', e.target.value)} placeholder="e.g., 7.50" />
                             </div>
-                            <div style={styles.formGroup}>
-                                <label style={styles.label}>Amazon Fee</label>
-                                <input type="number" style={styles.input} value={totalAmazonFee > 0 ? totalAmazonFee.toFixed(2) : ''} onChange={handleAmazonFeeChange} placeholder="e.g., 11.00" title="Total of FBA Fee + Referral Fee" />
-                            </div>
                         </div>
+
+                        <div style={styles.formGroup}>
+                           <label style={styles.label}>Amazon Fee</label>
+                            <input 
+                                type="number" 
+                                step="0.01" 
+                                style={styles.input} 
+                                value={aiCache.productInfo.fbaFee} // Repurposing fbaFee state to hold the total fee
+                                onChange={e => {
+                                    setProductInfo('fbaFee', e.target.value);
+                                    setProductInfo('referralFeePercent', '0'); // Ensure referral is always 0
+                                }} 
+                                placeholder="e.g., 11.00" 
+                                title="Total Amazon Fee (FBA + Referral)"
+                            />
+                        </div>
+
 
                         <hr style={{border: 'none', borderTop: '1px solid var(--border-color)', margin: '10px 0'}}/>
                         

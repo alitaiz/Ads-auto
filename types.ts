@@ -278,16 +278,11 @@ export interface AICopilotCache {
         searchTermData: LoadedDataInfo;
         streamData: LoadedDataInfo;
         salesTrafficData: LoadedDataInfo;
+        searchQueryPerformanceData: LoadedDataInfo;
     };
     chat: {
-        gemini: {
-            conversationId: string | null;
-            messages: ChatMessage[];
-        };
-        openai: {
-            conversationId: string | null;
-            messages: ChatMessage[];
-        };
+        conversationId: string | null;
+        messages: ChatMessage[];
         systemInstruction: string;
     };
 }

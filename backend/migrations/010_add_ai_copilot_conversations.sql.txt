@@ -1,0 +1,42 @@
+-- Migration: Create AI Co-Pilot Conversations Table
+-- This script creates the table to store persistent chat histories for the AI Co-Pilot feature.
+
+-- Use pgcrypto extension to generate UUIDs for conversation IDs.
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+CREATE TABLE IF NOT EXISTS ai_copilot_conversations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    profile_id TEXT NOT NULL,
+    provider VARCHAR(20) NOT NULL, -- 'gemini' or 'openai'
+    title TEXT NOT NULL,
+    history JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Function and Trigger to automatically update the 'updated_at' timestamp on any change.
+CREATE OR REPLACE FUNCTION trigger_set_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS set_timestamp_ai_conversations ON ai_copilot_conversations;
+CREATE TRIGGER set_timestamp_ai_conversations
+BEFORE UPDATE ON ai_copilot_conversations
+FOR EACH ROW
+EXECUTE PROCEDURE trigger_set_timestamp();
+
+-- Add indexes for faster lookups by profile.
+CREATE INDEX IF NOT EXISTS idx_ai_conv_profile_id ON ai_copilot_conversations(profile_id);
+CREATE INDEX IF NOT EXISTS idx_ai_conv_updated_at ON ai_copilot_conversations(updated_at DESC);
+
+
+-- =============================================================================
+-- Grant Permissions to Application User
+-- =============================================================================
+-- IMPORTANT: Replace 'yourdbuser' with the actual DB_USER from your .env file.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ai_copilot_conversations TO yourdbuser;
+-- Note: UUID primary keys do not have sequences, so no sequence grant is needed.

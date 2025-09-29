@@ -3,15 +3,10 @@ import express from 'express';
 import pool from '../db.js';
 import { GoogleGenAI } from '@google/genai';
 import { OpenAI } from 'openai';
-import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-
-// In-memory store now holds an object with history and the provider
-const conversations = new Map();
 
 // --- Tool Endpoints (for Frontend to pre-load data) ---
 
@@ -331,6 +326,70 @@ router.post('/ai/tool/sales-traffic', async (req, res) => {
     }
 });
 
+router.post('/ai/tool/search-query-performance', async (req, res) => {
+    const { asin, week } = req.body;
+    if (!asin || !week) {
+        return res.status(400).json({ error: 'ASIN and week are required.' });
+    }
+    try {
+        const startDate = new Date(week);
+        const endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6);
+
+        const query = `
+            SELECT 
+                search_query,
+                performance_data
+            FROM query_performance_data
+            WHERE asin = $1 AND start_date = $2;
+        `;
+        const { rows } = await pool.query(query, [asin, week]);
+        
+        // The data is already aggregated by week in the DB, so we just need to transform it for the AI.
+        const transformedData = rows.map(row => {
+            const raw = row.performance_data;
+            if (!raw) return null;
+            
+            const impressions = raw.impressionData || {};
+            const clicks = raw.clickData || {};
+            const cartAdds = raw.cartAddData || {};
+            const purchases = raw.purchaseData || {};
+
+            return {
+                searchQuery: row.search_query,
+                searchQueryVolume: raw.searchQueryData?.searchQueryVolume,
+                impressions: {
+                    totalCount: impressions.totalQueryImpressionCount,
+                    asinCount: impressions.asinImpressionCount,
+                    asinShare: impressions.asinImpressionShare,
+                },
+                clicks: {
+                    clickRate: clicks.totalClickRate,
+                    asinShare: clicks.asinClickShare,
+                },
+                cartAdds: {
+                    cartAddRate: cartAdds.totalCartAddRate,
+                    asinShare: cartAdds.asinCartAddShare,
+                },
+                purchases: {
+                    purchaseRate: purchases.totalPurchaseRate,
+                    asinShare: purchases.asinShare,
+                }
+            };
+        }).filter(Boolean);
+
+        res.json({
+            data: transformedData,
+            dateRange: {
+                startDate: startDate.toISOString().split('T')[0],
+                endDate: endDate.toISOString().split('T')[0],
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 const buildContextString = (context) => `
 Here is the data context for my question. Please analyze it before answering, paying close attention to the different date ranges for each data source.
 
@@ -345,6 +404,7 @@ Here is the data context for my question. Please analyze it before answering, pa
 - Search Term Data (Date Range: ${context.performanceData.searchTermData.dateRange?.startDate} to ${context.performanceData.searchTermData.dateRange?.endDate}): ${JSON.stringify(context.performanceData.searchTermData.data, null, 2) || 'Not provided'}
 - Stream Data (Date Range: ${context.performanceData.streamData.dateRange?.startDate} to ${context.performanceData.streamData.dateRange?.endDate}): ${JSON.stringify(context.performanceData.streamData.data, null, 2) || 'Not provided'}
 - Sales & Traffic Data (Date Range: ${context.performanceData.salesTrafficData.dateRange?.startDate} to ${context.performanceData.salesTrafficData.dateRange?.endDate}): ${JSON.stringify(context.performanceData.salesTrafficData.data, null, 2) || 'Not provided'}
+- Search Query Performance Data (Date Range: ${context.performanceData.searchQueryPerformanceData.dateRange?.startDate} to ${context.performanceData.searchQueryPerformanceData.dateRange?.endDate}): ${JSON.stringify(context.performanceData.searchQueryPerformanceData.data, null, 2) || 'Not provided'}
 `;
 
 // --- Main Chat Endpoints ---
@@ -353,28 +413,43 @@ router.post('/ai/chat', async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Transfer-Encoding', 'chunked');
 
+    let newConversationId = null;
+    let title = null;
+    let client;
+
     try {
-        let { question, conversationId, context } = req.body;
+        let { question, conversationId, context, profileId, provider } = req.body;
         
         if (!question) throw new Error('Question is required.');
+        if (!profileId) throw new Error('Profile ID is required.');
 
         const systemInstruction = context.systemInstruction || 'You are an expert Amazon PPC Analyst.';
-
-        let history = [];
-        if (conversationId && conversations.has(conversationId)) {
-            const convData = conversations.get(conversationId);
-            // If the provider is different, start a new conversation
-            if (convData.provider === 'gemini') {
-                history = convData.history;
-            } else {
-                conversationId = uuidv4(); // Reset for provider switch
-            }
-        } else {
-            conversationId = uuidv4();
-        }
         
+        client = await pool.connect();
+        let history = [];
+
+        if (conversationId) {
+            const result = await client.query('SELECT history FROM ai_copilot_conversations WHERE id = $1 AND profile_id = $2', [conversationId, profileId]);
+            if (result.rows.length > 0) {
+                history = result.rows[0].history;
+            } else {
+                // If ID is provided but not found, treat as a new chat to prevent errors
+                conversationId = null; 
+            }
+        }
+
+        if (!conversationId) {
+            title = question.substring(0, 80);
+            const result = await client.query(
+                `INSERT INTO ai_copilot_conversations (profile_id, provider, title, history) 
+                 VALUES ($1, $2, $3, '[]'::jsonb) RETURNING id`,
+                [profileId, provider, title]
+            );
+            newConversationId = result.rows[0].id;
+        }
+
         const chat = ai.chats.create({
-            model: 'models/gemini-flash-latest',
+            model: 'gemini-2.5-flash',
             history: history,
             config: { systemInstruction }
         });
@@ -391,50 +466,71 @@ router.post('/ai/chat', async (req, res) => {
             const chunkText = chunk.text;
             if (chunkText) {
                 fullResponseText += chunkText;
-                if (firstChunk) {
-                    res.write(JSON.stringify({ conversationId, content: chunkText }) + '\n');
-                    firstChunk = false;
-                } else {
-                    res.write(JSON.stringify({ content: chunkText }) + '\n');
+                const responsePayload = { content: chunkText };
+                if (firstChunk && newConversationId) {
+                    responsePayload.conversationId = newConversationId;
+                    responsePayload.title = title;
                 }
+                res.write(JSON.stringify(responsePayload) + '\n');
+                firstChunk = false;
             }
         }
         
-        const newHistory = [
+        const finalHistory = [
             ...history,
             { role: 'user', parts: [{ text: currentMessage }] },
             { role: 'model', parts: [{ text: fullResponseText }] }
         ];
-        conversations.set(conversationId, { history: newHistory, provider: 'gemini' });
+
+        await client.query(
+            `UPDATE ai_copilot_conversations SET history = $1, updated_at = NOW() WHERE id = $2`,
+            [JSON.stringify(finalHistory), conversationId || newConversationId]
+        );
         
         res.end();
 
     } catch (error) {
         console.error("Gemini chat error:", error);
         res.status(500).end(JSON.stringify({ error: error.message }));
+    } finally {
+        if (client) client.release();
     }
 });
 
 router.post('/ai/chat-gpt', async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Transfer-Encoding', 'chunked');
+    let newConversationId = null;
+    let title = null;
+    let client;
 
     try {
-        let { question, conversationId, context } = req.body;
+        let { question, conversationId, context, profileId, provider } = req.body;
         if (!question) throw new Error('Question is required.');
+        if (!profileId) throw new Error('Profile ID is required.');
 
         const systemInstruction = context.systemInstruction || 'You are an expert Amazon PPC Analyst.';
-
+        
+        client = await pool.connect();
         let history = [];
-        if (conversationId && conversations.has(conversationId)) {
-            const convData = conversations.get(conversationId);
-            if (convData.provider === 'openai') {
-                history = convData.history;
+
+        if (conversationId) {
+            const result = await client.query('SELECT history FROM ai_copilot_conversations WHERE id = $1 AND profile_id = $2', [conversationId, profileId]);
+            if (result.rows.length > 0) {
+                history = result.rows[0].history;
             } else {
-                conversationId = uuidv4();
+                conversationId = null;
             }
-        } else {
-            conversationId = uuidv4();
+        }
+
+        if (!conversationId) {
+            title = question.substring(0, 80);
+            const result = await client.query(
+                `INSERT INTO ai_copilot_conversations (profile_id, provider, title, history) 
+                 VALUES ($1, $2, $3, '[]'::jsonb) RETURNING id`,
+                [profileId, provider, title]
+            );
+            newConversationId = result.rows[0].id;
         }
 
         const messages = [{ role: 'system', content: systemInstruction }];
@@ -458,27 +554,34 @@ router.post('/ai/chat-gpt', async (req, res) => {
             const content = chunk.choices[0]?.delta?.content || '';
             if (content) {
                 fullResponseText += content;
-                if (firstChunk) {
-                    res.write(JSON.stringify({ conversationId, content }) + '\n');
-                    firstChunk = false;
-                } else {
-                    res.write(JSON.stringify({ content }) + '\n');
+                 const responsePayload = { content: content };
+                if (firstChunk && newConversationId) {
+                    responsePayload.conversationId = newConversationId;
+                    responsePayload.title = title;
                 }
+                res.write(JSON.stringify(responsePayload) + '\n');
+                firstChunk = false;
             }
         }
 
-        const newHistory = [
+        const finalHistory = [
             ...history,
             messages[messages.length - 1], // The user message
             { role: 'assistant', content: fullResponseText }
         ];
-        conversations.set(conversationId, { history: newHistory, provider: 'openai' });
+        
+        await client.query(
+            `UPDATE ai_copilot_conversations SET history = $1, updated_at = NOW() WHERE id = $2`,
+            [JSON.stringify(finalHistory), conversationId || newConversationId]
+        );
         
         res.end();
 
     } catch (error) {
         console.error("OpenAI chat error:", error);
         res.status(500).end(JSON.stringify({ error: error.message }));
+    } finally {
+        if (client) client.release();
     }
 });
 

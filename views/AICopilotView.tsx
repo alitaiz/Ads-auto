@@ -1,11 +1,12 @@
 // views/AICopilotView.tsx
-import React, { useState, useRef, useEffect, useContext } from 'react';
+import React, { useState, useRef, useEffect, useContext, useCallback } from 'react';
 import { marked } from 'marked';
 import { DataCacheContext } from '../contexts/DataCacheContext';
-import { ChatMessage, AICopilotCache, LoadedDataInfo } from '../types';
+import { ChatMessage, AICopilotCache, LoadedDataInfo, PerformanceFilterOptions } from '../types';
 
 const styles: { [key: string]: React.CSSProperties } = {
-    container: { display: 'grid', gridTemplateColumns: '40% 60%', gap: '20px', height: 'calc(100vh - 100px)', padding: '20px' },
+    container: { display: 'grid', gridTemplateColumns: '280px 40% 1fr', gap: '20px', height: 'calc(100vh - 100px)', padding: '20px' },
+    historyPanel: { display: 'flex', flexDirection: 'column', gap: '10px', padding: '15px', backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)', overflowY: 'auto' },
     leftPanel: { display: 'flex', flexDirection: 'column', gap: '15px', padding: '20px', backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)', overflowY: 'auto' },
     rightPanel: { display: 'flex', flexDirection: 'column', backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)' },
     formGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
@@ -27,9 +28,18 @@ const styles: { [key: string]: React.CSSProperties } = {
     aiMessage: { backgroundColor: '#f0f2f2', alignSelf: 'flex-start', borderBottomLeftRadius: '0px' },
     thinking: { fontStyle: 'italic', color: '#666', padding: '5px 0' },
     error: { color: 'var(--danger-color)', fontSize: '0.9rem', marginTop: '5px' },
-    aiProviderName: { fontWeight: 'bold', margin: '0 0 8px 0', textTransform: 'capitalize', color: 'var(--primary-color)' }
+    aiProviderName: { fontWeight: 'bold', margin: '0 0 8px 0', textTransform: 'capitalize', color: 'var(--primary-color)' },
+    // History Panel Styles
+    historyHeader: { paddingBottom: '10px', borderBottom: '1px solid var(--border-color)', marginBottom: '10px'},
+    newChatButton: { width: '100%', padding: '10px', fontSize: '1rem' },
+    historyList: { listStyle: 'none', margin: 0, padding: 0, overflowY: 'auto', flex: 1 },
+    historyItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', borderRadius: '4px', cursor: 'pointer', marginBottom: '5px' },
+    historyItemActive: { backgroundColor: 'var(--primary-hover-color)', color: 'white' },
+    historyItemText: { flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+    deleteButton: { background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.2rem', padding: '0 5px' },
 };
 
+// ... (systemPromptTemplates remains the same)
 const systemPromptTemplates = [
     {
         name: "Default PPC Expert Analyst",
@@ -37,15 +47,20 @@ const systemPromptTemplates = [
 
 You will be provided with several pieces of data:
 1.  **Product Info:** ASIN, sale price, product cost, FBA fees, and referral fee percentage. This is for profitability calculations.
-2.  **Performance Data:** This is a JSON object containing up to three data sets. Understand their differences:
+2.  **Performance Data:** This is a JSON object containing up to four data sets. Understand their differences:
 
-    *   **Search Term Report Data:** This is HISTORICAL, AGGREGATED data from official reports. It has a **2-day reporting delay**. Use this for long-term trend analysis, identifying high-performing customer search terms, and finding irrelevant terms to negate.
+    *   **Search Term Report Data:** This is HISTORICAL, AGGREGATED data from official reports. It has a **2-day reporting delay**. Use this for long-term trend analysis, identifying high-performing customer search terms, and finding irrelevant terms to negate. It reflects ADVERTISING performance for specific search terms.
 
-    *   **Stream Data:** This is NEAR REAL-TIME, AGGREGATED data. It is very recent and good for understanding performance for **"yesterday" or "today"**.
+    *   **Stream Data:** This is NEAR REAL-TIME, AGGREGATED data. It is very recent and good for understanding performance for **"yesterday" or "today"**. This also reflects ADVERTISING performance.
 
     *   **Sales & Traffic Data:** This includes ORGANIC metrics. Use this to understand the overall health of the product, like total sessions and unit session percentage (conversion rate).
 
-**CRITICAL INSTRUCTION:** Do NOT simply add the metrics (spend, sales, clicks) from the Search Term Report and the Stream Data together. They represent different timeframes and data sources. Use them contextually. For example, if asked about "top search terms last month," use the Search Term Report. If asked about "performance yesterday," use the Stream Data.
+    *   **Search Query Performance Data:** This is from **Brand Analytics**. It is **WEEKLY** data and shows the **ENTIRE SEARCH FUNNEL** (impressions, clicks, add to carts, purchases) for a given search query across ALL products on Amazon, not just yours. It provides your ASIN's share of each of these metrics. This is extremely powerful for understanding market share and customer behavior but is NOT direct ad performance.
+
+**CRITICAL INSTRUCTION:** Do NOT simply add the metrics from different data sources together. They represent different timeframes and data types. Use them contextually.
+- Use Search Term/Stream for ad performance.
+- Use Sales & Traffic for organic health.
+- Use Search Query Performance for market share and search funnel analysis.
 
 Your Task:
 1.  **Acknowledge the data provided.** Note the date ranges for each dataset. If some data is missing, mention it.
@@ -97,14 +112,16 @@ export function AICopilotView() {
     
     const [selectedTemplateName, setSelectedTemplateName] = useState('Default PPC Expert Analyst');
     const [aiProvider, setAiProvider] = useState<'gemini' | 'openai'>('gemini');
+    const [sqpFilterOptions, setSqpFilterOptions] = useState<PerformanceFilterOptions['weeks']>([]);
+    const [selectedWeek, setSelectedWeek] = useState('');
 
-    const currentConversation = aiCache.chat[aiProvider];
+    const [conversationHistory, setConversationHistory] = useState<any[]>([]);
+    const [profileId, setProfileId] = useState<string | null>(null);
 
     useEffect(() => {
-        const matchingTemplate = systemPromptTemplates.find(t => t.prompt === aiCache.chat.systemInstruction);
-        setSelectedTemplateName(matchingTemplate ? matchingTemplate.name : "Custom");
-    }, [aiCache.chat.systemInstruction]);
-
+        const storedProfileId = localStorage.getItem('selectedProfileId');
+        setProfileId(storedProfileId);
+    }, []);
 
     const updateAiCache = (updater: (prev: AICopilotCache) => AICopilotCache) => {
         setCache(prevCache => ({
@@ -112,6 +129,43 @@ export function AICopilotView() {
             aiCopilot: updater(prevCache.aiCopilot),
         }));
     };
+    
+    const fetchHistory = useCallback(async () => {
+        if (!profileId) return;
+        try {
+            const response = await fetch(`/api/ai/conversations?profileId=${profileId}`);
+            if (response.ok) {
+                const data = await response.json();
+                setConversationHistory(data);
+            }
+        } catch (e) { console.error("Failed to fetch history", e); }
+    }, [profileId]);
+
+    useEffect(() => {
+        fetchHistory();
+    }, [fetchHistory]);
+
+    useEffect(() => {
+        const matchingTemplate = systemPromptTemplates.find(t => t.prompt === aiCache.chat.systemInstruction);
+        setSelectedTemplateName(matchingTemplate ? matchingTemplate.name : "Custom");
+    }, [aiCache.chat.systemInstruction]);
+
+    useEffect(() => {
+        const fetchSqpFilters = async () => {
+            try {
+                const response = await fetch('/api/query-performance-filters');
+                if (!response.ok) return;
+                const data: PerformanceFilterOptions = await response.json();
+                setSqpFilterOptions(data.weeks || []);
+                if (data.weeks.length > 0 && !selectedWeek) {
+                    setSelectedWeek(data.weeks[0].value);
+                }
+            } catch (e) {
+                console.error("Failed to fetch SQP filter options", e);
+            }
+        };
+        fetchSqpFilters();
+    }, [selectedWeek]);
 
     const setProductInfo = (key: keyof AICopilotCache['productInfo'], value: string) => {
         updateAiCache(prev => ({ ...prev, productInfo: { ...prev.productInfo, [key]: value } }));
@@ -131,44 +185,64 @@ export function AICopilotView() {
             }
         }
     };
-    
-    const handleProviderChange = (newProvider: 'gemini' | 'openai') => {
-        setAiProvider(newProvider);
-    };
 
     const setDateRange = (key: keyof AICopilotCache['dateRange'], value: string) => {
         updateAiCache(prev => ({ ...prev, dateRange: { ...prev.dateRange, [key]: value } }));
     };
 
-    const [loading, setLoading] = useState({ st: false, stream: false, sat: false, chat: false });
-    const [error, setError] = useState({ st: '', stream: '', sat: '', chat: '' });
+    const [loading, setLoading] = useState({ st: false, stream: false, sat: false, chat: false, sqp: false });
+    const [error, setError] = useState({ st: '', stream: '', sat: '', chat: '', sqp: '' });
     const [currentQuestion, setCurrentQuestion] = useState('');
     
     const chatEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [currentConversation.messages]);
+    }, [aiCache.chat.messages]);
 
-    const handleLoadData = async (tool: 'st' | 'stream' | 'sat') => {
+    const handleLoadData = async (tool: 'st' | 'stream' | 'sat' | 'sqp') => {
         setLoading(prev => ({ ...prev, [tool]: true }));
         setError(prev => ({ ...prev, [tool]: '' }));
         
         let endpoint = '';
         let dataKey: keyof AICopilotCache['loadedData'];
+        let body: any = {};
 
         switch (tool) {
             case 'st': 
                 endpoint = '/api/ai/tool/search-term';
                 dataKey = 'searchTermData';
+                body = { 
+                    asin: aiCache.productInfo.asin, 
+                    startDate: aiCache.dateRange.startDate, 
+                    endDate: aiCache.dateRange.endDate 
+                };
                 break;
             case 'stream':
                 endpoint = '/api/ai/tool/stream';
                 dataKey = 'streamData';
+                body = { 
+                    asin: aiCache.productInfo.asin, 
+                    startDate: aiCache.dateRange.startDate, 
+                    endDate: aiCache.dateRange.endDate 
+                };
                 break;
             case 'sat':
                 endpoint = '/api/ai/tool/sales-traffic';
                 dataKey = 'salesTrafficData';
+                body = { 
+                    asin: aiCache.productInfo.asin, 
+                    startDate: aiCache.dateRange.startDate, 
+                    endDate: aiCache.dateRange.endDate 
+                };
+                break;
+            case 'sqp':
+                endpoint = '/api/ai/tool/search-query-performance';
+                dataKey = 'searchQueryPerformanceData';
+                body = {
+                    asin: aiCache.productInfo.asin,
+                    week: selectedWeek
+                };
                 break;
         }
 
@@ -176,11 +250,7 @@ export function AICopilotView() {
             const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    asin: aiCache.productInfo.asin, 
-                    startDate: aiCache.dateRange.startDate, 
-                    endDate: aiCache.dateRange.endDate 
-                }),
+                body: JSON.stringify(body),
             });
             const responseData = await response.json();
             if (!response.ok) throw new Error(responseData.error || 'Failed to load data.');
@@ -203,12 +273,13 @@ export function AICopilotView() {
         }
     };
 
-    const handleViewData = (tool: 'st' | 'stream' | 'sat') => {
+    const handleViewData = (tool: 'st' | 'stream' | 'sat' | 'sqp') => {
         let dataInfo: LoadedDataInfo | null = null;
         switch(tool) {
             case 'st': dataInfo = aiCache.loadedData.searchTermData; break;
             case 'stream': dataInfo = aiCache.loadedData.streamData; break;
             case 'sat': dataInfo = aiCache.loadedData.salesTrafficData; break;
+            case 'sqp': dataInfo = aiCache.loadedData.searchQueryPerformanceData; break;
         }
     
         if (dataInfo && dataInfo.data && dataInfo.data.length > 0) {
@@ -220,22 +291,19 @@ export function AICopilotView() {
 
     const handleStartConversation = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!currentQuestion.trim()) return;
+        if (!currentQuestion.trim() || !profileId) {
+            if (!profileId) alert("Please select a Profile in the PPC Management view first.");
+            return;
+        }
 
         const questionToAsk = currentQuestion;
         const newUserMessage: ChatMessage = { id: Date.now(), sender: 'user', text: questionToAsk };
-
+        
         updateAiCache(prev => ({
             ...prev,
-            chat: {
-                ...prev.chat,
-                [aiProvider]: {
-                    ...prev.chat[aiProvider],
-                    messages: [...prev.chat[aiProvider].messages, newUserMessage],
-                },
-            },
+            chat: { ...prev.chat, messages: [...prev.chat.messages, newUserMessage] },
         }));
-        
+
         setLoading(prev => ({...prev, chat: true}));
         setError(prev => ({...prev, chat: ''}));
         setCurrentQuestion('');
@@ -243,12 +311,14 @@ export function AICopilotView() {
         try {
             const payload = {
                 question: questionToAsk,
-                conversationId: currentConversation.conversationId,
+                conversationId: aiCache.chat.conversationId,
                 context: {
                     productInfo: aiCache.productInfo,
                     performanceData: aiCache.loadedData,
                     systemInstruction: aiCache.chat.systemInstruction,
-                }
+                },
+                profileId,
+                provider: aiProvider,
             };
 
             const endpoint = aiProvider === 'gemini' ? '/api/ai/chat' : '/api/ai/chat-gpt';
@@ -281,38 +351,34 @@ export function AICopilotView() {
 
                         if (isFirstChunk) {
                             isFirstChunk = false;
+                            const newConversationId = parsed.conversationId || aiCache.chat.conversationId;
+
                             updateAiCache(prev => {
-                                const newConversationId = parsed.conversationId || prev.chat[aiProvider].conversationId;
                                 const newAiMessagePlaceholder: ChatMessage = { id: currentAiMessageId, sender: 'ai', text: '' };
                                 return {
                                     ...prev,
                                     chat: {
                                         ...prev.chat,
-                                        [aiProvider]: {
-                                            messages: [...prev.chat[aiProvider].messages, newAiMessagePlaceholder],
-                                            conversationId: newConversationId,
-                                        },
+                                        messages: [...prev.chat.messages, newAiMessagePlaceholder],
+                                        conversationId: newConversationId,
                                     },
                                 };
                             });
+
+                            if(parsed.conversationId) { // This means a new conversation was created
+                                fetchHistory(); // Refresh history list
+                            }
                         }
 
                         if (parsed.content) {
                             aiResponseText += parsed.content;
                              updateAiCache(prev => {
-                                const providerChat = prev.chat[aiProvider];
-                                const updatedMessages = providerChat.messages.map(msg =>
+                                const updatedMessages = prev.chat.messages.map(msg =>
                                     msg.id === currentAiMessageId ? { ...msg, text: aiResponseText } : msg
                                 );
                                 return {
                                     ...prev,
-                                    chat: {
-                                        ...prev.chat,
-                                        [aiProvider]: {
-                                            ...providerChat,
-                                            messages: updatedMessages,
-                                        },
-                                    },
+                                    chat: { ...prev.chat, messages: updatedMessages },
                                 };
                             });
                         }
@@ -329,19 +395,108 @@ export function AICopilotView() {
         }
     };
 
+    const handleNewChat = () => {
+        updateAiCache(prev => ({
+            ...prev,
+            chat: { ...prev.chat, conversationId: null, messages: [] }
+        }));
+    };
+
+    const handleSelectConversation = async (id: string) => {
+        try {
+            const res = await fetch(`/api/ai/conversations/${id}`);
+            if (!res.ok) throw new Error("Failed to load conversation.");
+            const data = await res.json();
+            const provider = data.provider || 'gemini'; // Default to gemini if not present
+            
+            updateAiCache(prev => ({
+                ...prev,
+                chat: { ...prev.chat, conversationId: id, messages: data.history }
+            }));
+            setAiProvider(provider);
+
+        } catch (e) { console.error(e); }
+    };
+    
+    const handleDeleteConversation = async (id: string) => {
+        if (!window.confirm("Are you sure you want to delete this conversation?")) return;
+        try {
+            const res = await fetch(`/api/ai/conversations/${id}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error("Failed to delete conversation.");
+            fetchHistory(); // Refresh list
+            if (aiCache.chat.conversationId === id) {
+                handleNewChat();
+            }
+        } catch (e) { console.error(e); }
+    };
+    
+    // Calculations for the Amazon Fee field
+    const { salePrice, cost, fbaFee, referralFeePercent } = aiCache.productInfo;
+    const salePriceNum = parseFloat(salePrice) || 0;
+    const fbaFeeNum = parseFloat(fbaFee) || 0;
+    const referralFeePercentNum = parseFloat(referralFeePercent) || 15;
+
+    const calculatedReferralFee = salePriceNum * (referralFeePercentNum / 100);
+    const totalAmazonFee = fbaFeeNum + calculatedReferralFee;
+
+    const handleAmazonFeeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newTotalFee = parseFloat(e.target.value) || 0;
+        
+        const { salePrice: currentSalePrice, referralFeePercent: currentReferralFeePercent } = aiCache.productInfo;
+        const currentSalePriceNum = parseFloat(currentSalePrice) || 0;
+        const currentReferralFeePercentNum = parseFloat(currentReferralFeePercent) || 15;
+        
+        const currentCalculatedReferralFee = currentSalePriceNum * (currentReferralFeePercentNum / 100);
+        const newFbaFee = newTotalFee - currentCalculatedReferralFee;
+
+        // Store only the FBA fee portion in state to keep backend logic consistent
+        setProductInfo('fbaFee', newFbaFee.toFixed(2));
+    };
+
     return (
         <div style={styles.container}>
+            <div style={styles.historyPanel}>
+                <div style={styles.historyHeader}>
+                    <button style={{...styles.toolButton, ...styles.newChatButton}} onClick={handleNewChat}>+ New Chat</button>
+                </div>
+                <ul style={styles.historyList}>
+                    {conversationHistory.map(conv => (
+                        <li key={conv.id}
+                            style={conv.id === aiCache.chat.conversationId ? {...styles.historyItem, ...styles.historyItemActive} : styles.historyItem}
+                            onClick={() => handleSelectConversation(conv.id)}
+                            title={conv.title}
+                        >
+                            <span style={styles.historyItemText}>{conv.title}</span>
+                            <button
+                                style={styles.deleteButton}
+                                onClick={(e) => { e.stopPropagation(); handleDeleteConversation(conv.id); }}
+                                title="Delete conversation"
+                            >
+                                &times;
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            </div>
             <div style={styles.leftPanel}>
                 <h2>AI Co-Pilot Control Panel</h2>
                 <div style={styles.formGroup}>
                     <label style={styles.label}>ASIN</label>
                     <input style={styles.input} value={aiCache.productInfo.asin} onChange={e => setProductInfo('asin', e.target.value)} placeholder="e.g., B0DD45VPSL" />
                 </div>
-                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px'}}>
-                    <div style={styles.formGroup}><label style={styles.label}>Sale Price</label><input type="number" style={styles.input} value={aiCache.productInfo.salePrice} onChange={e => setProductInfo('salePrice', e.target.value)} placeholder="e.g., 29.99" /></div>
-                    <div style={styles.formGroup}><label style={styles.label}>Product Cost</label><input type="number" style={styles.input} value={aiCache.productInfo.cost} onChange={e => setProductInfo('cost', e.target.value)} placeholder="e.g., 7.50" /></div>
-                    <div style={styles.formGroup}><label style={styles.label}>FBA Fee</label><input type="number" style={styles.input} value={aiCache.productInfo.fbaFee} onChange={e => setProductInfo('fbaFee', e.target.value)} placeholder="e.g., 6.50" /></div>
-                    <div style={styles.formGroup}><label style={styles.label}>Referral Fee (%)</label><input type="number" style={styles.input} value={aiCache.productInfo.referralFeePercent} onChange={e => setProductInfo('referralFeePercent', e.target.value)} placeholder="e.g., 15" /></div>
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px'}}>
+                    <div style={styles.formGroup}>
+                        <label style={styles.label}>Sale Price</label>
+                        <input type="number" style={styles.input} value={aiCache.productInfo.salePrice} onChange={e => setProductInfo('salePrice', e.target.value)} placeholder="e.g., 29.99" />
+                    </div>
+                    <div style={styles.formGroup}>
+                        <label style={styles.label}>Product Cost</label>
+                        <input type="number" style={styles.input} value={aiCache.productInfo.cost} onChange={e => setProductInfo('cost', e.target.value)} placeholder="e.g., 7.50" />
+                    </div>
+                    <div style={styles.formGroup}>
+                        <label style={styles.label}>Amazon Fee</label>
+                        <input type="number" style={styles.input} value={totalAmazonFee > 0 ? totalAmazonFee.toFixed(2) : ''} onChange={handleAmazonFeeChange} placeholder="e.g., 11.00" title="Total of FBA Fee + Referral Fee" />
+                    </div>
                 </div>
 
                 <hr style={{border: 'none', borderTop: '1px solid var(--border-color)', margin: '10px 0'}}/>
@@ -380,7 +535,7 @@ export function AICopilotView() {
                         <h3 style={styles.toolTitle}>Load Performance Data</h3>
                     </div>
                     <div style={styles.formGroup}>
-                        <label style={styles.label}>Date Range</label>
+                        <label style={styles.label}>Date Range (for ST, Stream, S&T)</label>
                         <div style={styles.dateInputContainer}>
                             <input type="date" style={styles.input} value={aiCache.dateRange.startDate} onChange={e => setDateRange('startDate', e.target.value)} />
                             <input type="date" style={styles.input} value={aiCache.dateRange.endDate} onChange={e => setDateRange('endDate', e.target.value)} />
@@ -390,13 +545,23 @@ export function AICopilotView() {
                         <ToolButton tool="st" onRun={handleLoadData} onView={handleViewData} loading={loading.st} dataInfo={aiCache.loadedData.searchTermData} error={error.st} name="Search Term Report" />
                         <ToolButton tool="stream" onRun={handleLoadData} onView={handleViewData} loading={loading.stream} dataInfo={aiCache.loadedData.streamData} error={error.stream} name="Stream Data" />
                         <ToolButton tool="sat" onRun={handleLoadData} onView={handleViewData} loading={loading.sat} dataInfo={aiCache.loadedData.salesTrafficData} error={error.sat} name="Sales & Traffic" />
+                         <div style={{borderTop: '1px dashed var(--border-color)', paddingTop: '15px'}}>
+                            <div style={{...styles.formGroup, marginBottom: '15px'}}>
+                                <label style={styles.label}>Search Query Performance Week</label>
+                                <select style={styles.input} value={selectedWeek} onChange={e => setSelectedWeek(e.target.value)} disabled={sqpFilterOptions.length === 0}>
+                                    {sqpFilterOptions.length === 0 && <option>Loading weeks...</option>}
+                                    {sqpFilterOptions.map(week => <option key={week.value} value={week.value}>{week.label}</option>)}
+                                </select>
+                            </div>
+                            <ToolButton tool="sqp" onRun={handleLoadData} onView={handleViewData} loading={loading.sqp} dataInfo={aiCache.loadedData.searchQueryPerformanceData} error={error.sqp} name="Search Query Performance" />
+                        </div>
                     </div>
                 </div>
             </div>
             <div style={styles.rightPanel}>
                 <div style={styles.chatWindow} ref={chatEndRef}>
-                    {currentConversation.messages.length === 0 && <p style={{textAlign: 'center', color: '#888'}}>Load data and ask a question to start your conversation.</p>}
-                    {currentConversation.messages.map(msg => (
+                    {aiCache.chat.messages.length === 0 && <p style={{textAlign: 'center', color: '#888'}}>Load data and ask a question to start your conversation.</p>}
+                    {aiCache.chat.messages.map(msg => (
                         <div key={msg.id} style={{...styles.message, ...(msg.sender === 'user' ? styles.userMessage : styles.aiMessage)}}>
                             {msg.sender === 'ai' && (
                                 <p style={styles.aiProviderName}>
@@ -406,7 +571,7 @@ export function AICopilotView() {
                              <div dangerouslySetInnerHTML={{ __html: marked.parse(msg.text) }}></div>
                         </div>
                     ))}
-                    {loading.chat && currentConversation.messages.length > 0 && currentConversation.messages[currentConversation.messages.length - 1].sender === 'user' && (
+                    {loading.chat && aiCache.chat.messages.length > 0 && aiCache.chat.messages[aiCache.chat.messages.length - 1].sender === 'user' && (
                         <div style={{...styles.message, ...styles.aiMessage}}><em style={{color: '#666'}}>AI is thinking...</em></div>
                     )}
                     {error.chat && <div style={{...styles.message, ...styles.aiMessage, backgroundColor: '#fdd', color: 'var(--danger-color)'}}>{error.chat}</div>}
@@ -417,7 +582,7 @@ export function AICopilotView() {
                         <select
                             style={{ ...styles.input, height: '44px', padding: '0 10px' }}
                             value={aiProvider}
-                            onChange={(e) => handleProviderChange(e.target.value as any)}
+                            onChange={(e) => setAiProvider(e.target.value as any)}
                             aria-label="Select AI Provider"
                         >
                            <option value="gemini">Gemini</option>
@@ -431,7 +596,7 @@ export function AICopilotView() {
     );
 }
 
-const ToolButton = ({ tool, onRun, onView, loading, dataInfo, error, name }: { tool: 'st' | 'stream' | 'sat', onRun: (tool: 'st' | 'stream' | 'sat') => void, onView: (tool: 'st' | 'stream' | 'sat') => void, loading: boolean, dataInfo: LoadedDataInfo, error: string, name: string }) => {
+const ToolButton = ({ tool, onRun, onView, loading, dataInfo, error, name }: { tool: 'st' | 'stream' | 'sat' | 'sqp', onRun: (tool: 'st' | 'stream' | 'sat' | 'sqp') => void, onView: (tool: 'st' | 'stream' | 'sat' | 'sqp') => void, loading: boolean, dataInfo: LoadedDataInfo, error: string, name: string }) => {
     
     const formatDate = (dateStr: string) => {
         // Add 'T00:00:00Z' to treat the date as UTC, avoiding timezone shifts from local interpretation.

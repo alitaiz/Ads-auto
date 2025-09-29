@@ -75,53 +75,47 @@ interface ColumnConfig {
 }
 
 const allColumns: ColumnConfig[] = [
-    // --- Primary Columns (Default Visible) ---
+    // --- Default Visible Columns (as per user request) ---
     { id: 'searchQuery', label: 'Search Query', defaultVisible: true, formatter: (val) => String(val), defaultWidth: 300 },
-    { id: 'searchQueryVolume', label: 'Search Volume', defaultVisible: true, formatter: formatNumber, metricFormat: 'number', defaultWidth: 140 },
+    { id: 'searchQueryScore', label: 'Search Query Score', defaultVisible: true, formatter: formatNumber, metricFormat: 'number', defaultWidth: 160 },
+    { id: 'searchQueryVolume', label: 'Search Query Volume', defaultVisible: true, formatter: formatNumber, metricFormat: 'number', defaultWidth: 140 },
+    
+    // Search Funnel - Impressions
+    { id: 'impressions.totalCount', label: 'Total Impressions', defaultVisible: true, formatter: formatNumber, metricFormat: 'number', defaultWidth: 150 },
+    { id: 'impressions.asinCount', label: 'ASIN Impressions', defaultVisible: true, formatter: formatNumber, metricFormat: 'number', defaultWidth: 150 },
     { id: 'impressions.asinShare', label: 'Impression Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent', defaultWidth: 150 },
+    
+    // Search Funnel - Clicks
+    { id: 'clicks.totalCount', label: 'Total Clicks', defaultVisible: true, formatter: formatNumber, metricFormat: 'number', defaultWidth: 120 },
     { id: 'clicks.clickRate', label: 'Click Rate', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent', defaultWidth: 120 },
+    { id: 'clicks.asinCount', label: 'ASIN Clicks', defaultVisible: true, formatter: formatNumber, metricFormat: 'number', defaultWidth: 120 },
     { id: 'clicks.asinShare', label: 'Click Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent', defaultWidth: 120 },
+    
+    // Search Funnel - Cart Adds
+    { id: 'cartAdds.totalCount', label: 'Total Cart Adds', defaultVisible: true, formatter: formatNumber, metricFormat: 'number', defaultWidth: 140 },
     { id: 'cartAdds.cartAddRate', label: 'Add to Cart Rate', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent', defaultWidth: 150 },
+    { id: 'cartAdds.asinCount', label: 'ASIN Cart Adds', defaultVisible: true, formatter: formatNumber, metricFormat: 'number', defaultWidth: 140 },
     { id: 'cartAdds.asinShare', label: 'Add to Cart Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent', defaultWidth: 150 },
+    
+    // Search Funnel - Purchases
+    { id: 'purchases.totalCount', label: 'Total Purchases', defaultVisible: true, formatter: formatNumber, metricFormat: 'number', defaultWidth: 140 },
     { id: 'purchases.purchaseRate', label: 'Purchase Rate', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent', defaultWidth: 140 },
+    { id: 'purchases.asinCount', label: 'ASIN Purchases', defaultVisible: true, formatter: formatNumber, metricFormat: 'number', defaultWidth: 140 },
     { id: 'purchases.asinShare', label: 'Purchase Share', defaultVisible: true, formatter: formatPercent, metricFormat: 'percent', defaultWidth: 140 },
-    
-    // --- General ---
-    { id: 'searchQueryScore', label: 'Search Query Score', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 160 },
-    
-    // --- Impressions ---
-    { id: 'impressions.totalCount', label: 'Total Impressions', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 150 },
-    { id: 'impressions.asinCount', label: 'ASIN Impressions', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 150 },
 
-    // --- Clicks ---
-    { id: 'clicks.totalCount', label: 'Total Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 120 },
-    { id: 'clicks.asinCount', label: 'ASIN Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 120 },
+    // --- Other Hidden Columns ---
     { id: 'clicks.totalMedianPrice', label: 'Total Median Click Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price', defaultWidth: 200 },
     { id: 'clicks.asinMedianPrice', label: 'ASIN Median Click Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price', defaultWidth: 200 },
-
-    // --- Cart Adds ---
-    { id: 'cartAdds.totalCount', label: 'Total Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 140 },
-    { id: 'cartAdds.asinCount', label: 'ASIN Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 140 },
     { id: 'cartAdds.totalMedianPrice', label: 'Total Median Cart Add Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price', defaultWidth: 220 },
     { id: 'cartAdds.asinMedianPrice', label: 'ASIN Median Cart Add Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price', defaultWidth: 220 },
-
-    // --- Purchases ---
-    { id: 'purchases.totalCount', label: 'Total Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 140 },
-    { id: 'purchases.asinCount', label: 'ASIN Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 140 },
     { id: 'purchases.totalMedianPrice', label: 'Total Median Purchase Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price', defaultWidth: 220 },
     { id: 'purchases.asinMedianPrice', label: 'ASIN Median Purchase Price', defaultVisible: false, formatter: (val) => String(val ?? 'N/A'), metricFormat: 'price', defaultWidth: 220 },
-
-    // --- Shipping Speed (Clicks) ---
     { id: 'clicks.sameDayShippingCount', label: 'Same-Day Shipping Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 200 },
     { id: 'clicks.oneDayShippingCount', label: '1-Day Shipping Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 200 },
     { id: 'clicks.twoDayShippingCount', label: '2-Day Shipping Clicks', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 200 },
-
-    // --- Shipping Speed (Cart Adds) ---
     { id: 'cartAdds.sameDayShippingCount', label: 'Same-Day Shipping Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 220 },
     { id: 'cartAdds.oneDayShippingCount', label: '1-Day Shipping Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 220 },
     { id: 'cartAdds.twoDayShippingCount', label: '2-Day Shipping Cart Adds', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 220 },
-    
-    // --- Shipping Speed (Purchases) ---
     { id: 'purchases.sameDayShippingCount', label: 'Same-Day Shipping Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 220 },
     { id: 'purchases.oneDayShippingCount', label: '1-Day Shipping Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 220 },
     { id: 'purchases.twoDayShippingCount', label: '2-Day Shipping Purchases', defaultVisible: false, formatter: formatNumber, metricFormat: 'number', defaultWidth: 220 },

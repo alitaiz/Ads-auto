@@ -123,32 +123,113 @@ async function fetchSalesTrafficDataForAI(asin, dateRange) {
         const { minDate, maxDate } = dateRangeResult.rows[0] || {};
 
         const { rows } = await pool.query(`
-            WITH daily_data AS (
-                SELECT
-                    report_date,
-                    SUM((sales_data->>'unitsOrdered')::int) as "unitsOrdered",
-                    SUM((sales_data->'orderedProductSales'->>'amount')::numeric) as "orderedProductSales",
-                    SUM((traffic_data->>'sessions')::int) as "sessions",
-                    SUM((traffic_data->>'pageViews')::int) as "pageViews",
-                    SUM((traffic_data->>'sessions')::int * (traffic_data->>'unitSessionPercentage')::numeric) as "weightedUnitSessionTotal",
-                    SUM((traffic_data->>'sessions')::int) as "totalSessionsForAvg"
-                FROM sales_and_traffic_by_asin
-                WHERE child_asin = $1 AND report_date BETWEEN $2 AND $3
-                GROUP BY report_date
-            )
             SELECT
-                report_date,
-                "unitsOrdered",
-                "orderedProductSales",
-                "sessions",
-                "pageViews",
-                ("weightedUnitSessionTotal" / NULLIF("totalSessionsForAvg", 0)) / 100 as "avgUnitSessionPercentage"
-            FROM daily_data
-            ORDER BY report_date ASC;
+                -- ### SUMMABLE METRICS ###
+                SUM(COALESCE((sales_data->>'unitsOrdered')::int, 0)) AS "unitsOrdered",
+                SUM(COALESCE((sales_data->'orderedProductSales'->>'amount')::numeric, 0)) AS "orderedProductSales",
+                SUM(COALESCE((sales_data->>'totalOrderItems')::int, 0)) AS "totalOrderItems",
+                SUM(COALESCE((sales_data->>'unitsOrderedB2B')::int, 0)) AS "unitsOrderedB2B",
+                SUM(COALESCE((sales_data->'orderedProductSalesB2B'->>'amount')::numeric, 0)) AS "orderedProductSalesB2B",
+                SUM(COALESCE((sales_data->>'totalOrderItemsB2B')::int, 0)) AS "totalOrderItemsB2B",
+
+                SUM(COALESCE((traffic_data->>'sessions')::int, 0)) AS "sessions",
+                SUM(COALESCE((traffic_data->>'pageViews')::int, 0)) AS "pageViews",
+                SUM(COALESCE((traffic_data->>'sessionsB2B')::int, 0)) AS "sessionsB2B",
+                SUM(COALESCE((traffic_data->>'pageViewsB2B')::int, 0)) AS "pageViewsB2B",
+                SUM(COALESCE((traffic_data->>'browserSessions')::int, 0)) AS "browserSessions",
+                SUM(COALESCE((traffic_data->>'mobileAppSessions')::int, 0)) AS "mobileAppSessions",
+                SUM(COALESCE((traffic_data->>'browserPageViews')::int, 0)) AS "browserPageViews",
+                SUM(COALESCE((traffic_data->>'mobileAppPageViews')::int, 0)) AS "mobileAppPageViews",
+                SUM(COALESCE((traffic_data->>'browserSessionsB2B')::int, 0)) AS "browserSessionsB2B",
+                SUM(COALESCE((traffic_data->>'mobileAppSessionsB2B')::int, 0)) AS "mobileAppSessionsB2B",
+                SUM(COALESCE((traffic_data->>'browserPageViewsB2B')::int, 0)) AS "browserPageViewsB2B",
+                SUM(COALESCE((traffic_data->>'mobileAppPageViewsB2B')::int, 0)) AS "mobileAppPageViewsB2B",
+
+                -- ### WEIGHTED AVERAGES FOR PRICES & PERCENTAGES ###
+                SUM(COALESCE((sales_data->'averageSalesPerOrderItem'->>'amount')::numeric, 0) * COALESCE((sales_data->>'totalOrderItems')::int, 0)) as "weighted_averageSalesPerOrderItem",
+                SUM(COALESCE((sales_data->'averageSalesPerOrderItemB2B'->>'amount')::numeric, 0) * COALESCE((sales_data->>'totalOrderItemsB2B')::int, 0)) as "weighted_averageSalesPerOrderItemB2B",
+                
+                SUM(COALESCE((traffic_data->>'buyBoxPercentage')::numeric, 0) * COALESCE((traffic_data->>'sessions')::int, 0)) as "weighted_buyBoxPercentage",
+                SUM(COALESCE((traffic_data->>'unitSessionPercentage')::numeric, 0) * COALESCE((traffic_data->>'sessions')::int, 0)) as "weighted_unitSessionPercentage",
+                SUM(COALESCE((traffic_data->>'sessionPercentage')::numeric, 0) * COALESCE((traffic_data->>'sessions')::int, 0)) as "weighted_sessionPercentage",
+                SUM(COALESCE((traffic_data->>'browserSessionPercentage')::numeric, 0) * COALESCE((traffic_data->>'browserSessions')::int, 0)) as "weighted_browserSessionPercentage",
+                SUM(COALESCE((traffic_data->>'mobileAppSessionPercentage')::numeric, 0) * COALESCE((traffic_data->>'mobileAppSessions')::int, 0)) as "weighted_mobileAppSessionPercentage",
+                
+                SUM(COALESCE((traffic_data->>'buyBoxPercentageB2B')::numeric, 0) * COALESCE((traffic_data->>'sessionsB2B')::int, 0)) as "weighted_buyBoxPercentageB2B",
+                SUM(COALESCE((traffic_data->>'unitSessionPercentageB2B')::numeric, 0) * COALESCE((traffic_data->>'sessionsB2B')::int, 0)) as "weighted_unitSessionPercentageB2B",
+                SUM(COALESCE((traffic_data->>'sessionPercentageB2B')::numeric, 0) * COALESCE((traffic_data->>'sessionsB2B')::int, 0)) as "weighted_sessionPercentageB2B",
+                SUM(COALESCE((traffic_data->>'browserSessionPercentageB2B')::numeric, 0) * COALESCE((traffic_data->>'browserSessionsB2B')::int, 0)) as "weighted_browserSessionPercentageB2B",
+                SUM(COALESCE((traffic_data->>'mobileAppSessionPercentageB2B')::numeric, 0) * COALESCE((traffic_data->>'mobileAppSessionsB2B')::int, 0)) as "weighted_mobileAppSessionPercentageB2B",
+                
+                SUM(COALESCE((traffic_data->>'pageViewsPercentage')::numeric, 0) * COALESCE((traffic_data->>'pageViews')::int, 0)) as "weighted_pageViewsPercentage",
+                SUM(COALESCE((traffic_data->>'browserPageViewsPercentage')::numeric, 0) * COALESCE((traffic_data->>'browserPageViews')::int, 0)) as "weighted_browserPageViewsPercentage",
+                SUM(COALESCE((traffic_data->>'mobileAppPageViewsPercentage')::numeric, 0) * COALESCE((traffic_data->>'mobileAppPageViews')::int, 0)) as "weighted_mobileAppPageViewsPercentage",
+                
+                SUM(COALESCE((traffic_data->>'pageViewsPercentageB2B')::numeric, 0) * COALESCE((traffic_data->>'pageViewsB2B')::int, 0)) as "weighted_pageViewsPercentageB2B",
+                SUM(COALESCE((traffic_data->>'browserPageViewsPercentageB2B')::numeric, 0) * COALESCE((traffic_data->>'browserPageViewsB2B')::int, 0)) as "weighted_browserPageViewsPercentageB2B",
+                SUM(COALESCE((traffic_data->>'mobileAppPageViewsPercentageB2B')::numeric, 0) * COALESCE((traffic_data->>'mobileAppPageViewsB2B')::int, 0)) as "weighted_mobileAppPageViewsPercentageB2B"
+
+            FROM sales_and_traffic_by_asin
+            WHERE child_asin = $1 AND report_date BETWEEN $2 AND $3;
         `, [asin, startDate, endDate]);
         
+        const agg = rows[0];
+
+        if (!agg || !agg.sessions) {
+            return { data: [], dateRange };
+        }
+
+        const safeDivide = (numerator, denominator) => {
+            const num = parseFloat(numerator || 0);
+            const den = parseFloat(denominator || 0);
+            return den > 0 ? num / den : 0;
+        };
+        
+        // Amazon stores percentages as numbers (e.g., 37.83 for 37.83%), so we divide by 100 to get a ratio for the AI.
+        const finalData = {
+            // Sales
+            unitsOrdered: parseInt(agg.unitsOrdered, 10),
+            orderedProductSales: parseFloat(agg.orderedProductSales),
+            totalOrderItems: parseInt(agg.totalOrderItems, 10),
+            averageSalesPerOrderItem: safeDivide(agg.weighted_averageSalesPerOrderItem, agg.totalOrderItems),
+            unitsOrderedB2B: parseInt(agg.unitsOrderedB2B, 10),
+            orderedProductSalesB2B: parseFloat(agg.orderedProductSalesB2B),
+            totalOrderItemsB2B: parseInt(agg.totalOrderItemsB2B, 10),
+            averageSalesPerOrderItemB2B: safeDivide(agg.weighted_averageSalesPerOrderItemB2B, agg.totalOrderItemsB2B),
+            // Traffic
+            sessions: parseInt(agg.sessions, 10),
+            pageViews: parseInt(agg.pageViews, 10),
+            sessionsB2B: parseInt(agg.sessionsB2B, 10),
+            pageViewsB2B: parseInt(agg.pageViewsB2B, 10),
+            browserSessions: parseInt(agg.browserSessions, 10),
+            mobileAppSessions: parseInt(agg.mobileAppSessions, 10),
+            browserPageViews: parseInt(agg.browserPageViews, 10),
+            mobileAppPageViews: parseInt(agg.mobileAppPageViews, 10),
+            browserSessionsB2B: parseInt(agg.browserSessionsB2B, 10),
+            mobileAppSessionsB2B: parseInt(agg.mobileAppSessionsB2B, 10),
+            browserPageViewsB2B: parseInt(agg.browserPageViewsB2B, 10),
+            mobileAppPageViewsB2B: parseInt(agg.mobileAppPageViewsB2B, 10),
+            // Percentages (returned as ratio, e.g., 0.3783)
+            buyBoxPercentage: safeDivide(agg.weighted_buyBoxPercentage, agg.sessions) / 100,
+            unitSessionPercentage: safeDivide(agg.weighted_unitSessionPercentage, agg.sessions) / 100,
+            sessionPercentage: safeDivide(agg.weighted_sessionPercentage, agg.sessions) / 100,
+            pageViewsPercentage: safeDivide(agg.weighted_pageViewsPercentage, agg.pageViews) / 100,
+            buyBoxPercentageB2B: safeDivide(agg.weighted_buyBoxPercentageB2B, agg.sessionsB2B) / 100,
+            unitSessionPercentageB2B: safeDivide(agg.weighted_unitSessionPercentageB2B, agg.sessionsB2B) / 100,
+            sessionPercentageB2B: safeDivide(agg.weighted_sessionPercentageB2B, agg.sessionsB2B) / 100,
+            pageViewsPercentageB2B: safeDivide(agg.weighted_pageViewsPercentageB2B, agg.pageViewsB2B) / 100,
+            browserSessionPercentage: safeDivide(agg.weighted_browserSessionPercentage, agg.browserSessions) / 100,
+            mobileAppSessionPercentage: safeDivide(agg.weighted_mobileAppSessionPercentage, agg.mobileAppSessions) / 100,
+            browserPageViewsPercentage: safeDivide(agg.weighted_browserPageViewsPercentage, agg.browserPageViews) / 100,
+            mobileAppPageViewsPercentage: safeDivide(agg.weighted_mobileAppPageViewsPercentage, agg.mobileAppPageViews) / 100,
+            browserSessionPercentageB2B: safeDivide(agg.weighted_browserSessionPercentageB2B, agg.browserSessionsB2B) / 100,
+            mobileAppSessionPercentageB2B: safeDivide(agg.weighted_mobileAppSessionPercentageB2B, agg.mobileAppSessionsB2B) / 100,
+            browserPageViewsPercentageB2B: safeDivide(agg.weighted_browserPageViewsPercentageB2B, agg.browserPageViewsB2B) / 100,
+            mobileAppPageViewsPercentageB2B: safeDivide(agg.weighted_mobileAppPageViewsPercentageB2B, agg.mobileAppPageViewsB2B) / 100,
+        };
+
         return {
-            data: rows,
+            data: [finalData], // Return as an array with a single aggregated object
             dateRange: {
                 startDate: minDate ? new Date(minDate).toISOString().split('T')[0] : startDate,
                 endDate: maxDate ? new Date(maxDate).toISOString().split('T')[0] : endDate

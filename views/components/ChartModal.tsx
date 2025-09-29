@@ -12,6 +12,7 @@ import {
   Tooltip,
   Legend,
   Filler,
+  ChartTypeRegistry,
 } from 'chart.js';
 import { AppChartConfig } from '../../types';
 
@@ -164,7 +165,8 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
                 <div style={styles.modalBody}>
                     {loading && <div style={styles.message}>Loading history...</div>}
                     {error && <div style={styles.message}>{error}</div>}
-                    {!loading && !error && chartData && <Chart type='bar' options={chartOptions} data={chartData} />}
+                    {/* FIX: The Chart component requires a 'type' prop. For mixed charts, 'bar' is used as the base type, and datasets override it. */}
+                    {!loading && !error && chartData && <Chart type={'bar' as keyof ChartTypeRegistry} options={chartOptions} data={chartData} />}
                     {!loading && !error && !chartData && <div style={styles.message}>No historical data available.</div>}
                 </div>
                 <div style={styles.modalFooter}>

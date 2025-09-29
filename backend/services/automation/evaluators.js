@@ -1,8 +1,8 @@
 // backend/services/automation/evaluators.js
+import pool from '../../db.js';
 import { amazonAdsApiRequest } from '../../helpers/amazon-api.js';
 import { getListingInfoBySku, updatePrice } from '../../helpers/spApiHelper.js';
 import { getLocalDateString, calculateMetricsForWindow, checkCondition } from './utils.js';
-import pool from '../../db.js';
 
 export const evaluatePriceAdjustmentRule = async (rule) => {
     const { skus, priceStep, priceLimit } = rule.config;
@@ -787,7 +787,7 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
                     });
 
                     if (!actionsByCampaign[campaignPerf.campaignId]) {
-                        actionsByCampaign[campaignId] = { changes: [], newNegatives: [] };
+                        actionsByCampaign[campaignPerf.campaignId] = { changes: [], newNegatives: [] };
                     }
                     actionsByCampaign[campaignPerf.campaignId].changes.push({
                         entityType: 'campaign', entityId: campaignPerf.campaignId,

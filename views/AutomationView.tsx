@@ -163,6 +163,7 @@ export function AutomationView() {
   const [loading, setLoading] = useState({ rules: true, logs: true });
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<AutomationRule | null>(null);
+  const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
 
   const fetchRules = useCallback(async () => {
     setLoading(prev => ({ ...prev, rules: true }));
@@ -292,7 +293,7 @@ export function AutomationView() {
           </div>
       )}
 
-      {activeTabId === 'HISTORY' && <LogsTab logs={logs} loading={loading.logs} />}
+      {activeTabId === 'HISTORY' && <LogsTab logs={logs} loading={loading.logs} expandedLogId={expandedLogId} setExpandedLogId={setExpandedLogId} />}
       {activeTabId === 'GUIDE' && <RuleGuideContent />}
       {activeTab && 'type' in activeTab && activeTab.type && <RulesList rules={filteredRules} onEdit={handleOpenModal} onDelete={handleDeleteRule} onDuplicate={handleDuplicateRule} />}
       
@@ -350,7 +351,32 @@ const RulesList = ({ rules, onEdit, onDelete, onDuplicate }: { rules: Automation
     </div>
 );
 
-const LogsTab = ({ logs, loading }: { logs: any[], loading: boolean}) => {
+const LogsTab = ({ logs, loading, expandedLogId, setExpandedLogId }: { logs: any[], loading: boolean, expandedLogId: number | null, setExpandedLogId: (id: number | null) => void }) => {
+    const getStatusStyle = (status: string): React.CSSProperties => {
+        let backgroundColor = '#e9ecef'; // default grey
+        let color = '#495057';
+        if (status === 'SUCCESS') {
+            backgroundColor = '#d4edda';
+            color = '#155724';
+        } else if (status === 'FAILURE') {
+            backgroundColor = '#f8d7da';
+            color = '#721c24';
+        } else if (status === 'NO_ACTION') {
+            backgroundColor = '#fff3cd';
+            color = '#856404';
+        }
+        return {
+            display: 'inline-block',
+            padding: '3px 8px',
+            borderRadius: '12px',
+            fontSize: '0.8rem',
+            fontWeight: 500,
+            backgroundColor,
+            color,
+            border: `1px solid ${color}`
+        };
+    };
+
     const formatDataWindow = (log: any) => {
         const range = log.details?.data_date_range;
         if (!range) return 'N/A';
@@ -393,13 +419,25 @@ const LogsTab = ({ logs, loading }: { logs: any[], loading: boolean}) => {
                     </tr></thead>
                     <tbody>
                         {logs.map(log => (
-                            <tr key={log.id}>
-                                <td style={styles.td}>{new Date(log.run_at).toLocaleString()}</td>
-                                <td style={styles.td}>{log.rule_name}</td>
-                                <td style={styles.td}>{log.status}</td>
-                                <td style={styles.td}>{formatDataWindow(log)}</td>
-                                <td style={styles.td} title={log.details ? JSON.stringify(log.details, null, 2) : ''}>{log.summary}</td>
-                            </tr>
+                           <React.Fragment key={log.id}>
+                                <tr onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                                    <td style={styles.td}>{new Date(log.run_at).toLocaleString()}</td>
+                                    <td style={styles.td}>{log.rule_name}</td>
+                                    <td style={styles.td}><span style={getStatusStyle(log.status)}>{log.status}</span></td>
+                                    <td style={styles.td}>{formatDataWindow(log)}</td>
+                                    <td style={styles.td}>{log.summary}</td>
+                                </tr>
+                                {expandedLogId === log.id && (
+                                    <tr>
+                                        <td colSpan={5} style={{ padding: '15px 25px', backgroundColor: '#f8f9fa' }}>
+                                            <h4 style={{ margin: '0 0 10px 0' }}>Execution Details</h4>
+                                            <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', backgroundColor: '#e9ecef', padding: '15px', borderRadius: '4px', maxHeight: '300px', overflowY: 'auto', fontSize: '0.8rem' }}>
+                                                {JSON.stringify(log.details, null, 2)}
+                                            </pre>
+                                        </td>
+                                    </tr>
+                                )}
+                            </React.Fragment>
                         ))}
                     </tbody>
                 </table>

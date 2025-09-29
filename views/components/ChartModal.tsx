@@ -114,16 +114,16 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
             yAxisID: 'y',
         }];
 
-        const hasSpData = historyData.some(d => d.sp_clicks !== null || d.sp_impressions !== null || d.sp_orders !== null);
+        const hasSpData = historyData.some(d => d.sp_clicks !== null && typeof d.sp_clicks === 'number');
 
         if (hasSpData) {
             datasets.push({
                 label: 'SP Clicks',
                 data: historyData.map(d => d.sp_clicks),
                 borderColor: '#28a745',
-                backgroundColor: 'rgba(40, 167, 69, 0.2)',
-                yAxisID: 'y1',
+                backgroundColor: 'rgba(40, 167, 69, 0.5)',
                 type: 'bar',
+                // Both datasets will now use the default 'y' axis
             });
         }
         
@@ -143,7 +143,7 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
                 type: 'linear' as const,
                 display: true,
                 position: 'left' as const,
-                title: { display: true, text: config.metricLabel },
+                title: { display: true, text: 'Value' },
                 ticks: {
                     callback: (value: any) => {
                         if (config.metricFormat === 'percent') return `${(value * 100).toFixed(1)}%`;
@@ -152,13 +152,8 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
                     }
                 }
             },
-            y1: {
-                type: 'linear' as const,
-                display: historyData.some(d => d.sp_clicks !== null), // Only display if there's data
-                position: 'right' as const,
-                title: { display: true, text: 'SP Clicks' },
-                grid: { drawOnChartArea: false },
-            },
+            // The second y-axis has been removed to fix the rendering crash.
+            // Both datasets will now render on the primary y-axis.
         },
     };
 

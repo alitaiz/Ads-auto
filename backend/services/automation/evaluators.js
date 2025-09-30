@@ -865,10 +865,10 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             targetingType: 'MANUAL',
                             state: 'ENABLED',
                             budget: {
-                                budget: action.newCampaignBudget,
+                                amount: action.newCampaignBudget,
                                 budgetType: 'DAILY'
                             },
-                            startDate: getLocalDateString('America/Los_Angeles').replace(/-/g, '')
+                            startDate: getLocalDateString('America/Los_Angeles')
                         };
                         try {
                             const campResponse = await amazonAdsApiRequest({
@@ -908,7 +908,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                 throw new Error(`Campaign creation failed: ${campResult?.description || campResult?.details || 'Unknown error'}`);
                             }
                         } catch (e) {
-                             console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, JSON.stringify(e.details || {}, null, 2));
+                             console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, e.details || e);
                              const apiErrorDetails = e.details ? (e.details.Message || e.details.message || e.details.details) : null; // Case-insensitive check
                              const errorMessage = (typeof apiErrorDetails === 'object' ? JSON.stringify(apiErrorDetails) : apiErrorDetails) || e.message || 'An unknown error occurred. See server logs for the raw error object.';
                              console.error(`[Harvesting] Error in CREATE_NEW_CAMPAIGN flow:`, errorMessage);

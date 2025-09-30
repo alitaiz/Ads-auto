@@ -855,19 +855,27 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
 
                 if (!throttledEntities.has(throttleKey)) {
                     if (action.type === 'CREATE_NEW_CAMPAIGN') {
-                        const campaignName = `[H] - ${entity.sourceAsin} - ${entity.entityText} - ${action.matchType}`;
+                        const maxNameLength = 128;
+                        const prefix = `[H] - ${entity.sourceAsin} - `;
+                        const suffix = ` - ${action.matchType}`;
+                        const maxSearchTermLength = maxNameLength - prefix.length - suffix.length;
+                        const truncatedSearchTerm = entity.entityText.length > maxSearchTermLength 
+                            ? entity.entityText.substring(0, maxSearchTermLength - 3) + '...' 
+                            : entity.entityText;
+                        const campaignName = `${prefix}${truncatedSearchTerm}${suffix}`;
                         
-                        // FIX: Corrected payload to match official SP-API v3 documentation for creating campaigns.
-                        // 'budget' and 'budgetType' are top-level properties.
-                        // 'startDate' must be in YYYYMMDD format.
+                        // FIX: Corrected payload to use a nested budget object.
                         const campaignPayload = {
                             name: campaignName,
                             targetingType: 'MANUAL',
                             state: 'ENABLED',
-                            budget: Number(action.newCampaignBudget ?? 10.00),
-                            budgetType: 'DAILY',
+                            budget: {
+                                budget: Number(action.newCampaignBudget ?? 10.00),
+                                budgetType: 'DAILY',
+                            },
                             startDate: getLocalDateString('America/Los_Angeles').replace(/-/g, ''),
                         };
+
                         try {
                             const campResponse = await amazonAdsApiRequest({
                                 method: 'post', url: '/sp/campaigns', profileId: rule.profile_id, data: { campaigns: [campaignPayload] },

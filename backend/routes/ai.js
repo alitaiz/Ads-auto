@@ -418,23 +418,6 @@ router.post('/ai/tool/search-query-performance', async (req, res) => {
 });
 
 
-const buildContextString = (context) => `
-Here is the data context for my question. Please analyze it before answering, paying close attention to the different date ranges for each data source.
-
-**Product Information:**
-- ASIN: ${context.productInfo.asin || 'Not provided'}
-- Sale Price: $${context.productInfo.salePrice || 'Not provided'}
-- Product Cost: $${context.productInfo.cost || 'Not provided'}
-- FBA Fee: $${context.productInfo.fbaFee || 'Not provided'}
-- Referral Fee: ${context.productInfo.referralFeePercent || '15'}%
-
-**Performance Data:**
-- Search Term Data (Date Range: ${context.performanceData.searchTermData?.dateRange?.startDate} to ${context.performanceData.searchTermData?.dateRange?.endDate}): ${JSON.stringify(context.performanceData.searchTermData?.data, null, 2) || 'Not provided'}
-- Stream Data (Date Range: ${context.performanceData.streamData?.dateRange?.startDate} to ${context.performanceData.streamData?.dateRange?.endDate}): ${JSON.stringify(context.performanceData.streamData?.data, null, 2) || 'Not provided'}
-- Sales & Traffic Data (Date Range: ${context.performanceData.salesTrafficData?.dateRange?.startDate} to ${context.performanceData.salesTrafficData?.dateRange?.endDate}): ${JSON.stringify(context.performanceData.salesTrafficData?.data, null, 2) || 'Not provided'}
-- Search Query Performance Data (Date Range: ${context.performanceData.searchQueryPerformanceData?.dateRange?.startDate} to ${context.performanceData.searchQueryPerformanceData?.dateRange?.endDate}): ${JSON.stringify(context.performanceData.searchQueryPerformanceData?.data, null, 2) || 'Not provided'}
-`;
-
 // --- Main Chat Endpoints ---
 
 router.post('/ai/chat', async (req, res) => {
@@ -446,25 +429,12 @@ router.post('/ai/chat', async (req, res) => {
     let client;
 
     try {
-        let { question, conversationId, context, dataParameters, profileId, provider } = req.body;
+        let { question, conversationId, context, profileId, provider } = req.body;
         
         if (!question) throw new Error('Question is required.');
         if (!profileId) throw new Error('Profile ID is required.');
 
         const systemInstruction = context.systemInstruction || 'You are an expert Amazon PPC Analyst.';
-        
-        // Fetch performance data on the server side
-        if (dataParameters) {
-            console.log('[AI Chat] Received data parameters, fetching data on server-side.');
-            context.performanceData = {
-                searchTermData: await fetchSearchTermDataForAI(dataParameters.asin, dataParameters.searchTermDateRange),
-                streamData: await fetchStreamDataForAI(dataParameters.asin, dataParameters.streamDateRange),
-                salesTrafficData: await fetchSalesTrafficDataForAI(dataParameters.asin, dataParameters.salesTrafficDateRange),
-                searchQueryPerformanceData: await fetchSqpDataForAI(dataParameters.asin, dataParameters.searchQueryPerformanceWeeks),
-            };
-        } else {
-             context.performanceData = {}; // Ensure it exists
-        }
         
         client = await pool.connect();
         let history = [];
@@ -494,11 +464,7 @@ router.post('/ai/chat', async (req, res) => {
             config: { systemInstruction }
         });
         
-        let currentMessage = (history.length === 0) 
-            ? `${buildContextString(context)}\n**My Initial Question:**\n${question}` 
-            : question;
-
-        const resultStream = await chat.sendMessageStream({ message: currentMessage });
+        const resultStream = await chat.sendMessageStream({ message: question });
 
         let fullResponseText = '';
         let firstChunk = true;
@@ -518,7 +484,7 @@ router.post('/ai/chat', async (req, res) => {
         
         const finalHistory = [
             ...history,
-            { role: 'user', parts: [{ text: currentMessage }] },
+            { role: 'user', parts: [{ text: question }] },
             { role: 'model', parts: [{ text: fullResponseText }] }
         ];
 
@@ -558,26 +524,14 @@ router.post('/ai/chat-gpt', async (req, res) => {
     let client;
 
     try {
-        let { question, conversationId, context, dataParameters, profileId, provider } = req.body;
+        let { question, conversationId, context, profileId, provider } = req.body;
         if (!question) throw new Error('Question is required.');
         if (!profileId) throw new Error('Profile ID is required.');
 
         const systemInstruction = context.systemInstruction || 'You are an expert Amazon PPC Analyst.';
         
-        if (dataParameters) {
-            console.log('[AI Chat] Received data parameters, fetching data on server-side for GPT.');
-            context.performanceData = {
-                searchTermData: await fetchSearchTermDataForAI(dataParameters.asin, dataParameters.searchTermDateRange),
-                streamData: await fetchStreamDataForAI(dataParameters.asin, dataParameters.streamDateRange),
-                salesTrafficData: await fetchSalesTrafficDataForAI(dataParameters.asin, dataParameters.salesTrafficDateRange),
-                searchQueryPerformanceData: await fetchSqpDataForAI(dataParameters.asin, dataParameters.searchQueryPerformanceWeeks),
-            };
-        } else {
-             context.performanceData = {};
-        }
-
         client = await pool.connect();
-        let history = [];
+        let history = []; // This will be in Gemini format from the DB
 
         if (conversationId) {
             const result = await client.query('SELECT history FROM ai_copilot_conversations WHERE id = $1 AND profile_id = $2', [conversationId, profileId]);
@@ -598,19 +552,16 @@ router.post('/ai/chat-gpt', async (req, res) => {
             newConversationId = result.rows[0].id;
         }
 
+        // Transform Gemini history format to OpenAI format
         const messages = [{ role: 'system', content: systemInstruction }];
-        if (history.length === 0) {
-            const contextMessage = `${buildContextString(context)}\n**My Initial Question:**\n${question}`;
-            messages.push({ role: 'user', content: contextMessage });
-        } else {
-            // OpenAI history format is slightly different from Gemini's
-            history.forEach(h => {
-                if (h.role === 'user' || h.role === 'assistant') {
-                    messages.push({ role: h.role, content: h.content || h.parts?.[0]?.text });
-                }
-            });
-            messages.push({ role: 'user', content: question });
-        }
+        history.forEach(h => {
+            if (h.role === 'user') {
+                messages.push({ role: 'user', content: h.parts?.[0]?.text || '' });
+            } else if (h.role === 'model') {
+                messages.push({ role: 'assistant', content: h.parts?.[0]?.text || '' });
+            }
+        });
+        messages.push({ role: 'user', content: question });
         
         const stream = await openai.chat.completions.create({
             model: 'gpt-4o',
@@ -634,10 +585,11 @@ router.post('/ai/chat-gpt', async (req, res) => {
             }
         }
 
+        // Save history back in the consistent Gemini format
         const finalHistory = [
             ...history,
-            { role: 'user', content: question },
-            { role: 'assistant', content: fullResponseText }
+            { role: 'user', parts: [{ text: question }] },
+            { role: 'model', parts: [{ text: fullResponseText }] }
         ];
         
         await client.query(
@@ -656,7 +608,6 @@ router.post('/ai/chat-gpt', async (req, res) => {
             return res.end();
         }
 
-        // OpenAI SDK errors often have a status property
         if (error.status) {
             switch (error.status) {
                 case 401:
@@ -670,7 +621,6 @@ router.post('/ai/chat-gpt', async (req, res) => {
                     userFriendlyMessage = "The OpenAI service is currently experiencing issues. Please try again in a few moments.";
                     break;
                 default:
-                    // Use the error message from OpenAI if available
                     userFriendlyMessage = error.message || `An error occurred with the AI service (Status: ${error.status}).`;
             }
         }

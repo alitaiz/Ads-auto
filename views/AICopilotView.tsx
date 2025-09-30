@@ -22,7 +22,8 @@ const styles: { [key: string]: React.CSSProperties } = {
     chatWindow: { flex: 1, padding: '20px', overflowY: 'auto', borderBottom: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column' },
     chatInputForm: { display: 'flex', padding: '10px', gap: '10px', alignItems: 'center' },
     chatInput: { flex: 1, padding: '10px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '1rem' },
-    sendButton: { padding: '10px 20px', backgroundColor: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', height: '44px', minWidth: '80px' },
+    sendButton: { padding: '10px 20px', backgroundColor: 'var(--primary-color)', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', height: '44px', minWidth: '80px', fontWeight: 600 },
+    secondaryButton: { padding: '10px 20px', backgroundColor: 'var(--primary-hover-color)', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', height: '44px', fontWeight: 600 },
     message: { marginBottom: '15px', padding: '10px 15px', borderRadius: '10px', maxWidth: '85%' },
     userMessage: { backgroundColor: '#e6f7ff', alignSelf: 'flex-end', borderBottomRightRadius: '0px' },
     aiMessage: { backgroundColor: '#f0f2f2', alignSelf: 'flex-start', borderBottomLeftRadius: '0px' },
@@ -178,6 +179,45 @@ Your Task:
 4. Briefly explain the logic of the rule you created above the code block.`
     }
 ];
+
+const CollapsibleDataContext = ({ contextData }: { contextData: string }) => {
+    const [isExpanded, setIsExpanded] = useState(false);
+
+    const toggleStyle: React.CSSProperties = {
+        cursor: 'pointer',
+        color: 'var(--primary-color)',
+        fontWeight: 500,
+        marginBottom: '10px',
+        display: 'inline-block',
+        border: '1px solid var(--border-color)',
+        padding: '5px 10px',
+        borderRadius: '4px',
+        backgroundColor: '#f8f9fa'
+    };
+    
+    const dataContainerStyle: React.CSSProperties = {
+        border: '1px dashed #ccc', 
+        padding: '10px', 
+        borderRadius: '4px', 
+        marginBottom: '10px',
+        backgroundColor: '#fafafa',
+        maxHeight: '400px',
+        overflowY: 'auto'
+    };
+
+    return (
+        <div>
+            <button type="button" onClick={() => setIsExpanded(!isExpanded)} style={toggleStyle}>
+                {isExpanded ? '▼ Hide' : '► Show'} Data Context
+            </button>
+            {isExpanded && (
+                <div style={dataContainerStyle}>
+                     <div dangerouslySetInnerHTML={{ __html: marked.parse(contextData) }} />
+                </div>
+            )}
+        </div>
+    );
+};
 
 
 export function AICopilotView() {
@@ -419,15 +459,39 @@ export function AICopilotView() {
         }
     };
 
-    const handleStartConversation = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!currentQuestion.trim() || !profileId) {
+    const buildContextString = useCallback(() => {
+        const { productInfo, loadedData } = aiCache;
+        const { searchTermData, streamData, salesTrafficData, searchQueryPerformanceData } = loadedData;
+        const formatData = (name: string, info: LoadedDataInfo) => {
+            if (!info || !info.data || info.data.length === 0) return `- ${name}: Not provided`;
+            const dateRange = info.dateRange ? `(Date Range: ${info.dateRange.startDate} to ${info.dateRange.endDate})` : '';
+            return `- ${name} ${dateRange}: \`\`\`json\n${JSON.stringify(info.data, null, 2)}\n\`\`\``;
+        };
+
+        return `
+Here is the data context for my question. Please analyze it before answering, paying close attention to the different date ranges for each data source.
+
+**Product Information:**
+- ASIN: ${productInfo.asin || 'Not provided'}
+- Sale Price: $${productInfo.salePrice || 'Not provided'}
+- Product Cost: $${productInfo.cost || 'Not provided'}
+- Total Amazon Fee: $${productInfo.fbaFee || 'Not provided'}
+
+**Performance Data:**
+${formatData('Search Term Report Data', searchTermData)}
+${formatData('Stream Data', streamData)}
+${formatData('Sales & Traffic Data', salesTrafficData)}
+${formatData('Search Query Performance Data', searchQueryPerformanceData)}
+`;
+    }, [aiCache]);
+
+    const sendMessageToServer = async (messageText: string) => {
+        if (!messageText.trim() || !profileId) {
             if (!profileId) alert("Please select a Profile in the PPC Management view first.");
             return;
         }
 
-        const questionToAsk = currentQuestion;
-        const newUserMessage: ChatMessage = { id: Date.now(), sender: 'user', text: questionToAsk };
+        const newUserMessage: ChatMessage = { id: Date.now(), sender: 'user', text: messageText };
         
         updateAiCache(prev => ({
             ...prev,
@@ -442,20 +506,12 @@ export function AICopilotView() {
         abortControllerRef.current = controller;
 
         try {
-            // Refactored payload: Send data parameters instead of raw data
             const payload = {
-                question: questionToAsk,
+                question: messageText, // The full message text is now the question
                 conversationId: aiCache.chat.conversationId,
                 context: {
-                    productInfo: aiCache.productInfo,
+                    // Context is now built into the question, but we still send system prompt
                     systemInstruction: aiCache.chat.systemInstruction,
-                },
-                dataParameters: {
-                    asin: aiCache.productInfo.asin,
-                    searchTermDateRange: aiCache.loadedData.searchTermData.data ? aiCache.loadedData.searchTermData.dateRange : null,
-                    streamDateRange: aiCache.loadedData.streamData.data ? aiCache.loadedData.streamData.dateRange : null,
-                    salesTrafficDateRange: aiCache.loadedData.salesTrafficData.data ? aiCache.loadedData.salesTrafficData.dateRange : null,
-                    searchQueryPerformanceWeeks: aiCache.loadedData.searchQueryPerformanceData.data ? selectedWeeks : null,
                 },
                 profileId,
                 provider: aiProvider,
@@ -539,6 +595,30 @@ export function AICopilotView() {
              abortControllerRef.current = null;
              setLoading(prev => ({...prev, chat: false}));
         }
+    };
+
+    const handleFormSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!currentQuestion.trim() || loading.chat) return;
+
+        const isFirstUserMessage = !aiCache.chat.messages.some(m => m.sender === 'user');
+
+        if (isFirstUserMessage) {
+            const contextString = buildContextString();
+            const fullMessage = `${contextString}\n**My Initial Question:**\n${currentQuestion}`;
+            sendMessageToServer(fullMessage);
+        } else {
+            sendMessageToServer(currentQuestion);
+        }
+    };
+
+    const handleUpdateAndAsk = (e: React.MouseEvent) => {
+        e.preventDefault();
+        if (!currentQuestion.trim() || loading.chat) return;
+        
+        const contextString = buildContextString();
+        const fullMessage = `${contextString}\n**Updated Context & Question:**\n${currentQuestion}`;
+        sendMessageToServer(fullMessage);
     };
 
     const handleNewChat = () => {
@@ -789,23 +869,32 @@ export function AICopilotView() {
             <div style={styles.rightPanel}>
                 <div style={styles.chatWindow}>
                     {aiCache.chat.messages.length === 0 && <p style={{textAlign: 'center', color: '#888'}}>Load data and ask a question to start your conversation.</p>}
-                    {aiCache.chat.messages.map(msg => (
-                        <div key={msg.id} style={{...styles.message, ...(msg.sender === 'user' ? styles.userMessage : styles.aiMessage)}}>
-                            {msg.sender === 'ai' && (
-                                <p style={styles.aiProviderName}>
-                                    {aiProvider}
-                                </p>
-                            )}
-                             <div dangerouslySetInnerHTML={{ __html: marked.parse(msg.text) }}></div>
-                        </div>
-                    ))}
+                    {aiCache.chat.messages.map((msg) => {
+                        const contextMarkerRegex = /\n\*\*(My Initial Question|Updated Context & Question):\*\*\n/;
+                        const textParts = msg.text.split(contextMarkerRegex);
+                        const hasContext = textParts.length === 3;
+
+                        return (
+                            <div key={msg.id} style={{...styles.message, ...(msg.sender === 'user' ? styles.userMessage : styles.aiMessage)}}>
+                                {msg.sender === 'ai' && <p style={styles.aiProviderName}>{aiProvider}</p>}
+                                {hasContext ? (
+                                    <>
+                                        <CollapsibleDataContext contextData={textParts[0]} />
+                                        <div dangerouslySetInnerHTML={{ __html: marked.parse(`**${textParts[1]}:**\n${textParts[2]}`) }} />
+                                    </>
+                                ) : (
+                                     <div dangerouslySetInnerHTML={{ __html: marked.parse(msg.text) }} />
+                                )}
+                            </div>
+                        );
+                    })}
                     {loading.chat && aiCache.chat.messages.length > 0 && aiCache.chat.messages[aiCache.chat.messages.length - 1].sender === 'user' && (
                         <div style={{...styles.message, ...styles.aiMessage}}><em style={{color: '#666'}}>AI is thinking...</em></div>
                     )}
                     {error.chat && <div style={{...styles.message, ...styles.aiMessage, backgroundColor: '#fdd', color: 'var(--danger-color)'}}>{error.chat}</div>}
                     <div ref={chatEndRef} />
                 </div>
-                <form style={styles.chatInputForm} onSubmit={handleStartConversation}>
+                <form style={styles.chatInputForm} onSubmit={handleFormSubmit}>
                     <input style={styles.chatInput} value={currentQuestion} onChange={e => setCurrentQuestion(e.target.value)} placeholder="Ask a question about the loaded data..." disabled={loading.chat} />
                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                         <select
@@ -818,6 +907,9 @@ export function AICopilotView() {
                            <option value="gemini">Gemini</option>
                            <option value="openai">ChatGPT</option>
                         </select>
+                        <button type="button" onClick={handleUpdateAndAsk} style={styles.secondaryButton} title="Send a new question with a fresh snapshot of all loaded data" disabled={loading.chat || !currentQuestion.trim()}>
+                            Update & Ask
+                        </button>
                         {loading.chat ? (
                             <button type="button" onClick={handleStopConversation} style={{...styles.sendButton, backgroundColor: 'var(--danger-color)'}}>
                                 Stop

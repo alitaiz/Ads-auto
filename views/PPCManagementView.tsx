@@ -131,7 +131,9 @@ const formatDateForQuery = (d: Date) => {
     return `${year}-${month}-${day}`;
 };
 
-const RuleEditModal = ({ isOpen, onClose, campaign, allRules, onSave }: { isOpen: boolean, onClose: () => void, campaign: {id: number; name: string; type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION'} | null, allRules: AutomationRule[], onSave: (campaignId: number, initialIds: Set<number>, newIds: Set<number>) => void }) => {
+type EditableRuleType = 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION' | 'SEARCH_TERM_HARVESTING';
+
+const RuleEditModal = ({ isOpen, onClose, campaign, allRules, onSave }: { isOpen: boolean, onClose: () => void, campaign: {id: number; name: string; type: EditableRuleType} | null, allRules: AutomationRule[], onSave: (campaignId: number, initialIds: Set<number>, newIds: Set<number>) => void }) => {
     if (!isOpen || !campaign) return null;
 
     const relevantRules = allRules.filter(r => r.rule_type === campaign.type);
@@ -158,7 +160,8 @@ const RuleEditModal = ({ isOpen, onClose, campaign, allRules, onSave }: { isOpen
     const ruleTypeName = {
         'BID_ADJUSTMENT': 'Bid Adjustment',
         'SEARCH_TERM_AUTOMATION': 'Search Term',
-        'BUDGET_ACCELERATION': 'Budget Acceleration'
+        'BUDGET_ACCELERATION': 'Budget Acceleration',
+        'SEARCH_TERM_HARVESTING': 'Search Term Harvesting'
     }[campaign.type];
 
     return (
@@ -222,11 +225,12 @@ export function PPCManagementView() {
 
     const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<number>>(new Set());
     const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
-    const [editingCampaign, setEditingCampaign] = useState<{id: number; name: string; type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION'} | null>(null);
+    const [editingCampaign, setEditingCampaign] = useState<{id: number; name: string; type: EditableRuleType} | null>(null);
 
     const [bulkAction, setBulkAction] = useState<'none' | 'add' | 'remove'>('none');
     const [bulkSelectedBidRules, setBulkSelectedBidRules] = useState<string[]>([]);
     const [bulkSelectedSearchTermRules, setBulkSelectedSearchTermRules] = useState<string[]>([]);
+    const [bulkSelectedHarvestingRules, setBulkSelectedHarvestingRules] = useState<string[]>([]);
     const [bulkSelectedBudgetRules, setBulkSelectedBudgetRules] = useState<string[]>([]);
 
 
@@ -613,9 +617,10 @@ export function PPCManagementView() {
     
     const bidAdjustmentRules = useMemo(() => profileFilteredRules.filter(r => r.rule_type === 'BID_ADJUSTMENT'), [profileFilteredRules]);
     const searchTermRules = useMemo(() => profileFilteredRules.filter(r => r.rule_type === 'SEARCH_TERM_AUTOMATION'), [profileFilteredRules]);
+    const searchTermHarvestingRules = useMemo(() => profileFilteredRules.filter(r => r.rule_type === 'SEARCH_TERM_HARVESTING'), [profileFilteredRules]);
     const budgetAccelerationRules = useMemo(() => profileFilteredRules.filter(r => r.rule_type === 'BUDGET_ACCELERATION'), [profileFilteredRules]);
 
-    const handleEditCampaignRules = (campaignId: number, ruleType: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION') => {
+    const handleEditCampaignRules = (campaignId: number, ruleType: EditableRuleType) => {
         const campaign = combinedCampaignData.find(c => c.campaignId === campaignId);
         if (campaign) {
             setEditingCampaign({ id: campaignId, name: campaign.name, type: ruleType });
@@ -628,7 +633,8 @@ export function PPCManagementView() {
         const updates: Promise<any>[] = [];
         const allRelevantRules = editingCampaign?.type === 'BID_ADJUSTMENT' ? bidAdjustmentRules : 
                                  editingCampaign?.type === 'SEARCH_TERM_AUTOMATION' ? searchTermRules :
-                                 budgetAccelerationRules;
+                                 editingCampaign?.type === 'BUDGET_ACCELERATION' ? budgetAccelerationRules :
+                                 searchTermHarvestingRules;
 
         for (const rule of allRelevantRules) {
             const wasSelected = initialRuleIds.has(rule.id);
@@ -664,7 +670,7 @@ export function PPCManagementView() {
     const handleBulkApplyRules = async () => {
         if (selectedCampaignIds.size === 0) return alert('Please select at least one campaign.');
         if (bulkAction === 'none') return alert('Please select a bulk action.');
-        const allSelectedRules = [...bulkSelectedBidRules, ...bulkSelectedSearchTermRules, ...bulkSelectedBudgetRules];
+        const allSelectedRules = [...bulkSelectedBidRules, ...bulkSelectedSearchTermRules, ...bulkSelectedHarvestingRules, ...bulkSelectedBudgetRules];
         if (allSelectedRules.length === 0) return alert('Please select at least one rule to apply.');
 
         setLoading(prev => ({ ...prev, rules: true }));
@@ -696,6 +702,7 @@ export function PPCManagementView() {
             setBulkAction('none');
             setBulkSelectedBidRules([]);
             setBulkSelectedSearchTermRules([]);
+            setBulkSelectedHarvestingRules([]);
             setBulkSelectedBudgetRules([]);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to apply rules in bulk.');
@@ -771,6 +778,12 @@ export function PPCManagementView() {
                                     <label style={{fontWeight:500}}>Search Term Rules:</label>
                                     <select multiple value={bulkSelectedSearchTermRules} onChange={e => setBulkSelectedSearchTermRules(Array.from(e.target.selectedOptions, option => option.value))} style={styles.multiSelect} disabled={loading.rules}>
                                         {searchTermRules.map(rule => (<option key={rule.id} value={rule.id}>{rule.name}</option>))}
+                                    </select>
+                                </div>
+                                 <div style={styles.controlGroup}>
+                                    <label style={{fontWeight:500}}>Harvesting Rules:</label>
+                                    <select multiple value={bulkSelectedHarvestingRules} onChange={e => setBulkSelectedHarvestingRules(Array.from(e.target.selectedOptions, option => option.value))} style={styles.multiSelect} disabled={loading.rules}>
+                                        {searchTermHarvestingRules.map(rule => (<option key={rule.id} value={rule.id}>{rule.name}</option>))}
                                     </select>
                                 </div>
                                 <div style={styles.controlGroup}>

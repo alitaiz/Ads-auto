@@ -79,7 +79,8 @@ const getDefaultHarvestingAction = (): AutomationRuleAction => ({
     type: 'CREATE_NEW_CAMPAIGN',
     matchType: 'EXACT',
     newCampaignBudget: 10,
-    bidOption: { type: 'CPC_MULTIPLIER', value: 1.15 }
+    bidOption: { type: 'CPC_MULTIPLIER', value: 1.15 },
+    autoNegate: true,
 });
 
 const getDefaultBidAdjustmentGroup = (): AutomationConditionGroup => ({
@@ -783,6 +784,23 @@ const SearchTermHarvestingActionForm = ({ action, onActionChange }: { action: Au
                 )}
             </div>
         </div>
-        <div style={{...styles.infoBox, gridColumn: '1 / -1'}}>ℹ️ The harvested search term will be automatically added as a Negative Exact in its original Ad Group to prevent spend overlap.</div>
+        
+        <div style={{ paddingTop: '20px', borderTop: '1px dashed #ccc' }}>
+            <div style={styles.formGroup}>
+                <label style={{...styles.label, display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer'}}>
+                    <input
+                        type="checkbox"
+                        style={{ transform: 'scale(1.2)' }}
+                        checked={action.autoNegate !== false} // Default to true if undefined
+                        onChange={e => onActionChange('autoNegate', e.target.checked)}
+                    />
+                    Automatic Negation
+                </label>
+            </div>
+        </div>
+
+        <div style={{...styles.infoBox, gridColumn: '1 / -1'}}>
+            ℹ️ When 'Automatic Negation' is enabled, the harvested term is added as a Negative Exact in its original Ad Group to prevent spend overlap. This is highly recommended.
+        </div>
     </div>
 );

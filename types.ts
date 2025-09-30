@@ -94,6 +94,7 @@ export interface AutomationRuleAction {
         type: 'CPC_MULTIPLIER' | 'CUSTOM_BID';
         value: number;
     };
+    autoNegate?: boolean;
 }
 
 // The structure of a single IF/THEN block within a rule.

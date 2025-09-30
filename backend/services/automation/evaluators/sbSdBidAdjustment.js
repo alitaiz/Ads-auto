@@ -1,5 +1,5 @@
 // backend/services/automation/evaluators/sbSdBidAdjustment.js
-import { amazonAdsApiRequest } from '../../helpers/amazon-api.js';
+import { amazonAdsApiRequest } from '../../../helpers/amazon-api.js';
 import { getLocalDateString, calculateMetricsForWindow, checkCondition } from '../utils.js';
 
 export const evaluateSbSdBidAdjustmentRule = async (rule, performanceData, throttledEntities) => {

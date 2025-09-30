@@ -1,6 +1,6 @@
 // backend/services/automation/evaluators/budgetAcceleration.js
-import pool from '../../db.js';
-import { amazonAdsApiRequest } from '../../helpers/amazon-api.js';
+import pool from '../../../db.js';
+import { amazonAdsApiRequest } from '../../../helpers/amazon-api.js';
 import { getLocalDateString, calculateMetricsForWindow, checkCondition } from '../utils.js';
 
 export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {

@@ -80,13 +80,13 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                         
                         const campaignPayload = {
                             name: campaignName,
-                            targetingType: 'manual',
+                            targetingType: 'MANUAL', // FIX: Uppercase enum value as required by v3 API
                             state: 'ENABLED',
                             budget: {
                                 budget: Number(action.newCampaignBudget ?? 10.00),
                                 budgetType: 'DAILY',
                             },
-                            startDate: getLocalDateString('America/Los_Angeles').replace(/-/g, ''),
+                            startDate: getLocalDateString('America/Los_Angeles'), // FIX: Use YYYY-MM-DD format
                         };
 
                         try {

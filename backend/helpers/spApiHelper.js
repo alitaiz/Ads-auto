@@ -73,6 +73,48 @@ export async function spApiRequest({ method, url, data, params }) {
 }
 
 /**
+ * Retrieves the Seller SKU for a given ASIN using the Catalog Items API.
+ * @param {string} asin The ASIN of the product.
+ * @returns {Promise<string|null>} The SKU, or null if not found.
+ */
+export async function getSkuByAsin(asin) {
+    const { SP_API_MARKETPLACE_ID } = process.env;
+    console.log(`[SP-API] Fetching SKU for ASIN: ${asin}`);
+    try {
+        const response = await spApiRequest({
+            method: 'get',
+            url: `/catalog/2022-04-01/items/${asin}`,
+            params: {
+                marketplaceIds: SP_API_MARKETPLACE_ID,
+                includedData: 'attributes',
+            }
+        });
+
+        // The 'seller_sku' attribute is typically found within the 'attributes' JSON object.
+        if (response.attributes && response.attributes.seller_sku && response.attributes.seller_sku.length > 0) {
+            const sku = response.attributes.seller_sku[0].value;
+            console.log(`[SP-API] Found SKU: ${sku} for ASIN: ${asin}`);
+            return sku;
+        }
+
+        console.warn(`[SP-API] Could not find 'seller_sku' in attributes for ASIN: ${asin}.`);
+        return null;
+
+    } catch (error) {
+        console.error(`[SP-API] Error fetching SKU for ASIN ${asin}:`, error);
+        let errorMessage = 'Failed to fetch catalog item.';
+        try {
+            const parsedError = JSON.parse(error.message);
+            errorMessage = parsedError[0]?.message || errorMessage;
+        } catch (e) {
+            errorMessage = error.message || errorMessage;
+        }
+        throw new Error(`Failed to retrieve SKU for ASIN ${asin}. Reason: ${errorMessage}`);
+    }
+}
+
+
+/**
  * Fetches listing information for a given SKU, including sellerId and current price.
  * This function has been made more robust by checking multiple locations for the price.
  * @param {string} sku The Seller SKU of the product.

@@ -1,5 +1,6 @@
 // backend/services/automation/evaluators/searchTermHarvesting.js
 import { amazonAdsApiRequest } from '../../../helpers/amazon-api.js';
+import { getSkuByAsin } from '../../../helpers/spApiHelper.js';
 import { getLocalDateString, calculateMetricsForWindow, checkCondition } from '../utils.js';
 
 export const evaluateSearchTermHarvestingRule = async (rule, performanceData, throttledEntities) => {
@@ -89,7 +90,13 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                     newAdGroupId = agSuccessResult.adGroupId;
                                     console.log(`[Harvesting] Created Ad Group ID: ${newAdGroupId}`);
                                     
-                                    const productAdPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', sku: entity.sourceAsin };
+                                    // CRITICAL STEP: Fetch the SKU using the ASIN before creating the product ad.
+                                    const retrievedSku = await getSkuByAsin(entity.sourceAsin);
+                                    if (!retrievedSku) {
+                                        throw new Error(`Could not find a valid SKU for ASIN ${entity.sourceAsin}. Cannot create product ad.`);
+                                    }
+
+                                    const productAdPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', sku: retrievedSku };
                                     const adResponse = await amazonAdsApiRequest({
                                         method: 'post', url: '/sp/productAds', profileId: rule.profile_id, data: { productAds: [productAdPayload] },
                                         headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json', 'Accept': 'application/vnd.spProductAd.v3+json' },
@@ -98,7 +105,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                     const adSuccessResult = adResponse?.productAds?.success?.[0];
 
                                     if(adSuccessResult && adSuccessResult.adId) {
-                                        console.log(`[Harvesting] Created Product Ad for ASIN ${entity.sourceAsin}`);
+                                        console.log(`[Harvesting] Created Product Ad for SKU ${retrievedSku}`);
                                         harvestSuccess = true;
                                     } else {
                                         const adError = adResponse?.productAds?.error?.[0];

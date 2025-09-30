@@ -475,59 +475,6 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
         return {};
     });
 
-    const [spCampaigns, setSpCampaigns] = useState<Campaign[]>([]);
-    const [adGroups, setAdGroups] = useState<AdGroup[]>([]);
-    const [isLoadingCampaigns, setIsLoadingCampaigns] = useState(false);
-    const [isLoadingAdGroups, setIsLoadingAdGroups] = useState(false);
-
-    useEffect(() => {
-        if (formData.rule_type === 'SEARCH_TERM_HARVESTING') {
-            const fetchCampaigns = async () => {
-                setIsLoadingCampaigns(true);
-                const profileId = localStorage.getItem('selectedProfileId');
-                if (!profileId) { setIsLoadingCampaigns(false); return; }
-
-                try {
-                    const response = await fetch('/api/amazon/campaigns/list', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ profileId, stateFilter: ["ENABLED"] }),
-                    });
-                    const data = await response.json();
-                    const spCamps = data.campaigns.filter((c: Campaign) => c.campaignType === 'sponsoredProducts');
-                    setSpCampaigns(spCamps);
-                } catch (e) { console.error("Failed to fetch campaigns", e); } 
-                finally { setIsLoadingCampaigns(false); }
-            };
-            fetchCampaigns();
-        }
-    }, [formData.rule_type]);
-
-    useEffect(() => {
-        const targetCampaignId = formData.config?.conditionGroups?.[0]?.action?.targetCampaignId;
-        if (formData.rule_type === 'SEARCH_TERM_HARVESTING' && targetCampaignId) {
-            const fetchAdGroups = async () => {
-                setIsLoadingAdGroups(true);
-                setAdGroups([]);
-                const profileId = localStorage.getItem('selectedProfileId');
-                if (!profileId) { setIsLoadingAdGroups(false); return; }
-
-                try {
-                    const response = await fetch(`/api/amazon/campaigns/${targetCampaignId}/adgroups`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ profileId }),
-                    });
-                    const data = await response.json();
-                    setAdGroups(data.adGroups || []);
-                } catch (e) { console.error("Failed to fetch ad groups", e); }
-                finally { setIsLoadingAdGroups(false); }
-            };
-            fetchAdGroups();
-        }
-    }, [formData.rule_type, formData.config?.conditionGroups?.[0]?.action?.targetCampaignId]);
-
-
     useEffect(() => {
         if (formData.config?.conditionGroups) {
             let needsUpdate = false;
@@ -735,7 +682,7 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
                                                 {rule_type === 'BID_ADJUSTMENT' && <BidAdjustmentActionForm action={group.action} onActionChange={(f,v) => handleActionChange(groupIndex, f, v)} />}
                                                 {rule_type === 'SEARCH_TERM_AUTOMATION' && <SearchTermNegationActionForm action={group.action} onActionChange={(f,v) => handleActionChange(groupIndex, f, v)} />}
                                                 {rule_type === 'BUDGET_ACCELERATION' && <BudgetAccelerationActionForm action={group.action} onActionChange={(f,v) => handleActionChange(groupIndex, f, v)} />}
-                                                {rule_type === 'SEARCH_TERM_HARVESTING' && <SearchTermHarvestingActionForm action={group.action} onActionChange={(f,v) => handleActionChange(groupIndex, f, v)} spCampaigns={spCampaigns} adGroups={adGroups} isLoadingCampaigns={isLoadingCampaigns} isLoadingAdGroups={isLoadingAdGroups} />}
+                                                {rule_type === 'SEARCH_TERM_HARVESTING' && <SearchTermHarvestingActionForm action={group.action} onActionChange={(f,v) => handleActionChange(groupIndex, f, v)} />}
                                              </div>
                                         </div>
                                        {groupIndex < formData.config!.conditionGroups!.length - 1 && <div style={{textAlign: 'center', margin: '15px 0', fontWeight: 'bold', color: '#555'}}>OR</div>}
@@ -787,7 +734,7 @@ const BudgetAccelerationActionForm = ({ action, onActionChange }: { action: Auto
     </div>
 );
 
-const SearchTermHarvestingActionForm = ({ action, onActionChange, spCampaigns, adGroups, isLoadingCampaigns, isLoadingAdGroups }: { action: AutomationRuleAction, onActionChange: (field: string, value: any) => void, spCampaigns: Campaign[], adGroups: AdGroup[], isLoadingCampaigns: boolean, isLoadingAdGroups: boolean }) => (
+const SearchTermHarvestingActionForm = ({ action, onActionChange }: { action: AutomationRuleAction, onActionChange: (field: string, value: any) => void }) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
         <div style={styles.formGroup}><label style={styles.label}>Action</label><div style={styles.radioGroup}>
             <label><input type="radio" value="CREATE_NEW_CAMPAIGN" checked={action.type === 'CREATE_NEW_CAMPAIGN'} onChange={e => onActionChange('type', e.target.value)} /> Create a new campaign</label>
@@ -800,8 +747,26 @@ const SearchTermHarvestingActionForm = ({ action, onActionChange, spCampaigns, a
         </div>}
         
         {action.type === 'ADD_TO_EXISTING_CAMPAIGN' && <div style={{...styles.thenGrid, gridTemplateColumns: '1fr 1fr'}}>
-            <div style={styles.formGroup}><label style={styles.label}>Target Campaign</label><select style={styles.conditionInput} value={action.targetCampaignId ?? ''} onChange={e => onActionChange('targetCampaignId', e.target.value)} disabled={isLoadingCampaigns}>{isLoadingCampaigns ? <option>Loading...</option> : <><option value="">Select a campaign...</option>{spCampaigns.map(c => <option key={c.campaignId} value={c.campaignId}>{c.name}</option>)}</>}</select></div>
-            <div style={styles.formGroup}><label style={styles.label}>Target Ad Group</label><select style={styles.conditionInput} value={action.targetAdGroupId ?? ''} onChange={e => onActionChange('targetAdGroupId', e.target.value)} disabled={isLoadingAdGroups || !action.targetCampaignId}>{isLoadingAdGroups ? <option>Loading...</option> : <><option value="">Select an ad group...</option>{adGroups.map(ag => <option key={ag.adGroupId} value={ag.adGroupId}>{ag.name}</option>)}</>}</select></div>
+            <div style={styles.formGroup}>
+                <label style={styles.label}>Target Campaign</label>
+                <input
+                    type="text"
+                    style={styles.conditionInput}
+                    value={action.targetCampaignId ?? ''}
+                    onChange={e => onActionChange('targetCampaignId', e.target.value)}
+                    placeholder="Enter exact campaign name"
+                />
+            </div>
+            <div style={styles.formGroup}>
+                <label style={styles.label}>Target Ad Group</label>
+                <input
+                    type="text"
+                    style={styles.conditionInput}
+                    value={action.targetAdGroupId ?? ''}
+                    onChange={e => onActionChange('targetAdGroupId', e.target.value)}
+                    placeholder="Enter exact ad group name"
+                />
+            </div>
         </div>}
 
         <div style={{ paddingTop: '20px', borderTop: '1px dashed #ccc' }}>
@@ -811,6 +776,11 @@ const SearchTermHarvestingActionForm = ({ action, onActionChange, spCampaigns, a
             </div></div>
             <div style={{...styles.formGroup, marginTop: '10px'}}>
                 <input type="number" step="0.01" min="0" style={{...styles.conditionInput, width: '200px'}} placeholder={action.bidOption?.type === 'CPC_MULTIPLIER' ? "e.g., 1.15 for +15%" : "e.g., 0.75"} value={action.bidOption?.value ?? ''} onChange={e => onActionChange('bidOption.value', Number(e.target.value))} />
+                {action.bidOption?.type === 'CPC_MULTIPLIER' && (
+                    <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>
+                        hệ số nhân (ví dụ: <code style={{backgroundColor: '#e9ecef', padding: '2px 4px', borderRadius: '3px'}}>1.15</code> để đặt giá thầu cao hơn 15% so với CPC)
+                    </p>
+                )}
             </div>
         </div>
         <div style={{...styles.infoBox, gridColumn: '1 / -1'}}>ℹ️ The harvested search term will be automatically added as a Negative Exact in its original Ad Group to prevent spend overlap.</div>

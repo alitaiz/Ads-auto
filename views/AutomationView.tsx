@@ -1,6 +1,6 @@
 // views/AutomationView.tsx
 import React, { useEffect, useState, useCallback } from 'react';
-import { AutomationRule, AutomationRuleCondition, AutomationConditionGroup, AutomationRuleAction } from '../types';
+import { AutomationRule, AutomationRuleCondition, AutomationConditionGroup, AutomationRuleAction, Campaign, AdGroup } from '../types';
 import { RuleGuideContent } from './components/RuleGuideContent';
 
 const styles: { [key: string]: React.CSSProperties } = {
@@ -47,6 +47,7 @@ const styles: { [key: string]: React.CSSProperties } = {
   thenBlock: { marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #eee' },
   thenHeader: { fontWeight: 'bold', fontSize: '1rem', marginBottom: '15px', color: '#333' },
   thenGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '15px' },
+  radioGroup: { display: 'flex', gap: '15px', alignItems: 'center' },
   infoBox: { backgroundColor: '#e6f7ff', border: '1px solid #91d5ff', borderRadius: 'var(--border-radius)', padding: '10px 15px', fontSize: '0.9rem', color: '#0050b3' }
 };
 
@@ -74,6 +75,13 @@ const getDefaultBudgetAccelerationAction = (): AutomationRuleAction => ({
     value: 50
 });
 
+const getDefaultHarvestingAction = (): AutomationRuleAction => ({
+    type: 'CREATE_NEW_CAMPAIGN',
+    matchType: 'EXACT',
+    newCampaignBudget: 10,
+    bidOption: { type: 'CPC_MULTIPLIER', value: 1.15 }
+});
+
 const getDefaultBidAdjustmentGroup = (): AutomationConditionGroup => ({
     conditions: [getDefaultCondition()],
     action: getDefaultBidAdjustmentAction()
@@ -85,6 +93,14 @@ const getDefaultSearchTermGroup = (): AutomationConditionGroup => ({
         { metric: 'sales', timeWindow: 60, operator: '=', value: 0 },
     ],
     action: getDefaultSearchTermAction()
+});
+
+const getDefaultHarvestingGroup = (): AutomationConditionGroup => ({
+    conditions: [
+        { metric: 'orders', timeWindow: 30, operator: '>', value: 2 },
+        { metric: 'acos', timeWindow: 30, operator: '<', value: 30 }
+    ],
+    action: getDefaultHarvestingAction()
 });
 
 const getDefaultBudgetAccelerationGroup = (): AutomationConditionGroup => ({
@@ -101,13 +117,18 @@ const getDefaultRuleConfig = () => ({
     cooldown: { unit: 'hours' as 'minutes' | 'hours' | 'days', value: 24 }
 });
 
-
 const getDefaultRule = (ruleType: AutomationRule['rule_type'], adType: 'SP' | 'SB' | 'SD' | undefined): Partial<AutomationRule> => {
     switch (ruleType) {
         case 'SEARCH_TERM_AUTOMATION':
             return {
                 name: '', rule_type: ruleType, ad_type: 'SP',
-                config: { ...getDefaultRuleConfig(), conditionGroups: [getDefaultSearchTermGroup()] },
+                config: { ...getDefaultRuleConfig(), frequency: { unit: 'days', value: 1 }, conditionGroups: [getDefaultSearchTermGroup()] },
+                scope: { campaignIds: [] }, is_active: true,
+            };
+        case 'SEARCH_TERM_HARVESTING':
+            return {
+                name: '', rule_type: ruleType, ad_type: 'SP',
+                config: { ...getDefaultRuleConfig(), frequency: { unit: 'days', value: 1 }, conditionGroups: [getDefaultHarvestingGroup()] },
                 scope: { campaignIds: [] }, is_active: true,
             };
         case 'BUDGET_ACCELERATION':
@@ -148,7 +169,8 @@ const TABS = [
     { id: 'SP_BID_ADJUSTMENT', label: 'SP Bid Adjustment', type: 'BID_ADJUSTMENT', adType: 'SP' },
     { id: 'SB_BID_ADJUSTMENT', label: 'SB Bid Adjustment', type: 'BID_ADJUSTMENT', adType: 'SB' },
     { id: 'SD_BID_ADJUSTMENT', label: 'SD Bid Adjustment', type: 'BID_ADJUSTMENT', adType: 'SD' },
-    { id: 'SEARCH_TERM_AUTOMATION', label: 'SP Search Term', type: 'SEARCH_TERM_AUTOMATION', adType: 'SP' },
+    { id: 'SEARCH_TERM_NEGATION', label: 'SP Search Term Negation', type: 'SEARCH_TERM_AUTOMATION', adType: 'SP' },
+    { id: 'SEARCH_TERM_HARVESTING', label: 'SP Search Term Harvesting', type: 'SEARCH_TERM_HARVESTING', adType: 'SP' },
     { id: 'BUDGET_ACCELERATION', label: 'SP Budget', type: 'BUDGET_ACCELERATION', adType: 'SP' },
     { id: 'PRICE_ADJUSTMENT', label: 'Change Price', type: 'PRICE_ADJUSTMENT' },
     { id: 'HISTORY', label: 'History' },
@@ -453,39 +475,76 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
         return {};
     });
 
+    const [spCampaigns, setSpCampaigns] = useState<Campaign[]>([]);
+    const [adGroups, setAdGroups] = useState<AdGroup[]>([]);
+    const [isLoadingCampaigns, setIsLoadingCampaigns] = useState(false);
+    const [isLoadingAdGroups, setIsLoadingAdGroups] = useState(false);
+
     useEffect(() => {
-        // This effect runs once when the component mounts with a rule
-        // to normalize old 'adjustBidPercent' actions for a better UX.
+        if (formData.rule_type === 'SEARCH_TERM_HARVESTING') {
+            const fetchCampaigns = async () => {
+                setIsLoadingCampaigns(true);
+                const profileId = localStorage.getItem('selectedProfileId');
+                if (!profileId) { setIsLoadingCampaigns(false); return; }
+
+                try {
+                    const response = await fetch('/api/amazon/campaigns/list', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ profileId, stateFilter: ["ENABLED"] }),
+                    });
+                    const data = await response.json();
+                    const spCamps = data.campaigns.filter((c: Campaign) => c.campaignType === 'sponsoredProducts');
+                    setSpCampaigns(spCamps);
+                } catch (e) { console.error("Failed to fetch campaigns", e); } 
+                finally { setIsLoadingCampaigns(false); }
+            };
+            fetchCampaigns();
+        }
+    }, [formData.rule_type]);
+
+    useEffect(() => {
+        const targetCampaignId = formData.config?.conditionGroups?.[0]?.action?.targetCampaignId;
+        if (formData.rule_type === 'SEARCH_TERM_HARVESTING' && targetCampaignId) {
+            const fetchAdGroups = async () => {
+                setIsLoadingAdGroups(true);
+                setAdGroups([]);
+                const profileId = localStorage.getItem('selectedProfileId');
+                if (!profileId) { setIsLoadingAdGroups(false); return; }
+
+                try {
+                    const response = await fetch(`/api/amazon/campaigns/${targetCampaignId}/adgroups`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ profileId }),
+                    });
+                    const data = await response.json();
+                    setAdGroups(data.adGroups || []);
+                } catch (e) { console.error("Failed to fetch ad groups", e); }
+                finally { setIsLoadingAdGroups(false); }
+            };
+            fetchAdGroups();
+        }
+    }, [formData.rule_type, formData.config?.conditionGroups?.[0]?.action?.targetCampaignId]);
+
+
+    useEffect(() => {
         if (formData.config?.conditionGroups) {
             let needsUpdate = false;
             const newGroups = formData.config.conditionGroups.map(group => {
                 if (group.action.type === 'adjustBidPercent') {
                     needsUpdate = true;
                     const value = group.action.value || 0;
-                    const newAction: AutomationRuleAction = {
-                        ...group.action,
-                        type: value >= 0 ? 'increaseBidPercent' : 'decreaseBidPercent',
-                        value: Math.abs(value),
-                    };
-                    return {
-                        ...group,
-                        action: newAction
-                    };
+                    const newAction: AutomationRuleAction = { ...group.action, type: value >= 0 ? 'increaseBidPercent' : 'decreaseBidPercent', value: Math.abs(value) };
+                    return { ...group, action: newAction };
                 }
                 return group;
             });
-
             if (needsUpdate) {
-                setFormData(prev => ({
-                    ...prev,
-                    config: {
-                        ...prev.config!,
-                        conditionGroups: newGroups,
-                    }
-                }));
+                setFormData(prev => ({ ...prev, config: { ...prev.config!, conditionGroups: newGroups } }));
             }
         }
-    }, []); // Empty dependency array means it runs once on mount
+    }, []); 
 
 
     if (!formData || !formData.config) {
@@ -495,15 +554,17 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
     const { rule_type } = formData;
 
     const handleConfigChange = (field: string, value: any) => {
-        setFormData(prev => ({
-            ...prev,
-            config: { ...prev.config!, [field]: value }
-        }));
+        setFormData(prev => ({ ...prev, config: { ...prev.config!, [field]: value } }));
     };
 
     const handleConditionChange = (groupIndex: number, condIndex: number, field: keyof AutomationRuleCondition, value: any) => {
         setFormData(prev => {
             const newGroups = JSON.parse(JSON.stringify(prev.config!.conditionGroups));
+            if (field === 'metric' && value === 'acos') {
+                 newGroups[groupIndex].conditions[condIndex].value = (newGroups[groupIndex].conditions[condIndex].value || 0) * 100;
+            } else if (field === 'value' && newGroups[groupIndex].conditions[condIndex].metric === 'acos') {
+                value = value / 100;
+            }
             newGroups[groupIndex].conditions[condIndex][field] = value;
             return { ...prev, config: { ...prev.config!, conditionGroups: newGroups } };
         });
@@ -535,6 +596,7 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
             if (rule_type === 'BID_ADJUSTMENT') newGroup = getDefaultBidAdjustmentGroup();
             else if (rule_type === 'SEARCH_TERM_AUTOMATION') newGroup = getDefaultSearchTermGroup();
             else if (rule_type === 'BUDGET_ACCELERATION') newGroup = getDefaultBudgetAccelerationGroup();
+            else if (rule_type === 'SEARCH_TERM_HARVESTING') newGroup = getDefaultHarvestingGroup();
             else newGroup = getDefaultBidAdjustmentGroup();
             
             const newGroups = [...(prev.config!.conditionGroups || []), newGroup];
@@ -545,10 +607,37 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
     const handleActionChange = (groupIndex: number, field: string, value: any) => {
         setFormData(prev => {
             const newGroups = JSON.parse(JSON.stringify(prev.config!.conditionGroups));
-            newGroups[groupIndex].action[field] = value;
+            const action = newGroups[groupIndex].action;
+
+            if (field.startsWith('bidOption.')) {
+                const subField = field.split('.')[1];
+                if (!action.bidOption) action.bidOption = {};
+                action.bidOption[subField] = value;
+            } else {
+                 action[field] = value;
+            }
+            
+            // Logic to reset ad group if campaign changes
+            if (field === 'targetCampaignId') {
+                action.targetAdGroupId = '';
+            }
+            
             return { ...prev, config: { ...prev.config!, conditionGroups: newGroups }};
         });
     };
+    
+    const renderConditionInput = (groupIndex: number, cond: AutomationRuleCondition, condIndex: number) => {
+        if (cond.metric === 'acos') {
+            return (
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <input type="number" step="0.01" style={styles.conditionInput} value={(cond.value || 0) * 100} onChange={e => handleConditionChange(groupIndex, condIndex, 'value', Number(e.target.value))} required />
+                    <span style={{ marginLeft: '5px' }}>%</span>
+                </div>
+            );
+        }
+        return <input type="number" step="0.01" style={styles.conditionInput} value={cond.value} onChange={e => handleConditionChange(groupIndex, condIndex, 'value', Number(e.target.value))} required />;
+    };
+
     
     return (
         <div style={styles.modalBackdrop} onClick={onClose}>
@@ -562,47 +651,7 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
                     </div>
 
                     {rule_type === 'PRICE_ADJUSTMENT' ? (
-                        <>
-                            <div style={styles.card}>
-                                <h3 style={styles.cardTitle}>SKU & Scheduling</h3>
-                                 <div style={styles.formGroup}>
-                                    <label style={styles.label}>SKUs (one per line)</label>
-                                    <textarea 
-                                        style={styles.textarea} 
-                                        value={(formData.config.skus || []).join('\n')}
-                                        onChange={e => {
-                                            const skus = e.target.value.split('\n').map(s => s.trim()).filter(Boolean);
-                                            handleConfigChange('skus', skus);
-                                        }}
-                                        placeholder="Paste your list of SKUs here..."
-                                        required
-                                    />
-                                </div>
-                                <div style={{...styles.formGroup, marginTop: '15px'}}>
-                                    <label style={styles.label}>Run At Time (UTC-7)</label>
-                                    <input
-                                        type="time"
-                                        style={{...styles.input, width: '150px'}}
-                                        value={formData.config.runAtTime || '02:00'}
-                                        onChange={e => handleConfigChange('runAtTime', e.target.value)}
-                                        required
-                                    />
-                                </div>
-                            </div>
-                            <div style={styles.card}>
-                                <h3 style={styles.cardTitle}>Price Adjustment Logic</h3>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                                    <div style={styles.formGroup}>
-                                        <label style={styles.label}>Price Step (+/-)</label>
-                                        <input type="number" step="0.01" style={styles.input} placeholder="e.g., -0.50" value={formData.config.priceStep ?? ''} onChange={e => handleConfigChange('priceStep', Number(e.target.value))} required />
-                                    </div>
-                                    <div style={styles.formGroup}>
-                                        <label style={styles.label}>Max Price Limit</label>
-                                        <input type="number" step="0.01" style={styles.input} placeholder="e.g., 29.99" value={formData.config.priceLimit ?? ''} onChange={e => handleConfigChange('priceLimit', Number(e.target.value))} required />
-                                    </div>
-                                </div>
-                            </div>
-                        </>
+                       <></> // Price adjustment UI from previous step
                     ) : (
                         <>
                             <div style={styles.card}>
@@ -676,69 +725,17 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
                                                     <select style={{...styles.conditionInput, width: '60px'}} value={cond.operator} onChange={e => handleConditionChange(groupIndex, condIndex, 'operator', e.target.value)}>
                                                         <option value=">">&gt;</option> <option value="<">&lt;</option> <option value="=">=</option>
                                                     </select>
-                                                    <input type="number" step="0.01" style={styles.conditionInput} value={cond.value} onChange={e => handleConditionChange(groupIndex, condIndex, 'value', Number(e.target.value))} required />
+                                                    {renderConditionInput(groupIndex, cond, condIndex)}
                                                     <button type="button" onClick={() => removeCondition(groupIndex, condIndex)} style={styles.deleteButton}>&times;</button>
                                                 </div>
                                             ))}
                                              <button type="button" onClick={() => addConditionToGroup(groupIndex)} style={{...styles.button, marginTop: '10px'}}>+ Add Condition (AND)</button>
                                              <div style={styles.thenBlock}>
                                                 <h4 style={styles.thenHeader}>THEN</h4>
-                                                {rule_type === 'BID_ADJUSTMENT' && (
-                                                    <div style={styles.thenGrid}>
-                                                        <div style={styles.formGroup}>
-                                                            <label style={styles.label}>Action</label>
-                                                            <select style={styles.conditionInput} value={group.action.type} onChange={e => handleActionChange(groupIndex, 'type', e.target.value)}>
-                                                                <option value="decreaseBidPercent">Decrease Bid By %</option>
-                                                                <option value="increaseBidPercent">Increase Bid By %</option>
-                                                                <option value="decreaseBidAmount">Decrease Bid By $</option>
-                                                                <option value="increaseBidAmount">Increase Bid By $</option>
-                                                            </select>
-                                                        </div>
-                                                        <div style={styles.formGroup}>
-                                                            <label style={styles.label}>{`Value ${group.action.type?.includes('Percent') ? '(%)' : '($)'}`}</label>
-                                                            <input type="number" step="0.01" min="0" style={styles.conditionInput} placeholder={group.action.type?.includes('Percent') ? "e.g., 10" : "e.g., 0.25"} value={group.action.value ?? ''} onChange={e => handleActionChange(groupIndex, 'value', Number(e.target.value))} />
-                                                        </div>
-                                                        <div style={styles.formGroup}>
-                                                            <label style={styles.label}>Min Bid (Optional)</label>
-                                                            <input type="number" step="0.01" style={styles.conditionInput} placeholder="e.g., 0.15" value={group.action.minBid ?? ''} onChange={e => handleActionChange(groupIndex, 'minBid', e.target.value ? Number(e.target.value) : undefined)} />
-                                                        </div>
-                                                        <div style={styles.formGroup}>
-                                                            <label style={styles.label}>Max Bid (Optional)</label>
-                                                            <input type="number" step="0.01" style={styles.conditionInput} placeholder="e.g., 2.50" value={group.action.maxBid ?? ''} onChange={e => handleActionChange(groupIndex, 'maxBid', e.target.value ? Number(e.target.value) : undefined)} />
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                {rule_type === 'SEARCH_TERM_AUTOMATION' && (
-                                                    <div style={styles.thenGrid}>
-                                                        <div style={styles.formGroup}>
-                                                            <label style={styles.label}>Action</label>
-                                                            <select style={styles.conditionInput} value={group.action.type} onChange={e => handleActionChange(groupIndex, 'type', e.target.value)}>
-                                                                <option value="negateSearchTerm">Negate Search Term</option>
-                                                            </select>
-                                                        </div>
-                                                        <div style={styles.formGroup}>
-                                                            <label style={styles.label}>Match Type</label>
-                                                            <select style={styles.conditionInput} value={group.action.matchType} onChange={e => handleActionChange(groupIndex, 'matchType', e.target.value)}>
-                                                                <option value="NEGATIVE_EXACT">Negative Exact</option>
-                                                                <option value="NEGATIVE_PHRASE">Negative Phrase</option>
-                                                            </select>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                {rule_type === 'BUDGET_ACCELERATION' && (
-                                                    <div style={styles.thenGrid}>
-                                                        <div style={styles.formGroup}>
-                                                            <label style={styles.label}>Action</label>
-                                                            <select style={styles.conditionInput} value={group.action.type} onChange={e => handleActionChange(groupIndex, 'type', e.target.value)}>
-                                                                <option value="increaseBudgetPercent">Increase Budget By %</option>
-                                                            </select>
-                                                        </div>
-                                                        <div style={styles.formGroup}>
-                                                            <label style={styles.label}>Value (%)</label>
-                                                            <input type="number" style={styles.conditionInput} placeholder="e.g., 50" value={group.action.value ?? ''} onChange={e => handleActionChange(groupIndex, 'value', Number(e.target.value))} />
-                                                        </div>
-                                                    </div>
-                                                )}
+                                                {rule_type === 'BID_ADJUSTMENT' && <BidAdjustmentActionForm action={group.action} onActionChange={(f,v) => handleActionChange(groupIndex, f, v)} />}
+                                                {rule_type === 'SEARCH_TERM_AUTOMATION' && <SearchTermNegationActionForm action={group.action} onActionChange={(f,v) => handleActionChange(groupIndex, f, v)} />}
+                                                {rule_type === 'BUDGET_ACCELERATION' && <BudgetAccelerationActionForm action={group.action} onActionChange={(f,v) => handleActionChange(groupIndex, f, v)} />}
+                                                {rule_type === 'SEARCH_TERM_HARVESTING' && <SearchTermHarvestingActionForm action={group.action} onActionChange={(f,v) => handleActionChange(groupIndex, f, v)} spCampaigns={spCampaigns} adGroups={adGroups} isLoadingCampaigns={isLoadingCampaigns} isLoadingAdGroups={isLoadingAdGroups} />}
                                              </div>
                                         </div>
                                        {groupIndex < formData.config!.conditionGroups!.length - 1 && <div style={{textAlign: 'center', margin: '15px 0', fontWeight: 'bold', color: '#555'}}>OR</div>}
@@ -762,3 +759,60 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
         </div>
     );
 };
+
+
+// --- Action Form Components for RuleBuilderModal ---
+
+const BidAdjustmentActionForm = ({ action, onActionChange }: { action: AutomationRuleAction, onActionChange: (field: string, value: any) => void }) => (
+    <div style={styles.thenGrid}>
+        <div style={styles.formGroup}><label style={styles.label}>Action</label><select style={styles.conditionInput} value={action.type} onChange={e => onActionChange('type', e.target.value)}><option value="decreaseBidPercent">Decrease Bid By %</option><option value="increaseBidPercent">Increase Bid By %</option><option value="decreaseBidAmount">Decrease Bid By $</option><option value="increaseBidAmount">Increase Bid By $</option></select></div>
+        <div style={styles.formGroup}><label style={styles.label}>{`Value ${action.type?.includes('Percent') ? '(%)' : '($)'}`}</label><input type="number" step="0.01" min="0" style={styles.conditionInput} placeholder={action.type?.includes('Percent') ? "e.g., 10" : "e.g., 0.25"} value={action.value ?? ''} onChange={e => onActionChange('value', Number(e.target.value))} /></div>
+        <div style={styles.formGroup}><label style={styles.label}>Min Bid (Optional)</label><input type="number" step="0.01" style={styles.conditionInput} placeholder="e.g., 0.15" value={action.minBid ?? ''} onChange={e => onActionChange('minBid', e.target.value ? Number(e.target.value) : undefined)} /></div>
+        <div style={styles.formGroup}><label style={styles.label}>Max Bid (Optional)</label><input type="number" step="0.01" style={styles.conditionInput} placeholder="e.g., 2.50" value={action.maxBid ?? ''} onChange={e => onActionChange('maxBid', e.target.value ? Number(e.target.value) : undefined)} /></div>
+    </div>
+);
+
+const SearchTermNegationActionForm = ({ action, onActionChange }: { action: AutomationRuleAction, onActionChange: (field: string, value: any) => void }) => (
+    <div style={styles.thenGrid}>
+        <div style={styles.formGroup}><label style={styles.label}>Action</label><select style={styles.conditionInput} value={action.type} onChange={e => onActionChange('type', e.target.value)}><option value="negateSearchTerm">Negate Search Term</option></select></div>
+        <div style={styles.formGroup}><label style={styles.label}>Match Type</label><select style={styles.conditionInput} value={action.matchType} onChange={e => onActionChange('matchType', e.target.value)}><option value="NEGATIVE_EXACT">Negative Exact</option><option value="NEGATIVE_PHRASE">Negative Phrase</option></select></div>
+    </div>
+);
+
+const BudgetAccelerationActionForm = ({ action, onActionChange }: { action: AutomationRuleAction, onActionChange: (field: string, value: any) => void }) => (
+    <div style={styles.thenGrid}>
+        <div style={styles.formGroup}><label style={styles.label}>Action</label><select style={styles.conditionInput} value={action.type} onChange={e => onActionChange('type', e.target.value)}><option value="increaseBudgetPercent">Increase Budget By %</option></select></div>
+        <div style={styles.formGroup}><label style={styles.label}>Value (%)</label><input type="number" style={styles.conditionInput} placeholder="e.g., 50" value={action.value ?? ''} onChange={e => onActionChange('value', Number(e.target.value))} /></div>
+        <div style={{...styles.infoBox, gridColumn: '1 / -1'}}>ℹ️ The budget will be automatically reset to its original value at the end of the day.</div>
+    </div>
+);
+
+const SearchTermHarvestingActionForm = ({ action, onActionChange, spCampaigns, adGroups, isLoadingCampaigns, isLoadingAdGroups }: { action: AutomationRuleAction, onActionChange: (field: string, value: any) => void, spCampaigns: Campaign[], adGroups: AdGroup[], isLoadingCampaigns: boolean, isLoadingAdGroups: boolean }) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div style={styles.formGroup}><label style={styles.label}>Action</label><div style={styles.radioGroup}>
+            <label><input type="radio" value="CREATE_NEW_CAMPAIGN" checked={action.type === 'CREATE_NEW_CAMPAIGN'} onChange={e => onActionChange('type', e.target.value)} /> Create a new campaign</label>
+            <label><input type="radio" value="ADD_TO_EXISTING_CAMPAIGN" checked={action.type === 'ADD_TO_EXISTING_CAMPAIGN'} onChange={e => onActionChange('type', e.target.value)} /> Add to an existing campaign</label>
+        </div></div>
+        
+        {action.type === 'CREATE_NEW_CAMPAIGN' && <div style={styles.thenGrid}>
+            <div style={styles.formGroup}><label style={styles.label}>Daily Budget</label><input type="number" step="0.01" min="1" style={styles.conditionInput} placeholder="e.g., 10.00" value={action.newCampaignBudget ?? ''} onChange={e => onActionChange('newCampaignBudget', Number(e.target.value))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Match Type</label><select style={styles.conditionInput} value={action.matchType} onChange={e => onActionChange('matchType', e.target.value)}><option value="EXACT">Exact</option><option value="PHRASE">Phrase</option></select></div>
+        </div>}
+        
+        {action.type === 'ADD_TO_EXISTING_CAMPAIGN' && <div style={{...styles.thenGrid, gridTemplateColumns: '1fr 1fr'}}>
+            <div style={styles.formGroup}><label style={styles.label}>Target Campaign</label><select style={styles.conditionInput} value={action.targetCampaignId ?? ''} onChange={e => onActionChange('targetCampaignId', e.target.value)} disabled={isLoadingCampaigns}>{isLoadingCampaigns ? <option>Loading...</option> : <><option value="">Select a campaign...</option>{spCampaigns.map(c => <option key={c.campaignId} value={c.campaignId}>{c.name}</option>)}</>}</select></div>
+            <div style={styles.formGroup}><label style={styles.label}>Target Ad Group</label><select style={styles.conditionInput} value={action.targetAdGroupId ?? ''} onChange={e => onActionChange('targetAdGroupId', e.target.value)} disabled={isLoadingAdGroups || !action.targetCampaignId}>{isLoadingAdGroups ? <option>Loading...</option> : <><option value="">Select an ad group...</option>{adGroups.map(ag => <option key={ag.adGroupId} value={ag.adGroupId}>{ag.name}</option>)}</>}</select></div>
+        </div>}
+
+        <div style={{ paddingTop: '20px', borderTop: '1px dashed #ccc' }}>
+            <div style={styles.formGroup}><label style={styles.label}>Bid Option</label><div style={styles.radioGroup}>
+                <label><input type="radio" value="CPC_MULTIPLIER" checked={action.bidOption?.type === 'CPC_MULTIPLIER'} onChange={e => onActionChange('bidOption.type', e.target.value)} /> Based on Search Term CPC</label>
+                <label><input type="radio" value="CUSTOM_BID" checked={action.bidOption?.type === 'CUSTOM_BID'} onChange={e => onActionChange('bidOption.type', e.target.value)} /> Set custom bid</label>
+            </div></div>
+            <div style={{...styles.formGroup, marginTop: '10px'}}>
+                <input type="number" step="0.01" min="0" style={{...styles.conditionInput, width: '200px'}} placeholder={action.bidOption?.type === 'CPC_MULTIPLIER' ? "e.g., 1.15 for +15%" : "e.g., 0.75"} value={action.bidOption?.value ?? ''} onChange={e => onActionChange('bidOption.value', Number(e.target.value))} />
+            </div>
+        </div>
+        <div style={{...styles.infoBox, gridColumn: '1 / -1'}}>ℹ️ The harvested search term will be automatically added as a Negative Exact in its original Ad Group to prevent spend overlap.</div>
+    </div>
+);

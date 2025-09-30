@@ -860,11 +860,13 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                 if (!throttledEntities.has(throttleKey)) {
                     if (action.type === 'CREATE_NEW_CAMPAIGN') {
                         const campaignName = `[H] - ${entity.sourceAsin} - ${entity.entityText} - ${action.matchType}`;
+                        // FIX: The v3 POST /campaigns endpoint expects budget and budgetType as top-level properties.
                         const campaignPayload = {
                             name: campaignName,
                             targetingType: 'MANUAL',
                             state: 'ENABLED',
-                            budget: { budget: action.newCampaignBudget, budgetType: 'DAILY' },
+                            budget: action.newCampaignBudget,
+                            budgetType: 'DAILY',
                             startDate: getLocalDateString('America/Los_Angeles')
                         };
                         try {
@@ -886,7 +888,6 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                     newAdGroupId = agResult.adGroupId;
                                     console.log(`[Harvesting] Created Ad Group ID: ${newAdGroupId}`);
                                     
-                                    // ADDED: Create Product Ad
                                     const productAdPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', asin: entity.sourceAsin };
                                     const adResponse = await amazonAdsApiRequest({
                                         method: 'post', url: '/sp/productAds', profileId: rule.profile_id, data: { productAds: [productAdPayload] },
@@ -897,21 +898,19 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                         console.log(`[Harvesting] Created Product Ad for ASIN ${entity.sourceAsin}`);
                                         harvestSuccess = true;
                                     } else {
-                                        const errorMessage = adResult?.description || adResult?.details || 'Unknown error';
-                                        throw new Error(`Product Ad creation failed: ${errorMessage}`);
+                                        throw new Error(`Product Ad creation failed: ${adResult?.description || adResult?.details || 'Unknown error'}`);
                                     }
                                 } else {
-                                    const errorMessage = agResult?.description || agResult?.details || 'Unknown error';
-                                    throw new Error(`Ad Group creation failed: ${errorMessage}`);
+                                    throw new Error(`Ad Group creation failed: ${agResult?.description || agResult?.details || 'Unknown error'}`);
                                 }
                             } else {
-                                const errorMessage = campResult?.description || campResult?.details || 'Unknown error';
-                                throw new Error(`Campaign creation failed: ${errorMessage}`);
+                                throw new Error(`Campaign creation failed: ${campResult?.description || campResult?.details || 'Unknown error'}`);
                             }
                         } catch (e) {
-                             console.error(`[Harvesting] Error in CREATE_NEW_CAMPAIGN flow:`, e);
-                             // FIX: Correctly parse the error from the helper or the thrown error
-                             const errorMessage = e.details?.details || e.details?.message || e.message || 'Unknown error from API call.';
+                             console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, JSON.stringify(e, null, 2));
+                             const apiErrorDetails = e.details ? (e.details.message || e.details.details) : null;
+                             const errorMessage = apiErrorDetails || e.message || 'An unknown error occurred. See server logs for the raw error object.';
+                             console.error(`[Harvesting] Error in CREATE_NEW_CAMPAIGN flow:`, errorMessage);
                              throw new Error(`Campaign creation failed: ${errorMessage}`);
                         }
                     } else {

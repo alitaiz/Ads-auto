@@ -518,6 +518,27 @@ router.post('/adGroups', async (req, res) => {
     }
 });
 
+// CREATE SP Product Ads
+router.post('/productAds', async (req, res) => {
+    const { profileId, productAds } = req.body;
+    if (!profileId || !Array.isArray(productAds) || productAds.length === 0) {
+        return res.status(400).json({ message: 'profileId and a non-empty productAds array are required.' });
+    }
+    try {
+        const data = await amazonAdsApiRequest({
+            method: 'post',
+            url: '/sp/productAds',
+            profileId,
+            data: { productAds },
+            headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json', 'Accept': 'application/vnd.spProductAd.v3+json' },
+        });
+        res.status(207).json(data);
+    } catch (error) {
+        res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred while creating product ads' });
+    }
+});
+
+
 // CREATE SP Keywords
 router.post('/keywords', async (req, res) => {
     const { profileId, keywords } = req.body;

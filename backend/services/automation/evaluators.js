@@ -885,16 +885,35 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                 if (agResult?.code === 'SUCCESS') {
                                     newAdGroupId = agResult.adGroupId;
                                     console.log(`[Harvesting] Created Ad Group ID: ${newAdGroupId}`);
-                                    harvestSuccess = true;
+                                    
+                                    // ADDED: Create Product Ad
+                                    const productAdPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', asin: entity.sourceAsin };
+                                    const adResponse = await amazonAdsApiRequest({
+                                        method: 'post', url: '/sp/productAds', profileId: rule.profile_id, data: { productAds: [productAdPayload] },
+                                        headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json', 'Accept': 'application/vnd.spProductAd.v3+json' },
+                                    });
+                                    const adResult = adResponse.productAds?.[0];
+                                    if(adResult?.code === 'SUCCESS') {
+                                        console.log(`[Harvesting] Created Product Ad for ASIN ${entity.sourceAsin}`);
+                                        harvestSuccess = true;
+                                    } else {
+                                        const errorMessage = adResult?.description || adResult?.details || 'Unknown error';
+                                        throw new Error(`Product Ad creation failed: ${errorMessage}`);
+                                    }
                                 } else {
-                                    const errorMessage = agResult?.details || agResult?.description || 'Unknown error';
+                                    const errorMessage = agResult?.description || agResult?.details || 'Unknown error';
                                     throw new Error(`Ad Group creation failed: ${errorMessage}`);
                                 }
                             } else {
-                                const errorMessage = campResult?.details || campResult?.description || 'Unknown error';
+                                const errorMessage = campResult?.description || campResult?.details || 'Unknown error';
                                 throw new Error(`Campaign creation failed: ${errorMessage}`);
                             }
-                        } catch (e) { console.error(`[Harvesting] Error in CREATE_NEW_CAMPAIGN flow:`, e); }
+                        } catch (e) {
+                             console.error(`[Harvesting] Error in CREATE_NEW_CAMPAIGN flow:`, e);
+                             // FIX: Correctly parse the error from the helper or the thrown error
+                             const errorMessage = e.details?.details || e.details?.message || e.message || 'Unknown error from API call.';
+                             throw new Error(`Campaign creation failed: ${errorMessage}`);
+                        }
                     } else {
                         harvestSuccess = true; 
                         newCampaignId = action.targetCampaignId;

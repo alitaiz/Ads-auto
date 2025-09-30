@@ -74,6 +74,7 @@ export async function spApiRequest({ method, url, data, params }) {
 
 /**
  * Retrieves the Seller SKU for a given ASIN using the Catalog Items API.
+ * This function is now more robust, checking both 'attributes' and 'summaries' for the SKU.
  * @param {string} asin The ASIN of the product.
  * @returns {Promise<string|null>} The SKU, or null if not found.
  */
@@ -86,18 +87,31 @@ export async function getSkuByAsin(asin) {
             url: `/catalog/2022-04-01/items/${asin}`,
             params: {
                 marketplaceIds: SP_API_MARKETPLACE_ID,
-                includedData: 'attributes',
+                // Request both summaries and attributes to increase chances of finding the SKU
+                includedData: 'attributes,summaries',
             }
         });
 
-        // The 'seller_sku' attribute is typically found within the 'attributes' JSON object.
+        let sku = null;
+
+        // Attempt 1: Check attributes (primary method)
         if (response.attributes && response.attributes.seller_sku && response.attributes.seller_sku.length > 0) {
-            const sku = response.attributes.seller_sku[0].value;
-            console.log(`[SP-API] Found SKU: ${sku} for ASIN: ${asin}`);
+            sku = response.attributes.seller_sku[0].value;
+            console.log(`[SP-API] Found SKU in 'attributes': ${sku} for ASIN: ${asin}`);
             return sku;
         }
 
-        console.warn(`[SP-API] Could not find 'seller_sku' in attributes for ASIN: ${asin}.`);
+        // Attempt 2: Check summaries (fallback method)
+        if (response.summaries && Array.isArray(response.summaries) && response.summaries.length > 0) {
+            const summary = response.summaries.find(s => s.marketplaceId === SP_API_MARKETPLACE_ID);
+            if (summary && summary.sku) {
+                sku = summary.sku;
+                console.log(`[SP-API] Found SKU in 'summaries': ${sku} for ASIN: ${asin}`);
+                return sku;
+            }
+        }
+
+        console.warn(`[SP-API] Could not find SKU in 'attributes' or 'summaries' for ASIN: ${asin}.`);
         return null;
 
     } catch (error) {

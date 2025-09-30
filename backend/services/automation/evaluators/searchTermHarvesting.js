@@ -2,30 +2,6 @@
 import { amazonAdsApiRequest } from '../../../helpers/amazon-api.js';
 import { getLocalDateString, calculateMetricsForWindow, checkCondition } from '../utils.js';
 
-/**
- * Normalizes the response from Amazon Ads API creation endpoints.
- * Handles `{ "campaigns": [...] }`, `[...]`, and single object formats for both success and error.
- * @param {object | Array} response The raw response from the API.
- * @param {string} key The expected key (e.g., 'campaigns', 'adGroups').
- * @returns {Array} A standardized array of results.
- */
-const getResultsArray = (response, key) => {
-    // Case 1: Response is already a results array
-    if (Array.isArray(response)) {
-        return response;
-    }
-    // Case 2: Response is an object with the results array under `key`
-    if (response && response[key] && Array.isArray(response[key])) {
-        return response[key];
-    }
-    // Case 3: Response is a single result object (success or error) which should be in an array
-    if (response && (response.code || response.campaignId || response.adGroupId || response.productAdId)) {
-        return [response];
-    }
-    return []; // Fallback for unexpected structures
-};
-
-
 export const evaluateSearchTermHarvestingRule = async (rule, performanceData, throttledEntities) => {
     const actionsByCampaign = {};
     const actedOnEntities = new Set();
@@ -80,13 +56,13 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                         
                         const campaignPayload = {
                             name: campaignName,
-                            targetingType: 'MANUAL', // FIX: Uppercase enum value as required by v3 API
+                            targetingType: 'MANUAL',
                             state: 'ENABLED',
                             budget: {
                                 budget: Number(action.newCampaignBudget ?? 10.00),
                                 budgetType: 'DAILY',
                             },
-                            startDate: getLocalDateString('America/Los_Angeles'), // FIX: Use YYYY-MM-DD format
+                            startDate: getLocalDateString('America/Los_Angeles'),
                         };
 
                         try {
@@ -95,11 +71,10 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                 headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
                             });
                             
-                            const campResults = getResultsArray(campResponse, 'campaigns');
-                            const campResult = campResults[0];
+                            const campSuccessResult = campResponse?.campaigns?.success?.[0];
 
-                            if (campResult?.code === 'SUCCESS') {
-                                newCampaignId = campResult.campaignId;
+                            if (campSuccessResult && campSuccessResult.campaignId) {
+                                newCampaignId = campSuccessResult.campaignId;
                                 console.log(`[Harvesting] Created Campaign ID: ${newCampaignId}`);
                                 
                                 const adGroupPayload = { name: entity.entityText, campaignId: newCampaignId, state: 'ENABLED', defaultBid: newBid };
@@ -108,11 +83,10 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                     headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' },
                                 });
 
-                                const agResults = getResultsArray(agResponse, 'adGroups');
-                                const agResult = agResults[0];
+                                const agSuccessResult = agResponse?.adGroups?.success?.[0];
 
-                                if (agResult?.code === 'SUCCESS') {
-                                    newAdGroupId = agResult.adGroupId;
+                                if (agSuccessResult && agSuccessResult.adGroupId) {
+                                    newAdGroupId = agSuccessResult.adGroupId;
                                     console.log(`[Harvesting] Created Ad Group ID: ${newAdGroupId}`);
                                     
                                     const productAdPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', asin: entity.sourceAsin };
@@ -121,21 +95,22 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                         headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json', 'Accept': 'application/vnd.spProductAd.v3+json' },
                                     });
                                     
-                                    const adResults = getResultsArray(adResponse, 'productAds');
-                                    const adResult = adResults[0];
+                                    const adSuccessResult = adResponse?.productAds?.success?.[0];
 
-                                    if(adResult?.code === 'SUCCESS') {
+                                    if(adSuccessResult && adSuccessResult.adId) {
                                         console.log(`[Harvesting] Created Product Ad for ASIN ${entity.sourceAsin}`);
                                         harvestSuccess = true;
                                     } else {
-                                        throw new Error(`Product Ad creation failed: ${adResult?.details || 'Unknown error'}`);
+                                        const adErrorDetails = adResponse?.productAds?.error?.[0]?.errors?.[0]?.details || 'Unknown product ad error';
+                                        throw new Error(`Product Ad creation failed: ${adErrorDetails}`);
                                     }
                                 } else {
-                                    throw new Error(`Ad Group creation failed: ${agResult?.details || 'Unknown error'}`);
+                                    const agErrorDetails = agResponse?.adGroups?.error?.[0]?.errors?.[0]?.details || 'Unknown ad group error';
+                                    throw new Error(`Ad Group creation failed: ${agErrorDetails}`);
                                 }
                             } else {
-                                const details = campResult?.details || (campResponse.code ? `${campResponse.code}: ${campResponse.message}` : campResponse.Message || 'Unknown error');
-                                throw new Error(`Campaign creation failed: ${details}`);
+                                const campErrorDetails = campResponse?.campaigns?.error?.[0]?.errors?.[0]?.details || campResponse.Message || 'Unknown campaign error';
+                                throw new Error(`Campaign creation failed: ${campErrorDetails}`);
                             }
                         } catch (e) {
                             console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, e);

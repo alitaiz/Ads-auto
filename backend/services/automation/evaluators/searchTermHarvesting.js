@@ -48,15 +48,14 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             : entity.entityText;
                         const campaignName = `${prefix}${truncatedSearchTerm}${suffix}`;
                         
+                        // CORRECTED PAYLOAD STRUCTURE
                         const campaignPayload = {
                             name: campaignName,
                             targetingType: 'MANUAL',
                             state: 'ENABLED',
-                            budget: {
-                                budget: Number(action.newCampaignBudget ?? 10.00),
-                                budgetType: 'DAILY',
-                            },
-                            startDate: getLocalDateString('America/Los_Angeles'),
+                            budget: Number(action.newCampaignBudget ?? 10.00),
+                            budgetType: 'DAILY',
+                            startDate: getLocalDateString('America/Los_Angeles').replace(/-/g, ''), // Format: YYYYMMDD
                         };
 
                         try {
@@ -99,21 +98,23 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             }
                         } catch (e) {
                             console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, e);
-                            let errorMessage;
+                            
+                            // IMPROVED ERROR LOGGING
+                            let errorMessage = 'An unknown error occurred. See server logs for the raw error object.';
+                            
                             if (e instanceof Error) {
                                 errorMessage = e.message;
                             } else if (e && e.details) {
-                                 if (typeof e.details === 'object' && e.details !== null) {
+                                if (typeof e.details === 'object' && e.details !== null) {
                                     errorMessage = e.details.message || e.details.Message || JSON.stringify(e.details);
-                                 } else {
-                                     errorMessage = e.details;
-                                 }
+                                } else if (typeof e.details === 'string') {
+                                    errorMessage = e.details;
+                                }
                             } else if (e && (e.Message || e.message)) {
-                                 errorMessage = e.Message || e.message;
-                            } else {
-                                 errorMessage = 'An unknown error occurred. See server logs for the raw error object.';
+                                errorMessage = e.Message || e.message;
                             }
-                            console.error(`[Harvesting] Error in CREATE_NEW_CAMPAIGN flow:`, errorMessage);
+                        
+                            console.error(`[Harvesting] Extracted error message in flow:`, errorMessage);
                             throw new Error(`Campaign creation failed: ${errorMessage}`);
                         }
                     } else {

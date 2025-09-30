@@ -1,5 +1,5 @@
 // backend/services/automation/evaluators/priceAdjustment.js
-import { getListingInfoBySku, updatePrice } from '../../helpers/spApiHelper.js';
+import { getListingInfoBySku, updatePrice } from '../../../helpers/spApiHelper.js';
 
 export const evaluatePriceAdjustmentRule = async (rule) => {
     const { skus, priceStep, priceLimit } = rule.config;

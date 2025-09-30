@@ -19,7 +19,7 @@ const getResultsArray = (response, key) => {
         return response[key];
     }
     // Case 3: Response is a single result object (success or error) which should be in an array
-    if (response && response.code) {
+    if (response && (response.code || response.campaignId || response.adGroupId || response.productAdId)) {
         return [response];
     }
     return []; // Fallback for unexpected structures
@@ -80,10 +80,11 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                         
                         const campaignPayload = {
                             name: campaignName,
-                            targetingType: 'MANUAL',
+                            targetingType: 'manual',
                             state: 'ENABLED',
-                            budget: { budget: Number(action.newCampaignBudget ?? 10.00), budgetType: 'DAILY' },
-                            startDate: getLocalDateString('America/Los_Angeles'),
+                            budget: Number(action.newCampaignBudget ?? 10.00),
+                            budgetType: 'DAILY',
+                            startDate: getLocalDateString('America/Los_Angeles').replace(/-/g, ''),
                         };
 
                         try {

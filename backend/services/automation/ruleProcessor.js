@@ -1,7 +1,7 @@
 // backend/services/automation/ruleProcessor.js
 import pool from '../../db.js';
 import { getPerformanceData } from './dataFetcher.js';
-import { evaluateBidAdjustmentRule, evaluateSearchTermAutomationRule, evaluateBudgetAccelerationRule, evaluateSbSdBidAdjustmentRule, evaluatePriceAdjustmentRule } from './evaluators.js';
+import { evaluateBidAdjustmentRule, evaluateSearchTermAutomationRule, evaluateBudgetAccelerationRule, evaluateSbSdBidAdjustmentRule, evaluatePriceAdjustmentRule, evaluateSearchTermHarvestingRule } from './evaluators.js';
 import { isRuleDue, logAction, getLocalDateString } from './utils.js';
 import { amazonAdsApiRequest } from '../../helpers/amazon-api.js';
 
@@ -53,6 +53,8 @@ const processRule = async (rule) => {
                 finalResult = await evaluateSearchTermAutomationRule(rule, performanceMap, throttledEntities);
             } else if (rule.rule_type === 'BUDGET_ACCELERATION') {
                 finalResult = await evaluateBudgetAccelerationRule(rule, performanceMap);
+            } else if (rule.rule_type === 'SEARCH_TERM_HARVESTING') {
+                finalResult = await evaluateSearchTermHarvestingRule(rule, performanceMap, throttledEntities);
             } else {
                 finalResult = { summary: 'Rule type not recognized.', details: { actions_by_campaign: {} }, actedOnEntities: [] };
             }

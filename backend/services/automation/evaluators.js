@@ -787,7 +787,7 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
                     });
 
                     if (!actionsByCampaign[campaignPerf.campaignId]) {
-                        actionsByCampaign[campaignPerf.campaignId] = { changes: [], newNegatives: [] };
+                        actionsByCampaign[campaignId] = { changes: [], newNegatives: [] };
                     }
                     actionsByCampaign[campaignPerf.campaignId].changes.push({
                         entityType: 'campaign', entityId: campaignPerf.campaignId,
@@ -820,4 +820,9 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
         details: { actions_by_campaign: actionsByCampaign },
         actedOnEntities: []
     };
+};
+
+export const evaluateSearchTermHarvestingRule = async (rule, performanceData, throttledEntities) => {
+    // Implementation will go here
+    return { summary: "Search Term Harvesting is not yet fully implemented.", details: {}, actedOnEntities: [] };
 };

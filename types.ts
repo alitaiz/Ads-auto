@@ -81,11 +81,19 @@ export interface AutomationRuleCondition {
 }
 
 export interface AutomationRuleAction {
-    type: 'adjustBidPercent' | 'increaseBidPercent' | 'decreaseBidPercent' | 'increaseBidAmount' | 'decreaseBidAmount' | 'negateSearchTerm' | 'increaseBudgetPercent' | 'setBudgetAmount';
+    type: 'adjustBidPercent' | 'increaseBidPercent' | 'decreaseBidPercent' | 'increaseBidAmount' | 'decreaseBidAmount' | 'negateSearchTerm' | 'increaseBudgetPercent' | 'setBudgetAmount' | 'CREATE_NEW_CAMPAIGN' | 'ADD_TO_EXISTING_CAMPAIGN';
     value?: number;
-    matchType?: 'NEGATIVE_EXACT' | 'NEGATIVE_PHRASE';
+    matchType?: 'NEGATIVE_EXACT' | 'NEGATIVE_PHRASE' | 'EXACT' | 'PHRASE';
     minBid?: number;
     maxBid?: number;
+    // For Search Term Harvesting
+    newCampaignBudget?: number;
+    targetCampaignId?: string | number;
+    targetAdGroupId?: string | number;
+    bidOption?: {
+        type: 'CPC_MULTIPLIER' | 'CUSTOM_BID';
+        value: number;
+    };
 }
 
 // The structure of a single IF/THEN block within a rule.
@@ -97,7 +105,7 @@ export interface AutomationConditionGroup {
 export interface AutomationRule {
     id: number;
     name: string;
-    rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION' | 'CAMPAIGN_SCHEDULING' | 'PRICE_ADJUSTMENT';
+    rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION' | 'CAMPAIGN_SCHEDULING' | 'PRICE_ADJUSTMENT' | 'SEARCH_TERM_HARVESTING';
     ad_type?: 'SP' | 'SB' | 'SD';
     config: {
         // A rule is composed of one or more condition groups.

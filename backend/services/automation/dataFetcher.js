@@ -400,6 +400,65 @@ const getBudgetAccelerationPerformanceData = async (rule, campaignIds, today) =>
     return { performanceMap, dataDateRange: { report: null, stream: streamDateRange } };
 };
 
+const getSearchTermHarvestingPerformanceData = async (rule, campaignIds, maxLookbackDays, today) => {
+    // This rule type ONLY uses historical report data for accuracy.
+    const endDate = new Date(today);
+    endDate.setDate(today.getDate() - 2); // Data is available with a 2-day delay.
+    const startDate = new Date(endDate);
+    startDate.setDate(endDate.getDate() - (maxLookbackDays - 1));
+
+    const { rows } = await pool.query(
+        `SELECT
+            report_date AS performance_date,
+            customer_search_term,
+            campaign_id,
+            ad_group_id,
+            COALESCE(SUM(impressions), 0)::bigint AS impressions,
+            COALESCE(SUM(cost), 0)::numeric AS spend,
+            COALESCE(SUM(sales_1d), 0)::numeric AS sales,
+            COALESCE(SUM(clicks), 0)::bigint AS clicks,
+            COALESCE(SUM(purchases_1d), 0)::bigint AS orders
+        FROM sponsored_products_search_term_report
+        WHERE report_date >= $1 AND report_date <= $2
+          AND customer_search_term IS NOT NULL
+          AND campaign_id::text = ANY($3)
+        GROUP BY 1, 2, 3, 4;`,
+        [startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0], campaignIds.map(String)]
+    );
+
+    const performanceMap = new Map();
+    rows.forEach(row => {
+        // The unique key for a harvestable term is the term itself, across all its daily occurrences.
+        const key = row.customer_search_term.toString();
+        if (!key) return;
+
+        if (!performanceMap.has(key)) {
+            performanceMap.set(key, {
+                entityText: row.customer_search_term,
+                // Store the first campaign/adgroup found. This will be the source for negation.
+                // In a multi-campaign scenario, this is a simplification but generally effective.
+                sourceCampaignId: row.campaign_id,
+                sourceAdGroupId: row.ad_group_id,
+                dailyData: []
+            });
+        }
+        
+        const entityData = performanceMap.get(key);
+        entityData.dailyData.push({
+            date: new Date(row.performance_date),
+            impressions: parseInt(row.impressions || 0, 10),
+            spend: parseFloat(row.spend || 0),
+            sales: parseFloat(row.sales || 0),
+            clicks: parseInt(row.clicks || 0, 10),
+            orders: parseInt(row.orders || 0, 10)
+        });
+    });
+    
+    const reportDateRange = { start: startDate.toISOString().split('T')[0], end: endDate.toISOString().split('T')[0] };
+    return { performanceMap, dataDateRange: { report: reportDateRange, stream: null } };
+};
+
+
 export const getPerformanceData = async (rule, campaignIds) => {
     if (!campaignIds || campaignIds.length === 0) {
         return { performanceMap: new Map(), dataDateRange: null };
@@ -419,6 +478,8 @@ export const getPerformanceData = async (rule, campaignIds) => {
         result = await getSearchTermAutomationPerformanceData(rule, campaignIds, maxLookbackDays, today);
     } else if (rule.rule_type === 'BUDGET_ACCELERATION') {
         result = await getBudgetAccelerationPerformanceData(rule, campaignIds, today);
+    } else if (rule.rule_type === 'SEARCH_TERM_HARVESTING') {
+        result = await getSearchTermHarvestingPerformanceData(rule, campaignIds, maxLookbackDays, today);
     } else {
         result = { performanceMap: new Map(), dataDateRange: null };
     }

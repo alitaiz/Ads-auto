@@ -444,5 +444,34 @@ router.post('/negativeKeywords', async (req, res) => {
     }
 });
 
+/**
+ * POST /api/amazon/negativeTargets
+ * Creates one or more negative product targets.
+ */
+router.post('/negativeTargets', async (req, res) => {
+    const { profileId, negativeTargets } = req.body;
+    if (!profileId || !Array.isArray(negativeTargets) || negativeTargets.length === 0) {
+        return res.status(400).json({ message: 'profileId and a non-empty negativeTargets array are required.' });
+    }
+
+    try {
+        const transformedTargets = negativeTargets.map(target => ({
+            ...target,
+            state: 'ENABLED',
+        }));
+
+        const data = await amazonAdsApiRequest({
+            method: 'post',
+            url: '/sp/negativeTargets',
+            profileId,
+            data: { negativeTargetingClauses: transformedTargets },
+            headers: { 'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json', 'Accept': 'application/vnd.spNegativeTargetingClause.v3+json' },
+        });
+        res.status(207).json(data);
+    } catch (error) {
+        res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred while creating negative targets' });
+    }
+});
+
 
 export default router;

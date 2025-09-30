@@ -287,7 +287,7 @@ const getSbSdPerformanceData = async (rule, campaignIds, maxLookbackDays, today)
             SUM(CASE WHEN event_type IN ('sb-conversion', 'sd-conversion') THEN (event_data->>'purchases')::bigint ELSE 0 END) AS orders
         FROM raw_stream_events
         WHERE event_type = ANY($3::text[])
-          AND (event_data->>'time_window_start')::timestamptz >= ($1::timestamp AT TIME ZONE '${REPORTING_TIMEZONE}')
+          AND (event_data->>'time_window_start')::timestamptz >= (($1)::timestamp AT TIME ZONE '${REPORTING_TIMEZONE}')
           AND (event_data->>'campaign_id') = ANY($2::text[])
           AND COALESCE(event_data->>'keyword_id', event_data->>'target_id') IS NOT NULL
         GROUP BY 1, 2, 3, 4, 5, 6;`,

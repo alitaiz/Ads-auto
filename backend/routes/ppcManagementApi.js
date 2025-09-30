@@ -474,4 +474,89 @@ router.post('/negativeTargets', async (req, res) => {
 });
 
 
+// =================================================================
+// == NEW: Endpoints for Creating Entities (for Harvesting Rule)  ==
+// =================================================================
+
+// CREATE SP Campaigns
+router.post('/campaigns', async (req, res) => {
+    const { profileId, campaigns } = req.body;
+    if (!profileId || !Array.isArray(campaigns) || campaigns.length === 0) {
+        return res.status(400).json({ message: 'profileId and a non-empty campaigns array are required.' });
+    }
+    try {
+        const data = await amazonAdsApiRequest({
+            method: 'post',
+            url: '/sp/campaigns',
+            profileId,
+            data: { campaigns },
+            headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
+        });
+        res.status(207).json(data); // 207 Multi-Status
+    } catch (error) {
+        res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred while creating campaigns' });
+    }
+});
+
+// CREATE SP Ad Groups
+router.post('/adGroups', async (req, res) => {
+    const { profileId, adGroups } = req.body;
+    if (!profileId || !Array.isArray(adGroups) || adGroups.length === 0) {
+        return res.status(400).json({ message: 'profileId and a non-empty adGroups array are required.' });
+    }
+    try {
+        const data = await amazonAdsApiRequest({
+            method: 'post',
+            url: '/sp/adGroups',
+            profileId,
+            data: { adGroups },
+            headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' },
+        });
+        res.status(207).json(data);
+    } catch (error) {
+        res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred while creating ad groups' });
+    }
+});
+
+// CREATE SP Keywords
+router.post('/keywords', async (req, res) => {
+    const { profileId, keywords } = req.body;
+    if (!profileId || !Array.isArray(keywords) || keywords.length === 0) {
+        return res.status(400).json({ message: 'profileId and a non-empty keywords array are required.' });
+    }
+    try {
+        const data = await amazonAdsApiRequest({
+            method: 'post',
+            url: '/sp/keywords',
+            profileId,
+            data: { keywords },
+            headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
+        });
+        res.status(207).json(data);
+    } catch (error) {
+        res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred while creating keywords' });
+    }
+});
+
+// CREATE SP Targets
+router.post('/targets', async (req, res) => {
+    const { profileId, targets } = req.body;
+    if (!profileId || !Array.isArray(targets) || targets.length === 0) {
+        return res.status(400).json({ message: 'profileId and a non-empty targets array are required.' });
+    }
+    try {
+        const data = await amazonAdsApiRequest({
+            method: 'post',
+            url: '/sp/targets',
+            profileId,
+            data: { targetingClauses: targets },
+            headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' },
+        });
+        res.status(207).json(data);
+    } catch (error) {
+        res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred while creating targets' });
+    }
+});
+
+
 export default router;

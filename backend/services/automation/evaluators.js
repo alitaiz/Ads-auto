@@ -864,7 +864,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             : entity.entityText;
                         const campaignName = `${prefix}${truncatedSearchTerm}${suffix}`;
                         
-                        // FIX: Corrected payload to use a nested budget object.
+                        // FIX: Corrected startDate format to YYYY-MM-DD
                         const campaignPayload = {
                             name: campaignName,
                             targetingType: 'MANUAL',
@@ -873,7 +873,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                 budget: Number(action.newCampaignBudget ?? 10.00),
                                 budgetType: 'DAILY',
                             },
-                            startDate: getLocalDateString('America/Los_Angeles').replace(/-/g, ''),
+                            startDate: getLocalDateString('America/Los_Angeles'),
                         };
 
                         try {

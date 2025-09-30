@@ -860,14 +860,13 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                 if (!throttledEntities.has(throttleKey)) {
                     if (action.type === 'CREATE_NEW_CAMPAIGN') {
                         const campaignName = `[H] - ${entity.sourceAsin} - ${entity.entityText} - ${action.matchType}`;
+                        // FIX: Corrected payload to use a flat structure for budget, based on API docs.
                         const campaignPayload = {
                             name: campaignName,
                             targetingType: 'MANUAL',
                             state: 'ENABLED',
-                            budget: {
-                                budget: Number(action.newCampaignBudget ?? 10.00),
-                                budgetType: 'DAILY'
-                            },
+                            budget: Number(action.newCampaignBudget ?? 10.00),
+                            budgetType: 'DAILY',
                             startDate: getLocalDateString('America/Los_Angeles')
                         };
                         try {
@@ -905,14 +904,34 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                     throw new Error(`Ad Group creation failed: ${agResult?.details || 'Unknown error'}`);
                                 }
                             } else {
-                                throw new Error(`Campaign creation failed: ${campResult?.details || 'Unknown error'}`);
+                                // The API might return success=false instead of throwing, so we create our own error.
+                                const details = campResult?.details || (campResponse.code ? `${campResponse.code}: ${campResponse.message}` : 'Unknown error');
+                                throw new Error(`Campaign creation failed: ${details}`);
                             }
                         } catch (e) {
-                             console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, e.details || e);
-                             const apiErrorDetails = e.details ? (e.details.Message || e.details.message || e.details.details) : null; // Case-insensitive check
-                             const errorMessage = (typeof apiErrorDetails === 'object' ? JSON.stringify(apiErrorDetails) : apiErrorDetails) || e.message || 'An unknown error occurred. See server logs for the raw error object.';
-                             console.error(`[Harvesting] Error in CREATE_NEW_CAMPAIGN flow:`, errorMessage);
-                             throw new Error(`Campaign creation failed: ${errorMessage}`);
+                             // FIX: Implement robust error handling to prevent null/undefined messages.
+                            console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, e);
+                            let errorMessage;
+
+                            if (e instanceof Error) {
+                                errorMessage = e.message;
+                            } else if (e && e.details) {
+                                if (typeof e.details === 'object' && e.details !== null) {
+                                    errorMessage = e.details.message || e.details.Message || e.details.details || JSON.stringify(e.details);
+                                } else {
+                                    errorMessage = e.details;
+                                }
+                            } else {
+                                try {
+                                    errorMessage = JSON.stringify(e);
+                                } catch {
+                                    errorMessage = String(e);
+                                }
+                            }
+
+                            const finalMessage = errorMessage || 'An unknown error occurred. See raw error object in logs.';
+                            console.error(`[Harvesting] Error in CREATE_NEW_CAMPAIGN flow:`, finalMessage);
+                            throw new Error(`Campaign creation failed: ${finalMessage}`);
                         }
                     } else {
                         harvestSuccess = true; 

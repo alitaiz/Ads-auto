@@ -860,7 +860,6 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                 if (!throttledEntities.has(throttleKey)) {
                     if (action.type === 'CREATE_NEW_CAMPAIGN') {
                         const campaignName = `[H] - ${entity.sourceAsin} - ${entity.entityText} - ${action.matchType}`;
-                        // FIX: The v3 POST /campaigns endpoint expects a nested budget object.
                         const campaignPayload = {
                             name: campaignName,
                             targetingType: 'MANUAL',
@@ -869,7 +868,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                 budget: action.newCampaignBudget,
                                 budgetType: 'DAILY'
                             },
-                            startDate: getLocalDateString('America/Los_Angeles')
+                            startDate: getLocalDateString('America/Los_Angeles').replace(/-/g, '')
                         };
                         try {
                             const campResponse = await amazonAdsApiRequest({
@@ -909,8 +908,8 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                 throw new Error(`Campaign creation failed: ${campResult?.description || campResult?.details || 'Unknown error'}`);
                             }
                         } catch (e) {
-                             console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, JSON.stringify(e, null, 2));
-                             const apiErrorDetails = e.details ? (e.details.message || e.details.Message || e.details.details) : null;
+                             console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, JSON.stringify(e.details || {}, null, 2));
+                             const apiErrorDetails = e.details ? (e.details.Message || e.details.message || e.details.details) : null; // Case-insensitive check
                              const errorMessage = (typeof apiErrorDetails === 'object' ? JSON.stringify(apiErrorDetails) : apiErrorDetails) || e.message || 'An unknown error occurred. See server logs for the raw error object.';
                              console.error(`[Harvesting] Error in CREATE_NEW_CAMPAIGN flow:`, errorMessage);
                              throw new Error(`Campaign creation failed: ${errorMessage}`);

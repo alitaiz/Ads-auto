@@ -401,9 +401,8 @@ const getBudgetAccelerationPerformanceData = async (rule, campaignIds, today) =>
 };
 
 const getSearchTermHarvestingPerformanceData = async (rule, campaignIds, maxLookbackDays, today) => {
-    // This rule type ONLY uses historical report data for accuracy.
     const endDate = new Date(today);
-    endDate.setDate(today.getDate() - 2); // Data is available with a 2-day delay.
+    endDate.setDate(today.getDate() - 2);
     const startDate = new Date(endDate);
     startDate.setDate(endDate.getDate() - (maxLookbackDays - 1));
 
@@ -411,6 +410,7 @@ const getSearchTermHarvestingPerformanceData = async (rule, campaignIds, maxLook
         `SELECT
             report_date AS performance_date,
             customer_search_term,
+            asin,
             campaign_id,
             ad_group_id,
             COALESCE(SUM(impressions), 0)::bigint AS impressions,
@@ -422,21 +422,18 @@ const getSearchTermHarvestingPerformanceData = async (rule, campaignIds, maxLook
         WHERE report_date >= $1 AND report_date <= $2
           AND customer_search_term IS NOT NULL
           AND campaign_id::text = ANY($3)
-        GROUP BY 1, 2, 3, 4;`,
+        GROUP BY 1, 2, 3, 4, 5;`,
         [startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0], campaignIds.map(String)]
     );
 
     const performanceMap = new Map();
     rows.forEach(row => {
-        // The unique key for a harvestable term is the term itself, across all its daily occurrences.
-        const key = row.customer_search_term.toString();
-        if (!key) return;
-
+        const key = `${row.customer_search_term}::${row.asin}::${row.campaign_id}::${row.ad_group_id}`;
+        
         if (!performanceMap.has(key)) {
             performanceMap.set(key, {
                 entityText: row.customer_search_term,
-                // Store the first campaign/adgroup found. This will be the source for negation.
-                // In a multi-campaign scenario, this is a simplification but generally effective.
+                sourceAsin: row.asin,
                 sourceCampaignId: row.campaign_id,
                 sourceAdGroupId: row.ad_group_id,
                 dailyData: []

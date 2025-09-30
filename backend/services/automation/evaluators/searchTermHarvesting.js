@@ -82,8 +82,10 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             name: campaignName,
                             targetingType: 'manual',
                             state: 'ENABLED',
-                            budget: Number(action.newCampaignBudget ?? 10.00),
-                            budgetType: 'DAILY',
+                            budget: {
+                                budget: Number(action.newCampaignBudget ?? 10.00),
+                                budgetType: 'DAILY',
+                            },
                             startDate: getLocalDateString('America/Los_Angeles').replace(/-/g, ''),
                         };
 

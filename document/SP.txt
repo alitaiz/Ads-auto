@@ -1,0 +1,253 @@
+Dưới đây là các mẫu request “chuẩn – copy chạy luôn” cho quy trình tạo 1 chiến dịch Sponsored Products qua Amazon Ads API:
+(1) tạo “vỏ” campaign → (2) tạo ad group → (3) thêm product ad (ASIN) → (4) thêm keyword hoặc product targeting → (5) bật chiến dịch.
+
+Ghi chú chung
+• Base URL vùng NA: https://advertising-api.amazon.com (chọn đúng region của bạn). 
+Amazon Ads
+
+• Header bắt buộc:
+Authorization: Bearer <ACCESS_TOKEN> • Amazon-Advertising-API-ClientId: <CLIENT_ID> • Amazon-Advertising-API-Scope: <PROFILE_ID> • Content-Type: application/json. 
+Amazon Ads
+
+• SP v3 endpoints: quản trị campaign/ad group/ads/targets/keywords. 
+Amazon Ads
+
+• Cấu trúc nhiều-bước (campaign → ad group → ads/targeting) là bắt buộc. 
+Amazon Ads
++1
+
+• startDate/endDate dùng format YYYYMMDD; budgetType cho SP là DAILY; targetingType = manual hoặc auto. 
+Amazon Ads
++1
+
+1) Tạo “vỏ” Campaign (SP v3)
+
+cURL
+
+API="https://advertising-api.amazon.com"
+
+curl -X POST "$API/v3/sp/campaigns" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Amazon-Advertising-API-ClientId: <CLIENT_ID>" \
+  -H "Amazon-Advertising-API-Scope: <PROFILE_ID>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "campaigns": [
+      {
+        "name": "SP Campaign - Manual - Q4",
+        "startDate": "20251005",
+        "endDate": "20251231",
+        "state": "PAUSED",
+        "budget": 50.0,
+        "budgetType": "DAILY",
+        "targetingType": "manual",
+        "portfolioId": 123456789
+      }
+    ]
+  }'
+
+
+Endpoint (POST /v3/sp/campaigns) thuộc SP Campaign Management v3. Response có thể trả 207 Multi-Status nếu gửi bulk. 
+Amazon Ads
+
+2) Tạo Ad Group (lấy campaignId ở bước 1)
+
+cURL
+
+curl -X POST "$API/v3/sp/adGroups" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Amazon-Advertising-API-ClientId: <CLIENT_ID>" \
+  -H "Amazon-Advertising-API-Scope: <PROFILE_ID>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "adGroups": [
+      {
+        "campaignId": 987654321,
+        "name": "AG - Main",
+        "defaultBid": 1.50,
+        "state": "ENABLED"
+      }
+    ]
+  }'
+
+
+Bạn phải có campaignId để tạo ad group. 
+Amazon Ads
+
+3) Thêm Product Ad (gắn ASIN vào ad group)
+
+cURL
+
+curl -X POST "$API/v3/sp/productAds" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Amazon-Advertising-API-ClientId: <CLIENT_ID>" \
+  -H "Amazon-Advertising-API-Scope: <PROFILE_ID>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "productAds": [
+      {
+        "campaignId": 987654321,
+        "adGroupId": 22222222,
+        "asin": "B0XXXXX123",
+        "state": "ENABLED"
+      }
+    ]
+  }'
+
+
+Nếu ASIN không đủ điều kiện/ bị hạn chế sẽ báo lỗi validation. (Thuộc hợp đồng SP v3). 
+Amazon Ads
+
+4A) Thêm Keyword targeting (manual)
+
+cURL
+
+curl -X POST "$API/sp/keywords" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Amazon-Advertising-API-ClientId: <CLIENT_ID>" \
+  -H "Amazon-Advertising-API-Scope: <PROFILE_ID>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keywords": [
+      {
+        "campaignId": 987654321,
+        "adGroupId": 22222222,
+        "keywordText": "wireless earbuds",
+        "matchType": "broad",
+        "state": "ENABLED",
+        "bid": 0.60
+      },
+      {
+        "campaignId": 987654321,
+        "adGroupId": 22222222,
+        "keywordText": "bluetooth earbuds",
+        "matchType": "phrase",
+        "state": "ENABLED",
+        "bid": 0.70
+      }
+    ]
+  }'
+
+
+Keyword endpoint: POST /sp/keywords (overview + hướng dẫn manual campaigns). 
+Amazon Ads
++1
+
+Gợi ý: có thể lấy gợi ý keyword/bid qua POST /sp/targets/keywords/recommendations trước khi tạo. 
+Amazon Ads
+
+4B) Thêm Product targeting (ASIN/category)
+
+cURL — target ASIN trực tiếp
+
+curl -X POST "$API/sp/targets" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Amazon-Advertising-API-ClientId: <CLIENT_ID>" \
+  -H "Amazon-Advertising-API-Scope: <PROFILE_ID>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targets": [
+      {
+        "campaignId": 987654321,
+        "adGroupId": 22222222,
+        "state": "ENABLED",
+        "expressionType": "manual",
+        "expression": [
+          { "type": "ASIN_SAME_AS", "value": "B0YYYYY999" }
+        ],
+        "bid": 0.75
+      }
+    ]
+  }'
+
+
+cURL — target category + refinements (ví dụ brand/price range)
+
+curl -X POST "$API/sp/targets" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Amazon-Advertising-API-ClientId: <CLIENT_ID>" \
+  -H "Amazon-Advertising-API-Scope: <PROFILE_ID>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targets": [
+      {
+        "campaignId": 987654321,
+        "adGroupId": 22222222,
+        "state": "ENABLED",
+        "expressionType": "manual",
+        "expression": [
+          { "type": "CATEGORY", "value": "1234567890" },
+          { "type": "BRAND", "value": "Nike" },
+          { "type": "PRICE_GREATER_THAN", "value": 20.0 },
+          { "type": "PRICE_LESS_THAN",  "value": 80.0 }
+        ],
+        "bid": 0.65
+      }
+    ]
+  }'
+
+
+Endpoints product targeting SP v3: POST /sp/targets (tạo), POST /sp/targets/list (liệt kê/tra id), GET /sp/targets/categories & refinements, v.v. 
+Amazon Ads
++2
+Amazon Ads
++2
+
+Với auto campaigns, bạn sẽ dùng POST /sp/targets/list để lấy các auto-target expression IDs do hệ thống tạo rồi điều chỉnh bid/enable theo nhu cầu. 
+Amazon Ads
++1
+
+5) Bật Campaign sau khi cấu hình đủ
+
+cURL (update state)
+
+Trong SP v3, cập nhật campaign dùng cùng hợp đồng quản trị campaign (create/manage). Bạn có thể gửi update để đổi state sang ENABLED. (Xem SP v3 “Create and manage Sponsored Products campaigns”/Release notes: cập nhật qua PUT /sp/campaigns hoặc resource cập nhật tương đương trong v3). 
+Amazon Ads
++1
+
+curl -X PUT "$API/v3/sp/campaigns" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Amazon-Advertising-API-ClientId: <CLIENT_ID>" \
+  -H "Amazon-Advertising-API-Scope: <PROFILE_ID>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "campaigns": [
+      {
+        "campaignId": 987654321,
+        "state": "ENABLED"
+      }
+    ]
+  }'
+
+Mẹo nhanh & kiểm tra lỗi
+
+Tạo ở state=PAUSED trước, cấu hình xong hết rồi mới bật. 
+Amazon Ads
+
+Nếu tạo xong campaign mà không có hiển thị, thường do chưa có ad group/ads/targeting. 
+Amazon Ads
++1
+
+Keywords và Product targets là 2 cách “targeting clause” cho SP; chiến dịch cần ít nhất một clause để phân phối. 
+Amazon Ads
+
+Có thể lấy keyword recommendations: POST /sp/targets/keywords/recommendations (trả về keyword + bid gợi ý). 
+Amazon Ads
+
+Tham khảo chính thức
+
+SP v3 — Campaign management (OpenAPI/contract): tạo & quản trị campaigns/ad groups/ads/targets. 
+Amazon Ads
+
+SP Overview & “Creating Sponsored Products campaigns”: tổng quan khái niệm, trường (budget/start/end/targetingType…). 
+Amazon Ads
++1
+
+Ad groups (SP): “phải có campaignId trước khi tạo ad group”. 
+Amazon Ads
+
+Keywords (SP): POST /sp/keywords + hướng dẫn manual campaigns. 
+Amazon Ads
++1
+
+Product targeting (SP): POST /sp/targets + danh mục gợi ý/refinements.

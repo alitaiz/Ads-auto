@@ -56,12 +56,15 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                         const campaignName = `${prefix}${truncatedSearchTerm}${suffix}`;
                         
                         // FIX: Correctly structured payload for POST /sp/campaigns (v3)
+                        // The budget must be an object with 'amount' and 'budgetType'.
                         const campaignPayload = {
                             name: campaignName,
-                            targetingType: 'manual', // Lowercase enum is correct
+                            targetingType: 'manual',
                             state: 'ENABLED',
-                            budget: Number(action.newCampaignBudget ?? 10.00), // budget is a flat number
-                            budgetType: 'DAILY',
+                            budget: {
+                                amount: Number(action.newCampaignBudget ?? 10.00),
+                                budgetType: 'DAILY'
+                            },
                             startDate: getLocalDateString('America/Los_Angeles').replace(/-/g, ''),
                         };
 
@@ -75,7 +78,6 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                 newCampaignId = campResult.campaignId;
                                 console.log(`[Harvesting] Created Campaign ID: ${newCampaignId}`);
                                 
-                                // FIX: Add required defaultBid to ad group payload
                                 const adGroupPayload = { name: entity.entityText, campaignId: newCampaignId, state: 'ENABLED', defaultBid: newBid };
                                 const agResponse = await amazonAdsApiRequest({
                                     method: 'post', url: '/sp/adGroups', profileId: rule.profile_id, data: { adGroups: [adGroupPayload] },
@@ -106,7 +108,6 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                 throw new Error(`Campaign creation failed: ${details}`);
                             }
                         } catch (e) {
-                            // FIX: Improved error logging to extract useful details from Amazon's response
                             console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, e);
                             let errorMessage = 'An unknown error occurred. See server logs for the raw error object.';
                             if (e instanceof Error) {
@@ -130,7 +131,6 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                     }
                 } else {
                     console.log(`[Harvesting] Term "${entity.entityText}" for ASIN ${entity.sourceAsin} is a winner, but is currently on cooldown. Skipping harvest action.`);
-                    // Even if on cooldown, we still want to negate it in the new source if auto-negate is on.
                     harvestSuccess = false; // Prevents creation of new keyword/target
                 }
 

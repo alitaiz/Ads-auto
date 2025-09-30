@@ -89,7 +89,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                     newAdGroupId = agSuccessResult.adGroupId;
                                     console.log(`[Harvesting] Created Ad Group ID: ${newAdGroupId}`);
                                     
-                                    const productAdPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', asin: entity.sourceAsin };
+                                    const productAdPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', sku: entity.sourceAsin };
                                     const adResponse = await amazonAdsApiRequest({
                                         method: 'post', url: '/sp/productAds', profileId: rule.profile_id, data: { productAds: [productAdPayload] },
                                         headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json', 'Accept': 'application/vnd.spProductAd.v3+json' },
@@ -101,15 +101,18 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                         console.log(`[Harvesting] Created Product Ad for ASIN ${entity.sourceAsin}`);
                                         harvestSuccess = true;
                                     } else {
-                                        const adErrorDetails = adResponse?.productAds?.error?.[0]?.errors?.[0]?.details || 'Unknown product ad error';
+                                        const adError = adResponse?.productAds?.error?.[0];
+                                        const adErrorDetails = adError?.errors?.[0]?.message || adError?.errors?.[0]?.details || `Unknown product ad error (Code: ${adError?.code})`;
                                         throw new Error(`Product Ad creation failed: ${adErrorDetails}`);
                                     }
                                 } else {
-                                    const agErrorDetails = agResponse?.adGroups?.error?.[0]?.errors?.[0]?.details || 'Unknown ad group error';
+                                    const agError = agResponse?.adGroups?.error?.[0];
+                                    const agErrorDetails = agError?.errors?.[0]?.message || agError?.errors?.[0]?.details || `Unknown ad group error (Code: ${agError?.code})`;
                                     throw new Error(`Ad Group creation failed: ${agErrorDetails}`);
                                 }
                             } else {
-                                const campErrorDetails = campResponse?.campaigns?.error?.[0]?.errors?.[0]?.details || campResponse.Message || 'Unknown campaign error';
+                                const campError = campResponse?.campaigns?.error?.[0];
+                                const campErrorDetails = campError?.errors?.[0]?.message || campError?.errors?.[0]?.details || campResponse.message || 'Unknown campaign error';
                                 throw new Error(`Campaign creation failed: ${campErrorDetails}`);
                             }
                         } catch (e) {
@@ -117,8 +120,8 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             let errorMessage = 'An unknown error occurred. See server logs.';
                             if (e instanceof Error) errorMessage = e.message;
                             else if (e?.details) errorMessage = typeof e.details === 'string' ? e.details : JSON.stringify(e.details);
-                            else if (e?.Message || e?.message) errorMessage = e.Message || e.message;
-                            console.error(`[Harvesting] Extracted error message in flow:`, errorMessage);
+                            else if (e?.message) errorMessage = e.message;
+                             console.error(`[Harvesting] Extracted error message in flow:`, errorMessage);
                             throw new Error(`Harvesting flow failed: ${errorMessage}`);
                         }
                     } else {

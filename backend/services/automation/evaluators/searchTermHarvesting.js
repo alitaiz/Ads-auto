@@ -56,16 +56,15 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                         const campaignName = `${prefix}${truncatedSearchTerm}${suffix}`;
                         
                         // FIX: Correctly structured payload for POST /sp/campaigns (v3)
-                        // The budget must be an object with 'amount' and 'budgetType'.
                         const campaignPayload = {
                             name: campaignName,
-                            targetingType: 'manual',
+                            targetingType: 'MANUAL', // FIX: Use uppercase enum 'MANUAL'
                             state: 'ENABLED',
                             budget: {
-                                amount: Number(action.newCampaignBudget ?? 10.00),
+                                budget: Number(action.newCampaignBudget ?? 10.00), // FIX: Use 'budget' key instead of 'amount'
                                 budgetType: 'DAILY'
                             },
-                            startDate: getLocalDateString('America/Los_Angeles').replace(/-/g, ''),
+                            startDate: getLocalDateString('America/Los_Angeles'), // FIX: Send date as YYYY-MM-DD
                         };
 
                         try {

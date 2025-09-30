@@ -868,13 +868,19 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             startDate: getLocalDateString('America/Los_Angeles')
                         };
                         try {
-                            const campResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/campaigns', profileId: rule.profile_id, data: { campaigns: [campaignPayload] }});
+                            const campResponse = await amazonAdsApiRequest({
+                                method: 'post', url: '/sp/campaigns', profileId: rule.profile_id, data: { campaigns: [campaignPayload] },
+                                headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
+                            });
                             const campResult = campResponse.campaigns?.[0];
                             if (campResult?.code === 'SUCCESS') {
                                 newCampaignId = campResult.campaignId;
                                 console.log(`[Harvesting] Created Campaign ID: ${newCampaignId}`);
                                 const adGroupPayload = { name: entity.entityText, campaignId: newCampaignId, state: 'ENABLED' };
-                                const agResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/adGroups', profileId: rule.profile_id, data: { adGroups: [adGroupPayload] } });
+                                const agResponse = await amazonAdsApiRequest({
+                                    method: 'post', url: '/sp/adGroups', profileId: rule.profile_id, data: { adGroups: [adGroupPayload] },
+                                    headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' },
+                                });
                                 const agResult = agResponse.adGroups?.[0];
                                 if (agResult?.code === 'SUCCESS') {
                                     newAdGroupId = agResult.adGroupId;
@@ -884,10 +890,8 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             } else { throw new Error(`Campaign creation failed: ${campResult?.description}`); }
                         } catch (e) { console.error(`[Harvesting] Error in CREATE_NEW_CAMPAIGN flow:`, e); }
                     } else {
-                        // Logic for ADD_TO_EXISTING_CAMPAIGN would go here
-                        // For now, we'll assume it succeeded conceptually to proceed
                         harvestSuccess = true; 
-                        newCampaignId = action.targetCampaignId; // This should be ID, not name
+                        newCampaignId = action.targetCampaignId;
                         newAdGroupId = action.targetAdGroupId;
                     }
                 }
@@ -898,10 +902,16 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                     try {
                         if (isAsin) {
                             const targetPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', expression: [{ type: 'ASIN_SAME_AS', value: entity.entityText }], bid: newBid };
-                            await amazonAdsApiRequest({ method: 'post', url: '/sp/targets', profileId: rule.profile_id, data: { targetingClauses: [targetPayload] } });
+                            await amazonAdsApiRequest({
+                                method: 'post', url: '/sp/targets', profileId: rule.profile_id, data: { targetingClauses: [targetPayload] },
+                                headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' },
+                            });
                         } else {
                             const kwPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', keywordText: entity.entityText, matchType: action.matchType, bid: newBid };
-                            await amazonAdsApiRequest({ method: 'post', url: '/sp/keywords', profileId: rule.profile_id, data: { keywords: [kwPayload] }});
+                            await amazonAdsApiRequest({
+                                method: 'post', url: '/sp/keywords', profileId: rule.profile_id, data: { keywords: [kwPayload] },
+                                headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
+                            });
                         }
                         createdCount++;
                         actedOnEntities.add(throttleKey);
@@ -912,10 +922,16 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                     try {
                         if (isAsin) {
                             const negTargetPayload = { campaignId: entity.sourceCampaignId, adGroupId: entity.sourceAdGroupId, expression: [{ type: 'ASIN_SAME_AS', value: entity.entityText }] };
-                            await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeTargets', profileId: rule.profile_id, data: { negativeTargetingClauses: [negTargetPayload] } });
+                            await amazonAdsApiRequest({
+                                method: 'post', url: '/sp/negativeTargets', profileId: rule.profile_id, data: { negativeTargetingClauses: [negTargetPayload] },
+                                headers: { 'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json', 'Accept': 'application/vnd.spNegativeTargetingClause.v3+json' },
+                            });
                         } else {
                             const negKwPayload = { campaignId: entity.sourceCampaignId, adGroupId: entity.sourceAdGroupId, keywordText: entity.entityText, matchType: 'NEGATIVE_EXACT' };
-                            await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeKeywords', profileId: rule.profile_id, data: { negativeKeywords: [negKwPayload] } });
+                            await amazonAdsApiRequest({
+                                method: 'post', url: '/sp/negativeKeywords', profileId: rule.profile_id, data: { negativeKeywords: [negKwPayload] },
+                                headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json', 'Accept': 'application/vnd.spNegativeKeyword.v3+json' },
+                            });
                         }
                         console.log(`[Harvesting] Negated "${entity.entityText}" in source Ad Group ${entity.sourceAdGroupId}`);
                         negatedCount++;

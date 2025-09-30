@@ -779,8 +779,6 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
                         [campaignPerf.campaignId, currentBudget, todayDateStr, rule.id]
                     );
 
-                    // FIX: Construct the payload according to the SP Campaign v3 API specification.
-                    // The API expects a `budget` object with a `budget` key for the amount.
                     campaignsToUpdate.push({
                         campaignId: String(campaignPerf.campaignId),
                         budget: { budget: newBudget, budgetType: 'DAILY' }
@@ -801,8 +799,6 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
     }
 
     if (campaignsToUpdate.length > 0) {
-        // FIX: The API call for updating SP campaigns requires a versioned Content-Type and Accept header,
-        // and the top-level key in the payload must be 'campaigns'. This was causing a 415 error.
         await amazonAdsApiRequest({
             method: 'put',
             url: '/sp/campaigns',
@@ -860,14 +856,17 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                 if (!throttledEntities.has(throttleKey)) {
                     if (action.type === 'CREATE_NEW_CAMPAIGN') {
                         const campaignName = `[H] - ${entity.sourceAsin} - ${entity.entityText} - ${action.matchType}`;
-                        // FIX: Corrected payload to use a flat structure for budget, based on API docs.
+                        
+                        // FIX: Corrected payload to match official SP-API v3 documentation for creating campaigns.
+                        // 'budget' and 'budgetType' are top-level properties.
+                        // 'startDate' must be in YYYYMMDD format.
                         const campaignPayload = {
                             name: campaignName,
                             targetingType: 'MANUAL',
                             state: 'ENABLED',
                             budget: Number(action.newCampaignBudget ?? 10.00),
                             budgetType: 'DAILY',
-                            startDate: getLocalDateString('America/Los_Angeles')
+                            startDate: getLocalDateString('America/Los_Angeles').replace(/-/g, ''),
                         };
                         try {
                             const campResponse = await amazonAdsApiRequest({
@@ -904,34 +903,27 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                     throw new Error(`Ad Group creation failed: ${agResult?.details || 'Unknown error'}`);
                                 }
                             } else {
-                                // The API might return success=false instead of throwing, so we create our own error.
-                                const details = campResult?.details || (campResponse.code ? `${campResponse.code}: ${campResponse.message}` : 'Unknown error');
+                                const details = campResult?.details || (campResponse.code ? `${campResponse.code}: ${campResponse.message}` : campResponse.Message || 'Unknown error');
                                 throw new Error(`Campaign creation failed: ${details}`);
                             }
                         } catch (e) {
-                             // FIX: Implement robust error handling to prevent null/undefined messages.
                             console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, e);
                             let errorMessage;
-
                             if (e instanceof Error) {
                                 errorMessage = e.message;
                             } else if (e && e.details) {
-                                if (typeof e.details === 'object' && e.details !== null) {
-                                    errorMessage = e.details.message || e.details.Message || e.details.details || JSON.stringify(e.details);
-                                } else {
-                                    errorMessage = e.details;
-                                }
+                                 if (typeof e.details === 'object' && e.details !== null) {
+                                    errorMessage = e.details.message || e.details.Message || JSON.stringify(e.details);
+                                 } else {
+                                     errorMessage = e.details;
+                                 }
+                            } else if (e && (e.Message || e.message)) {
+                                 errorMessage = e.Message || e.message;
                             } else {
-                                try {
-                                    errorMessage = JSON.stringify(e);
-                                } catch {
-                                    errorMessage = String(e);
-                                }
+                                 errorMessage = 'An unknown error occurred. See server logs for the raw error object.';
                             }
-
-                            const finalMessage = errorMessage || 'An unknown error occurred. See raw error object in logs.';
-                            console.error(`[Harvesting] Error in CREATE_NEW_CAMPAIGN flow:`, finalMessage);
-                            throw new Error(`Campaign creation failed: ${finalMessage}`);
+                            console.error(`[Harvesting] Error in CREATE_NEW_CAMPAIGN flow:`, errorMessage);
+                            throw new Error(`Campaign creation failed: ${errorMessage}`);
                         }
                     } else {
                         harvestSuccess = true; 

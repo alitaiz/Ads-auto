@@ -1,0 +1,348 @@
+I. Tổng quan SP v3 – đặc điểm, endpoints, versioning
+1. Phiên bản & tài liệu OpenAPI
+
+Amazon Ads cung cấp Sponsored Products campaign management v3 (OpenAPI 3.0.1) — bạn có thể xem tài liệu chính thức “Sponsored Products campaign management – version 3” 
+Amazon Ads
+
+API v3 có các endpoint cho campaign, ad groups, keywords, product targeting, negative keywords, reports, bidRecommendations, v.v.
+
+API v3 là bản mới, có thể có thêm tính năng / cải tiến so với v2.
+
+Bạn nên dùng spec v3 để đảm bảo tương thích mới nhất (có thể có thêm trường mới, bỏ trường cũ).
+
+2. Endpoint cơ bản liên quan campaign
+
+Một số đường dẫn API liên quan (cơ bản):
+
+POST /v3/sp/campaigns — tạo (create) một hoặc nhiều campaign mới
+
+GET /v3/sp/campaigns — liệt campaign (có filter)
+
+GET /v3/sp/campaigns/{campaignId} — lấy chi tiết một campaign
+
+PATCH /v3/sp/campaigns — cập nhật các campaign
+
+DELETE /v3/sp/campaigns/{campaignId} hoặc archive tùy spec (để ngừng / lưu trữ campaign)
+
+(Trong spec OpenAPI sẽ có mô tả chi tiết từng path, parameter, schema) 
+Amazon Ads
++1
+
+3. Mối quan hệ dữ liệu – cây cấu trúc
+
+Khi bạn tạo campaign, đó mới là “vỏ bọc” (shell). Campaign không gắn với sản phẩm cụ thể cho tới khi bạn tạo ad group và gắn product ad (hoặc target) vào đó. (Một comment từ StackOverflow giải thích: “Creating a campaign is just a shell. You need to create a product ad which takes in the parameters adGroupId, campaignId, and asin.” 
+Stack Overflow
+)
+
+Vậy luồng thường là:
+
+Tạo campaign →
+
+Tạo ad group(s) gắn vào campaign →
+
+Tạo product ads / product targets / keywords tương ứng với ad group →
+
+(Nếu dùng negative keywords / negative product targets) →
+
+Theo dõi, cập nhật, báo cáo
+
+II. Chi tiết payload & schema khi tạo campaign
+
+Dưới đây là các trường (fields) thường gặp trong Create Campaign (v3 SP), những gì bắt buộc, những gì tuỳ chọn, và những ràng buộc bạn phải tuân theo — dựa vào tài liệu Amazon + thực hành.
+
+Lưu ý: Tài liệu Amazon đôi khi chỉ “mô tả” nội dung, bạn nên dùng OpenAPI spec để kiểm tra “required”, “minimum/maximum”, “enum” của từng trường.
+
+1. Các trường chính (common fields)
+
+Dưới đây là các trường rất thường xuất hiện:
+
+Trường	Kiểu dữ liệu	Bắt buộc?	Mô tả	Ràng buộc / ghi chú
+name	string	Có	Tên campaign	Chiều dài tối đa (ví dụ 128 ký tự) — kiểm tra spec v3
+startDate	string (YYYYMMDD)	Có hoặc không (tuỳ spec)	Ngày bắt đầu (format “YYYYMMDD”)	Nếu không cung cấp, Amazon có thể đặt tự động ngày hiện tại. Nếu được cung cấp, phải ≥ ngày hiện tại.
+endDate	string (YYYYMMDD)	Tuỳ chọn	Ngày kết thúc campaign	Nếu có, phải lớn hơn startDate
+budget	number (float)	Có	Ngân sách (hàng ngày)	Số dương; Amazon có giới hạn min / max
+budgetType	string enum	Có	Loại ngân sách	Ví dụ: "DAILY" (hiện SP thường dùng daily)
+state	string enum	Có	Trạng thái campaign khi tạo	Ví dụ: "ENABLED", "PAUSED"
+targetingType	string enum	Có	Loại targeting	"manual" hoặc "auto"
+portfolioId	integer	Tuỳ chọn	Nếu bạn muốn gắn campaign vào portfolio	Nếu có, campaign này được nhóm theo portfolio
+(các trường metadata / tags)	—	tuỳ	Gắn tag, labels	nếu spec có hỗ trợ
+
+Ví dụ payload mẫu (v3) có thể:
+
+{
+  "campaigns": [
+    {
+      "name": "SP Campaign 2025 Oct",
+      "startDate": "20251001",
+      "endDate": "20251231",
+      "state": "PAUSED",
+      "budget": 50.0,
+      "budgetType": "DAILY",
+      "targetingType": "manual",
+      "portfolioId": 12345
+    }
+  ]
+}
+
+
+Chú ý: nếu bạn gửi nhiều campaign trong mảng "campaigns", response có thể trả 207 Multi-Status để báo mỗi cái thành công / lỗi.
+
+2. Ràng buộc chi tiết & kiểm tra
+
+Tên (name): không được để trống, phải đảm bảo độ dài trong giới hạn spec (ví dụ ≤ 128 ký tự)
+
+Ngày (startDate / endDate): định dạng YYYYMMDD, không phải ISO 8601. Nếu endDate có thì phải > startDate.
+
+Ngân sách (budget): phải ≥ giá trị tối thiểu cho marketplace tương ứng, và ≤ giá trị tối đa.
+
+Trạng thái (state): chỉ chấp nhận các giá trị enum hợp lệ — nếu gửi giá trị ngoài, bạn sẽ bị lỗi validation.
+
+targetingType: nếu bạn chọn auto, bạn không cần tạo keyword / product target ngay; nếu manual, bạn phải cung cấp ad groups + targets sau.
+
+portfolioId: nếu bạn có portfolio, campaign phải đã được tạo portfolio trước nếu bạn dùng ID đó.
+
+Bulk request size: nếu bạn gửi nhiều campaign trong 1 request, số lượng tối đa (ví dụ 10, 50, 100) tùy quy định Amazon — nếu vượt quá, sẽ lỗi.
+
+Idempotency / deduplication: nếu Amazon hỗ trợ header idempotency hoặc parameter clientToken, bạn nên dùng để tránh tạo campaign trùng khi retry.
+
+Scope / profile: bạn cần gửi header Amazon-Advertising-API-Scope hoặc tương đương (profileId) để xác định tài khoản quảng cáo mà campaign thuộc về.
+
+3. Response (mẫu)
+
+Một response thành công điển hình sẽ trả:
+
+{
+  "campaigns": [
+    {
+      "campaignId": 987654321,
+      "code": "SUCCESS"
+    }
+  ]
+}
+
+
+Nếu có lỗi:
+
+{
+  "errors": [
+    {
+      "code": "VALIDATION_ERROR",
+      "message": "Name exceeds maximum length",
+      "details": null,
+      "id": null
+    }
+  ]
+}
+
+
+Nếu bulk với mix thành công & lỗi, response có thể có phần "campaigns" và "errors" đồng thời, hoặc trả status code 207 (Multi-Status) để báo từng phần.
+
+III. Ví dụ cụ thể – mã mẫu chi tiết (Python) + xử lý response
+
+Dưới đây là ví dụ chi tiết bằng Python (sử dụng requests) để tạo campaign SP v3, xử lý lỗi, và sau đó tạo ad group & product ad.
+
+import requests
+import json
+from datetime import datetime, timedelta
+
+# --- cấu hình ---
+ACCESS_TOKEN = "YOUR_ACCESS_TOKEN"
+CLIENT_ID = "YOUR_CLIENT_ID"
+PROFILE_ID = "YOUR_PROFILE_ID"  # profile quảng cáo (scope)
+
+API_BASE = "https://advertising-api.amazon.com"  # hoặc region tương ứng
+ENDPOINT = "/v3/sp/campaigns"
+
+# --- header chung ---
+headers = {
+    "Authorization": f"Bearer {ACCESS_TOKEN}",
+    "Content-Type": "application/json",
+    "Amazon-Advertising-API-ClientId": CLIENT_ID,
+    "Amazon-Advertising-API-Scope": str(PROFILE_ID)
+}
+
+# --- xây dựng payload campaign ---
+today = datetime.utcnow().strftime("%Y%m%d")
+end = (datetime.utcnow() + timedelta(days=30)).strftime("%Y%m%d")
+
+payload = {
+    "campaigns": [
+        {
+            "name": "SP Campaign API Example",
+            "startDate": today,
+            "endDate": end,
+            "state": "PAUSED",
+            "budget": 20.0,
+            "budgetType": "DAILY",
+            "targetingType": "manual"
+        }
+    ]
+}
+
+# gọi API tạo campaign
+url = API_BASE + ENDPOINT
+resp = requests.post(url, headers=headers, json=payload)
+print("HTTP status:", resp.status_code)
+data = resp.json()
+print("Response:", json.dumps(data, indent=2))
+
+# xử lý response
+if resp.status_code in (200, 201, 207):
+    # nếu có campaigns trong data
+    if "campaigns" in data:
+        for camp in data["campaigns"]:
+            if camp.get("code") == "SUCCESS":
+                camp_id = camp.get("campaignId")
+                print("Created campaignId:", camp_id)
+                # bạn có thể tiếp tục tạo ad group dựa vào camp_id
+            else:
+                print("Campaign failed:", camp)
+    # nếu có errors
+    if "errors" in data:
+        for err in data["errors"]:
+            print("Error:", err)
+else:
+    print("Request failed:", data)
+
+
+Sau khi bạn có campaignId, bạn có thể tạo ad group:
+
+# tạo ad group cho campaign vừa tạo
+adgroup_endpoint = "/v3/sp/adGroups"
+payload_ag = {
+    "adGroups": [
+        {
+            "campaignId": camp_id,
+            "name": "API AdGroup 1",
+            "defaultBid": 1.50,
+            "state": "ENABLED"
+        }
+    ]
+}
+resp2 = requests.post(API_BASE + adgroup_endpoint, headers=headers, json=payload_ag)
+print("AdGroup status:", resp2.status_code, resp2.json())
+
+
+Và tiếp tục tạo product ads (liên kết ASIN) hoặc targeting / product targets:
+
+prodads_endpoint = "/v3/sp/productAds"
+payload_pa = {
+    "productAds": [
+        {
+            "campaignId": camp_id,
+            "adGroupId": adgroup_id,
+            "asin": "B07EXAMPLE",
+            "state": "ENABLED"
+        }
+    ]
+}
+resp3 = requests.post(API_BASE + prodads_endpoint, headers=headers, json=payload_pa)
+print("ProductAds:", resp3.status_code, resp3.json())
+
+
+Nếu bạn dùng keyword targeting thay vì gắn ASIN trực tiếp:
+
+keywords_endpoint = "/v3/sp/keywords"
+payload_kw = {
+    "keywords": [
+        {
+            "campaignId": camp_id,
+            "adGroupId": adgroup_id,
+            "keywordText": "wireless headphones",
+            "matchType": "broad",
+            "state": "ENABLED",
+            "bid": 0.50
+        }
+    ]
+}
+resp4 = requests.post(API_BASE + keywords_endpoint, headers=headers, json=payload_kw)
+print("Keywords:", resp4.status_code, resp4.json())
+
+IV. Các kịch bản nâng cao & lưu ý
+1. Bulk operations & xử lý từng phần
+
+Khi bạn gửi nhiều campaign / ad group / keyword trong cùng 1 request, response có thể chứa kết quả “từng phần” (partial successes). Bạn cần:
+
+Phân tích mảng campaigns (hoặc adGroups, keywords) để xem cái nào thành công, cái nào lỗi.
+
+Với các lỗi, dựa vào code, message, details để biết lý do (ví dụ validation, duplicate).
+
+Retry các phần lỗi (sau khi sửa payload) nhưng không gửi lại phần đã thành công.
+
+Kiểm tra giới hạn kích thước request (Amazon có thể giới hạn số lượng phần tử tối đa).
+
+2. Idempotency / deduplication
+
+Nếu API hỗ trợ header hoặc param như clientToken / idempotencyKey, bạn nên dùng để đảm bảo retry không tạo campaign trùng. (Kiểm tra spec v3 xem có hỗ trợ).
+
+Nếu không, bạn cần logic kiểm tra xem campaign đã tồn tại chưa trước khi gửi (ví dụ: dùng GET list campaigns filter theo tên).
+
+3. Quota, rate limit & retry logic
+
+Amazon Ads API thường áp dụng giới hạn requests per second / minute cho mỗi profile / client.
+
+Nếu nhận lỗi 429 Too Many Requests, bạn nên thực hiện exponential backoff (tăng dần thời gian chờ và retry).
+
+Kiểm tra header trả về có thể có thông tin Retry-After để biết khi nào được phép gọi lại.
+
+Tránh gửi hàng loạt request nhỏ lẻ — cố gom vào bulk nếu có thể.
+
+4. Phân vùng khu vực & endpoint
+
+API base URL có thể khác tùy marketplace / quốc gia (US, EU, IN, JP…).
+
+Bạn phải dùng đúng endpoint phù hợp với marketplace của campaign bạn quản lý (ví dụ advertising-api.amazon.com cho US).
+
+Các ràng buộc ngân sách / giá tối thiểu tối đa có thể khác giữa các marketplace — kiểm tra spec cho marketplace đó.
+
+5. Xác thực & profile
+
+Bạn phải sử dụng Login With Amazon (LWA) để lấy access_token và refresh_token.
+
+Token có thời hạn (expiration) — bạn phải refresh khi hết hạn.
+
+Mỗi request cần header Authorization: Bearer <access_token>.
+
+Bạn phải gắn profile ID thông qua header Amazon-Advertising-API-Scope hoặc tương đương, để xác định tài khoản quảng cáo (một user có thể quản lý nhiều profile) 
+Amazon Ads
++1
+
+Kiểm tra quyền scope / permission: ứng dụng bạn phải được Amazon phê duyệt truy cập ads API với các quyền cần thiết (campaign_management, reporting, v.v.).
+
+6. Kiểm tra & cập nhật sau khi tạo
+
+Sau khi campaign + ad group + ads được tạo, bạn nên gọi GET /v3/sp/campaigns/{id} hoặc GET /v3/sp/campaigns để xác nhận campaign đã được tạo đúng như mong muốn.
+
+Bạn có thể PATCH /v3/sp/campaigns để cập nhật budget, trạng thái (ENABLED / PAUSED), tên mới, portfolio, etc.
+
+Nếu bạn muốn “xóa” campaign, có thể gọi DELETE / archive hoặc chuyển trạng thái thành ARCHIVED (tuỳ spec) — Amazon thường không xóa hẳn mà đặt ở trạng thái lưu trữ.
+
+7. Báo cáo (Reports) và tối ưu hóa
+
+Để theo dõi hiệu suất (impressions, clicks, sales, ACOS…), bạn gọi API reports tương ứng (Reports API) cho quảng cáo SP.
+
+Reports thường là bất đồng bộ: bạn gửi request báo cáo → nhận reportId → tiếp tục polling (GET /reports/{id}) để lấy file dữ liệu khi hoàn thành.
+
+Dựa vào dữ liệu, bạn sẽ điều chỉnh bids, thêm/bớt từ khóa, tối ưu ngân sách.
+
+Có API bidRecommendations (đề xuất giá đặt thầu) mà bạn có thể dùng để đề xuất giá cho keywords hoặc ad groups để tối ưu chi phí. (Phụ thuộc spec v3)
+
+8. Các tình huống thực tế & “cạm bẫy”
+
+Tạo campaign mà không gắn ad group / product ad → campaign không có gì hiển thị → không tạo ra traffic.
+
+Gắn ASIN không tồn tại / bị khóa → lỗi khi tạo product ad.
+
+Budget quá thấp → campaign có thể không được hiển thị.
+
+Tên trùng hoặc gần giống → có thể bị từ chối hoặc gây khó quản lý.
+
+TargetingType auto rồi bạn vẫn gửi keyword / product target → lỗi hoặc bị bỏ qua.
+
+Ngày bắt đầu trước ngày hiện tại → lỗi validation.
+
+Time zone / giờ UTC → khi đặt ngày, Amazon hiểu ngày theo UTC — đôi khi có sai lệch nếu bạn tính theo múi giờ địa phương.
+
+Quá nhiều entity nhỏ lẻ (keywords, ad groups) gây rate limit.
+
+Khi retry nhiều lần mà không kiểm tra → tạo trùng entity.

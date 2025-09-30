@@ -886,8 +886,14 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                     newAdGroupId = agResult.adGroupId;
                                     console.log(`[Harvesting] Created Ad Group ID: ${newAdGroupId}`);
                                     harvestSuccess = true;
-                                } else { throw new Error(`Ad Group creation failed: ${agResult?.description}`); }
-                            } else { throw new Error(`Campaign creation failed: ${campResult?.description}`); }
+                                } else {
+                                    const errorMessage = agResult?.details || agResult?.description || 'Unknown error';
+                                    throw new Error(`Ad Group creation failed: ${errorMessage}`);
+                                }
+                            } else {
+                                const errorMessage = campResult?.details || campResult?.description || 'Unknown error';
+                                throw new Error(`Campaign creation failed: ${errorMessage}`);
+                            }
                         } catch (e) { console.error(`[Harvesting] Error in CREATE_NEW_CAMPAIGN flow:`, e); }
                     } else {
                         harvestSuccess = true; 

@@ -40,8 +40,10 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
 
                 if (!throttledEntities.has(throttleKey)) {
                     // Calculate bid once, reuse for ad group and keyword/target
-                    const cpc = (entity.dailyData.reduce((s, d) => s + d.clicks, 0) > 0) ? (entity.dailyData.reduce((s, d) => s + d.spend, 0) / entity.dailyData.reduce((s, d) => s + d.clicks, 0)) : 0.50;
-                    newBid = parseFloat(Math.max(0.02, action.bidOption.type === 'CUSTOM_BID' ? action.bidOption.value : cpc * (action.bidOption.value || 1.15)).toFixed(2));
+                    const totalClicks = entity.dailyData.reduce((s, d) => s + d.clicks, 0);
+                    const totalSpend = entity.dailyData.reduce((s, d) => s + d.spend, 0);
+                    const avgCpc = totalClicks > 0 ? totalSpend / totalClicks : 0.50; // Use a fallback bid if no clicks
+                    newBid = parseFloat(Math.max(0.02, action.bidOption.type === 'CUSTOM_BID' ? action.bidOption.value : avgCpc * (action.bidOption.value || 1.15)).toFixed(2));
                     
                     if (action.type === 'CREATE_NEW_CAMPAIGN') {
                         const maxNameLength = 128;
@@ -53,12 +55,12 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             : entity.entityText;
                         const campaignName = `${prefix}${truncatedSearchTerm}${suffix}`;
                         
-                        // FIX: Use lowercase for enums and flatten budget object to match SP-API v3 spec for POST /campaigns
+                        // FIX: Correctly structured payload for POST /sp/campaigns (v3)
                         const campaignPayload = {
                             name: campaignName,
-                            targetingType: 'manual',
+                            targetingType: 'manual', // Lowercase enum is correct
                             state: 'ENABLED',
-                            budget: Number(action.newCampaignBudget ?? 10.00),
+                            budget: Number(action.newCampaignBudget ?? 10.00), // budget is a flat number
                             budgetType: 'DAILY',
                             startDate: getLocalDateString('America/Los_Angeles').replace(/-/g, ''),
                         };
@@ -126,10 +128,14 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                         newCampaignId = action.targetCampaignId;
                         newAdGroupId = action.targetAdGroupId;
                     }
+                } else {
+                    console.log(`[Harvesting] Term "${entity.entityText}" for ASIN ${entity.sourceAsin} is a winner, but is currently on cooldown. Skipping harvest action.`);
+                    // Even if on cooldown, we still want to negate it in the new source if auto-negate is on.
+                    harvestSuccess = false; // Prevents creation of new keyword/target
                 }
 
+
                 if (harvestSuccess && newAdGroupId) {
-                    // Bid is already calculated and stored in newBid
                     try {
                         if (isAsin) {
                             const targetPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', expression: [{ type: 'ASIN_SAME_AS', value: entity.entityText }], bid: newBid };

@@ -864,7 +864,6 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             : entity.entityText;
                         const campaignName = `${prefix}${truncatedSearchTerm}${suffix}`;
                         
-                        // FIX: Corrected startDate format to YYYY-MM-DD
                         const campaignPayload = {
                             name: campaignName,
                             targetingType: 'MANUAL',

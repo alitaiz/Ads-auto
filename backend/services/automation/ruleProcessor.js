@@ -1,7 +1,14 @@
 // backend/services/automation/ruleProcessor.js
 import pool from '../../db.js';
 import { getPerformanceData } from './dataFetcher.js';
-import { evaluateBidAdjustmentRule, evaluateSearchTermAutomationRule, evaluateBudgetAccelerationRule, evaluateSbSdBidAdjustmentRule, evaluatePriceAdjustmentRule, evaluateSearchTermHarvestingRule } from './evaluators.js';
+import { 
+    evaluateBidAdjustmentRule, 
+    evaluateSearchTermAutomationRule, 
+    evaluateBudgetAccelerationRule, 
+    evaluateSbSdBidAdjustmentRule, 
+    evaluatePriceAdjustmentRule, 
+    evaluateSearchTermHarvestingRule 
+} from './evaluators/index.js';
 import { isRuleDue, logAction, getLocalDateString } from './utils.js';
 import { amazonAdsApiRequest } from '../../helpers/amazon-api.js';
 

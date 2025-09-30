@@ -860,13 +860,15 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                 if (!throttledEntities.has(throttleKey)) {
                     if (action.type === 'CREATE_NEW_CAMPAIGN') {
                         const campaignName = `[H] - ${entity.sourceAsin} - ${entity.entityText} - ${action.matchType}`;
-                        // FIX: The v3 POST /campaigns endpoint expects budget and budgetType as top-level properties.
+                        // FIX: The v3 POST /campaigns endpoint expects a nested budget object.
                         const campaignPayload = {
                             name: campaignName,
                             targetingType: 'MANUAL',
                             state: 'ENABLED',
-                            budget: action.newCampaignBudget,
-                            budgetType: 'DAILY',
+                            budget: {
+                                budget: action.newCampaignBudget,
+                                budgetType: 'DAILY'
+                            },
                             startDate: getLocalDateString('America/Los_Angeles')
                         };
                         try {
@@ -908,8 +910,8 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             }
                         } catch (e) {
                              console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, JSON.stringify(e, null, 2));
-                             const apiErrorDetails = e.details ? (e.details.message || e.details.details) : null;
-                             const errorMessage = apiErrorDetails || e.message || 'An unknown error occurred. See server logs for the raw error object.';
+                             const apiErrorDetails = e.details ? (e.details.message || e.details.Message || e.details.details) : null;
+                             const errorMessage = (typeof apiErrorDetails === 'object' ? JSON.stringify(apiErrorDetails) : apiErrorDetails) || e.message || 'An unknown error occurred. See server logs for the raw error object.';
                              console.error(`[Harvesting] Error in CREATE_NEW_CAMPAIGN flow:`, errorMessage);
                              throw new Error(`Campaign creation failed: ${errorMessage}`);
                         }

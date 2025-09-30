@@ -865,7 +865,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             targetingType: 'MANUAL',
                             state: 'ENABLED',
                             budget: {
-                                amount: action.newCampaignBudget || 10.00,
+                                budget: Number(action.newCampaignBudget ?? 10.00),
                                 budgetType: 'DAILY'
                             },
                             startDate: getLocalDateString('America/Los_Angeles')
@@ -899,13 +899,13 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                         console.log(`[Harvesting] Created Product Ad for ASIN ${entity.sourceAsin}`);
                                         harvestSuccess = true;
                                     } else {
-                                        throw new Error(`Product Ad creation failed: ${adResult?.description || adResult?.details || 'Unknown error'}`);
+                                        throw new Error(`Product Ad creation failed: ${adResult?.details || 'Unknown error'}`);
                                     }
                                 } else {
-                                    throw new Error(`Ad Group creation failed: ${agResult?.description || agResult?.details || 'Unknown error'}`);
+                                    throw new Error(`Ad Group creation failed: ${agResult?.details || 'Unknown error'}`);
                                 }
                             } else {
-                                throw new Error(`Campaign creation failed: ${campResult?.description || campResult?.details || 'Unknown error'}`);
+                                throw new Error(`Campaign creation failed: ${campResult?.details || 'Unknown error'}`);
                             }
                         } catch (e) {
                              console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, e.details || e);

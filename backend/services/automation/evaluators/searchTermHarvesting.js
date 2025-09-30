@@ -36,8 +36,13 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                 let newCampaignId;
                 let newAdGroupId;
                 let harvestSuccess = false;
+                let newBid; // Will be calculated and reused
 
                 if (!throttledEntities.has(throttleKey)) {
+                    // Calculate bid once, reuse for ad group and keyword/target
+                    const cpc = (entity.dailyData.reduce((s, d) => s + d.clicks, 0) > 0) ? (entity.dailyData.reduce((s, d) => s + d.spend, 0) / entity.dailyData.reduce((s, d) => s + d.clicks, 0)) : 0.50;
+                    newBid = parseFloat(Math.max(0.02, action.bidOption.type === 'CUSTOM_BID' ? action.bidOption.value : cpc * (action.bidOption.value || 1.15)).toFixed(2));
+                    
                     if (action.type === 'CREATE_NEW_CAMPAIGN') {
                         const maxNameLength = 128;
                         const prefix = `[H] - ${entity.sourceAsin} - `;
@@ -48,14 +53,14 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             : entity.entityText;
                         const campaignName = `${prefix}${truncatedSearchTerm}${suffix}`;
                         
-                        // CORRECTED PAYLOAD STRUCTURE
+                        // FIX: Use lowercase for enums and flatten budget object to match SP-API v3 spec for POST /campaigns
                         const campaignPayload = {
                             name: campaignName,
-                            targetingType: 'MANUAL',
+                            targetingType: 'manual',
                             state: 'ENABLED',
                             budget: Number(action.newCampaignBudget ?? 10.00),
                             budgetType: 'DAILY',
-                            startDate: getLocalDateString('America/Los_Angeles').replace(/-/g, ''), // Format: YYYYMMDD
+                            startDate: getLocalDateString('America/Los_Angeles').replace(/-/g, ''),
                         };
 
                         try {
@@ -67,7 +72,9 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             if (campResult?.code === 'SUCCESS') {
                                 newCampaignId = campResult.campaignId;
                                 console.log(`[Harvesting] Created Campaign ID: ${newCampaignId}`);
-                                const adGroupPayload = { name: entity.entityText, campaignId: newCampaignId, state: 'ENABLED' };
+                                
+                                // FIX: Add required defaultBid to ad group payload
+                                const adGroupPayload = { name: entity.entityText, campaignId: newCampaignId, state: 'ENABLED', defaultBid: newBid };
                                 const agResponse = await amazonAdsApiRequest({
                                     method: 'post', url: '/sp/adGroups', profileId: rule.profile_id, data: { adGroups: [adGroupPayload] },
                                     headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' },
@@ -97,11 +104,9 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                 throw new Error(`Campaign creation failed: ${details}`);
                             }
                         } catch (e) {
+                            // FIX: Improved error logging to extract useful details from Amazon's response
                             console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, e);
-                            
-                            // IMPROVED ERROR LOGGING
                             let errorMessage = 'An unknown error occurred. See server logs for the raw error object.';
-                            
                             if (e instanceof Error) {
                                 errorMessage = e.message;
                             } else if (e && e.details) {
@@ -113,11 +118,10 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             } else if (e && (e.Message || e.message)) {
                                 errorMessage = e.Message || e.message;
                             }
-                        
                             console.error(`[Harvesting] Extracted error message in flow:`, errorMessage);
                             throw new Error(`Campaign creation failed: ${errorMessage}`);
                         }
-                    } else {
+                    } else { // ADD_TO_EXISTING_CAMPAIGN
                         harvestSuccess = true; 
                         newCampaignId = action.targetCampaignId;
                         newAdGroupId = action.targetAdGroupId;
@@ -125,8 +129,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                 }
 
                 if (harvestSuccess && newAdGroupId) {
-                    const cpc = (entity.dailyData.reduce((s, d) => s + d.clicks, 0) > 0) ? (entity.dailyData.reduce((s, d) => s + d.spend, 0) / entity.dailyData.reduce((s, d) => s + d.clicks, 0)) : 0.50;
-                    const newBid = parseFloat(Math.max(0.02, action.bidOption.type === 'CUSTOM_BID' ? action.bidOption.value : cpc * (action.bidOption.value || 1.15)).toFixed(2));
+                    // Bid is already calculated and stored in newBid
                     try {
                         if (isAsin) {
                             const targetPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', expression: [{ type: 'ASIN_SAME_AS', value: entity.entityText }], bid: newBid };

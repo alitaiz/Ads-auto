@@ -2,6 +2,27 @@
 import { amazonAdsApiRequest } from '../../../helpers/amazon-api.js';
 import { getLocalDateString, calculateMetricsForWindow, checkCondition } from '../utils.js';
 
+/**
+ * Normalizes the response from Amazon Ads API creation endpoints.
+ * Handles both `{ "campaigns": [...] }` and `[...]` formats.
+ * @param {object | Array} response The raw response from the API.
+ * @param {string} key The expected key (e.g., 'campaigns', 'adGroups').
+ * @returns {Array} A standardized array of results.
+ */
+const getResultsArray = (response, key) => {
+    if (Array.isArray(response)) {
+        return response;
+    }
+    if (response && response[key] && Array.isArray(response[key])) {
+        return response[key];
+    }
+    // Handle cases where the response is a direct error object { code: '...', details: '...' }
+    if (response && response.code && response.code !== 'SUCCESS') {
+        return [response]; // Return the error object in an array to be handled as a failure
+    }
+    return []; // Return an empty array for unexpected structures
+};
+
 export const evaluateSearchTermHarvestingRule = async (rule, performanceData, throttledEntities) => {
     const actionsByCampaign = {};
     const actedOnEntities = new Set();
@@ -36,13 +57,12 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                 let newCampaignId;
                 let newAdGroupId;
                 let harvestSuccess = false;
-                let newBid; // Will be calculated and reused
+                let newBid;
 
                 if (!throttledEntities.has(throttleKey)) {
-                    // Calculate bid once, reuse for ad group and keyword/target
                     const totalClicks = entity.dailyData.reduce((s, d) => s + d.clicks, 0);
                     const totalSpend = entity.dailyData.reduce((s, d) => s + d.spend, 0);
-                    const avgCpc = totalClicks > 0 ? totalSpend / totalClicks : 0.50; // Use a fallback bid if no clicks
+                    const avgCpc = totalClicks > 0 ? totalSpend / totalClicks : 0.50;
                     newBid = parseFloat(Math.max(0.02, action.bidOption.type === 'CUSTOM_BID' ? action.bidOption.value : avgCpc * (action.bidOption.value || 1.15)).toFixed(2));
                     
                     if (action.type === 'CREATE_NEW_CAMPAIGN') {
@@ -55,16 +75,12 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             : entity.entityText;
                         const campaignName = `${prefix}${truncatedSearchTerm}${suffix}`;
                         
-                        // FIX: Correctly structured payload for POST /sp/campaigns (v3)
                         const campaignPayload = {
                             name: campaignName,
-                            targetingType: 'MANUAL', // FIX: Use uppercase enum 'MANUAL'
+                            targetingType: 'MANUAL',
                             state: 'ENABLED',
-                            budget: {
-                                budget: Number(action.newCampaignBudget ?? 10.00), // FIX: Use 'budget' key instead of 'amount'
-                                budgetType: 'DAILY'
-                            },
-                            startDate: getLocalDateString('America/Los_Angeles'), // FIX: Send date as YYYY-MM-DD
+                            budget: { budget: Number(action.newCampaignBudget ?? 10.00), budgetType: 'DAILY' },
+                            startDate: getLocalDateString('America/Los_Angeles'),
                         };
 
                         try {
@@ -72,7 +88,10 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                 method: 'post', url: '/sp/campaigns', profileId: rule.profile_id, data: { campaigns: [campaignPayload] },
                                 headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
                             });
-                            const campResult = campResponse.campaigns?.[0];
+                            
+                            const campResults = getResultsArray(campResponse, 'campaigns');
+                            const campResult = campResults[0];
+
                             if (campResult?.code === 'SUCCESS') {
                                 newCampaignId = campResult.campaignId;
                                 console.log(`[Harvesting] Created Campaign ID: ${newCampaignId}`);
@@ -82,7 +101,10 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                     method: 'post', url: '/sp/adGroups', profileId: rule.profile_id, data: { adGroups: [adGroupPayload] },
                                     headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' },
                                 });
-                                const agResult = agResponse.adGroups?.[0];
+
+                                const agResults = getResultsArray(agResponse, 'adGroups');
+                                const agResult = agResults[0];
+
                                 if (agResult?.code === 'SUCCESS') {
                                     newAdGroupId = agResult.adGroupId;
                                     console.log(`[Harvesting] Created Ad Group ID: ${newAdGroupId}`);
@@ -92,7 +114,10 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                         method: 'post', url: '/sp/productAds', profileId: rule.profile_id, data: { productAds: [productAdPayload] },
                                         headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json', 'Accept': 'application/vnd.spProductAd.v3+json' },
                                     });
-                                    const adResult = adResponse.productAds?.[0];
+                                    
+                                    const adResults = getResultsArray(adResponse, 'productAds');
+                                    const adResult = adResults[0];
+
                                     if(adResult?.code === 'SUCCESS') {
                                         console.log(`[Harvesting] Created Product Ad for ASIN ${entity.sourceAsin}`);
                                         harvestSuccess = true;
@@ -108,31 +133,22 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             }
                         } catch (e) {
                             console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, e);
-                            let errorMessage = 'An unknown error occurred. See server logs for the raw error object.';
-                            if (e instanceof Error) {
-                                errorMessage = e.message;
-                            } else if (e && e.details) {
-                                if (typeof e.details === 'object' && e.details !== null) {
-                                    errorMessage = e.details.message || e.details.Message || JSON.stringify(e.details);
-                                } else if (typeof e.details === 'string') {
-                                    errorMessage = e.details;
-                                }
-                            } else if (e && (e.Message || e.message)) {
-                                errorMessage = e.Message || e.message;
-                            }
+                            let errorMessage = 'An unknown error occurred. See server logs.';
+                            if (e instanceof Error) errorMessage = e.message;
+                            else if (e?.details) errorMessage = typeof e.details === 'string' ? e.details : JSON.stringify(e.details);
+                            else if (e?.Message || e?.message) errorMessage = e.Message || e.message;
                             console.error(`[Harvesting] Extracted error message in flow:`, errorMessage);
-                            throw new Error(`Campaign creation failed: ${errorMessage}`);
+                            throw new Error(`Harvesting flow failed: ${errorMessage}`);
                         }
-                    } else { // ADD_TO_EXISTING_CAMPAIGN
+                    } else {
                         harvestSuccess = true; 
                         newCampaignId = action.targetCampaignId;
                         newAdGroupId = action.targetAdGroupId;
                     }
                 } else {
                     console.log(`[Harvesting] Term "${entity.entityText}" for ASIN ${entity.sourceAsin} is a winner, but is currently on cooldown. Skipping harvest action.`);
-                    harvestSuccess = false; // Prevents creation of new keyword/target
+                    harvestSuccess = false;
                 }
-
 
                 if (harvestSuccess && newAdGroupId) {
                     try {

@@ -79,7 +79,7 @@ const getDefaultHarvestingAction = (): AutomationRuleAction => ({
     type: 'CREATE_NEW_CAMPAIGN',
     matchType: 'EXACT',
     newCampaignBudget: 10,
-    bidOption: { type: 'CPC_MULTIPLIER', value: 1.0 },
+    bidOption: { type: 'CPC_MULTIPLIER', value: 1.0, maxBid: undefined },
     autoNegate: true,
 });
 
@@ -775,12 +775,29 @@ const SearchTermHarvestingActionForm = ({ action, onActionChange }: { action: Au
                 <label><input type="radio" value="CPC_MULTIPLIER" checked={action.bidOption?.type === 'CPC_MULTIPLIER'} onChange={e => onActionChange('bidOption.type', e.target.value)} /> Based on Search Term CPC</label>
                 <label><input type="radio" value="CUSTOM_BID" checked={action.bidOption?.type === 'CUSTOM_BID'} onChange={e => onActionChange('bidOption.type', e.target.value)} /> Set custom bid</label>
             </div></div>
-            <div style={{...styles.formGroup, marginTop: '10px'}}>
-                <input type="number" step="0.01" min="0" style={{...styles.conditionInput, width: '200px'}} placeholder={action.bidOption?.type === 'CPC_MULTIPLIER' ? "e.g., 1.0 for exact CPC" : "e.g., 0.75"} value={action.bidOption?.value ?? ''} onChange={e => onActionChange('bidOption.value', Number(e.target.value))} />
-                {action.bidOption?.type === 'CPC_MULTIPLIER' && (
-                    <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>
-                        hệ số nhân (ví dụ: <code style={{backgroundColor: '#e9ecef', padding: '2px 4px', borderRadius: '3px'}}>1.0</code> để dùng CPC, <code style={{backgroundColor: '#e9ecef', padding: '2px 4px', borderRadius: '3px'}}>1.15</code> để tăng 15%)
-                    </p>
+             <div style={{ marginTop: '15px' }}>
+                {action.bidOption?.type === 'CPC_MULTIPLIER' ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                        <div style={styles.formGroup}>
+                            <label style={styles.label}>CPC Multiplier</label>
+                            <input type="number" step="0.01" min="0" style={styles.conditionInput} placeholder="e.g., 1.0" value={action.bidOption?.value ?? ''} onChange={e => onActionChange('bidOption.value', Number(e.target.value))} />
+                            <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>
+                                Use <code style={{backgroundColor: '#e9ecef', padding: '2px 4px', borderRadius: '3px'}}>1.0</code> for exact CPC, <code style={{backgroundColor: '#e9ecef', padding: '2px 4px', borderRadius: '3px'}}>1.15</code> to increase by 15%.
+                            </p>
+                        </div>
+                        <div style={styles.formGroup}>
+                            <label style={styles.label}>Max Bid (Optional)</label>
+                            <input type="number" step="0.01" min="0.02" style={styles.conditionInput} placeholder="e.g., 1.25" value={action.bidOption?.maxBid ?? ''} onChange={e => onActionChange('bidOption.maxBid', e.target.value ? Number(e.target.value) : undefined)} />
+                            <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>
+                                Caps the bid calculated from CPC. Leave blank for no limit.
+                            </p>
+                        </div>
+                    </div>
+                ) : (
+                    <div style={styles.formGroup}>
+                        <label style={styles.label}>Custom Bid Amount</label>
+                        <input type="number" step="0.01" min="0.02" style={{...styles.conditionInput, width: '200px'}} placeholder="e.g., 0.75" value={action.bidOption?.value ?? ''} onChange={e => onActionChange('bidOption.value', Number(e.target.value))} />
+                    </div>
                 )}
             </div>
         </div>

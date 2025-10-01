@@ -93,6 +93,7 @@ export interface AutomationRuleAction {
     bidOption?: {
         type: 'CPC_MULTIPLIER' | 'CUSTOM_BID';
         value: number;
+        maxBid?: number;
     };
     autoNegate?: boolean;
 }

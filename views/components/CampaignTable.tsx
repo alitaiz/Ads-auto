@@ -261,10 +261,11 @@ interface LogNegative {
 interface LogHarvest {
     searchTerm: string;
     sourceAsin: string;
-    sourceCampaignId: string;
     actionType: 'CREATE_NEW_CAMPAIGN' | 'ADD_TO_EXISTING_CAMPAIGN';
     newCampaignId?: string;
+    newCampaignName?: string;
     targetCampaignId?: string;
+    triggeringMetrics?: TriggeringMetric[];
 }
 interface DataDateRange {
     report?: { start: string; end: string };
@@ -422,21 +423,34 @@ export function CampaignTable({
             return <span>{log.summary}</span>;
         }
         
+        const timeWindowText = (metric: TriggeringMetric) => 
+            metric.timeWindow === 'TODAY' ? 'Today' : `${metric.timeWindow} days`;
+
         return (
             <ul style={styles.detailsList}>
                 {newHarvests.map((harvest, index) => {
                     let text = `Harvested "${harvest.searchTerm}"`;
                     if (harvest.actionType === 'CREATE_NEW_CAMPAIGN') {
-                        text += ` into new campaign ${harvest.newCampaignId}.`;
+                        text += harvest.newCampaignName ? ` into new campaign "${harvest.newCampaignName}".` : ` into new campaign ${harvest.newCampaignId}.`;
                     } else {
                         text += ` into existing campaign ${harvest.targetCampaignId}.`;
                     }
-                    return <li key={`h-${index}`}>{text}</li>
+                    return (
+                         <li key={`h-${index}`}>
+                            {text}
+                            {(harvest.triggeringMetrics && harvest.triggeringMetrics.length > 0) && (
+                                <ul style={styles.metricList}>
+                                    {harvest.triggeringMetrics.map((metric, mIndex) => (
+                                        <li key={mIndex} style={styles.metricListItem}>
+                                            {metric.metric} ({timeWindowText(metric)}) was <strong>{formatMetricValue(metric.value, metric.metric)}</strong> (Condition: {metric.condition})
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </li>
+                    )
                 })}
                 {changes.map((change, index) => {
-                    const timeWindowText = (metric: TriggeringMetric) => 
-                        metric.timeWindow === 'TODAY' ? 'Today' : `${metric.timeWindow} days`;
-
                     // BUDGET ACCELERATION LOG
                     if (typeof change.oldBudget !== 'undefined' && typeof change.newBudget !== 'undefined') {
                         return (

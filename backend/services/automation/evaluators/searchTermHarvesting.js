@@ -49,12 +49,23 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
         
         let isWinner = false;
         let matchedGroup = null;
+        let triggeringMetrics = []; // Variable to hold metrics for the winning group
 
         for (const group of rule.config.conditionGroups) {
             let allConditionsMet = true;
+            const evaluatedMetricsForGroup = [];
             for (const condition of group.conditions) {
                 const metrics = calculateMetricsForWindow(entity.dailyData, condition.timeWindow, referenceDate);
-                if (!checkCondition(metrics[condition.metric], condition.operator, condition.value)) {
+                const metricValue = metrics[condition.metric];
+                
+                evaluatedMetricsForGroup.push({
+                    metric: condition.metric,
+                    timeWindow: condition.timeWindow,
+                    value: metricValue,
+                    condition: `${condition.operator} ${condition.value}`
+                });
+
+                if (!checkCondition(metricValue, condition.operator, condition.value)) {
                     allConditionsMet = false;
                     break;
                 }
@@ -62,6 +73,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
             if (allConditionsMet) {
                 isWinner = true;
                 matchedGroup = group;
+                triggeringMetrics = evaluatedMetricsForGroup; // Capture the metrics
                 break;
             }
         }
@@ -110,10 +122,12 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
                 const newBid = parseFloat(Math.max(0.02, calculatedBid).toFixed(2));
 
                 let newCampaignId, newAdGroupId;
+                let newCampaignName = null;
                 
                 if (action.type === 'CREATE_NEW_CAMPAIGN') {
                     const sanitizedSearchTerm = sanitizeForCampaignName(entity.entityText);
                     const campaignName = `[H] - ${entity.sourceAsin} - ${sanitizedSearchTerm.substring(0, 80)} - ${action.matchType}`;
+                    newCampaignName = campaignName;
 
                     const campResponse = await amazonAdsApiRequest({ /* create campaign */
                         method: 'post', url: '/sp/campaigns', profileId: rule.profile_id, data: { campaigns: [{
@@ -174,6 +188,21 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
                 harvestSuccessful = true;
                 createdCount++;
                 
+                // --- Add successful action to log details ---
+                const sourceCampaignId = entity.sourceCampaignId;
+                if (!actionsByCampaign[sourceCampaignId]) {
+                    actionsByCampaign[sourceCampaignId] = { changes: [], newNegatives: [], newHarvests: [] };
+                }
+                actionsByCampaign[sourceCampaignId].newHarvests.push({
+                    searchTerm: entity.entityText,
+                    sourceAsin: entity.sourceAsin,
+                    actionType: action.type,
+                    newCampaignId: newCampaignId,
+                    newCampaignName: newCampaignName,
+                    targetCampaignId: action.targetCampaignId,
+                    triggeringMetrics: triggeringMetrics
+                });
+
                 // --- Conditional Negation ---
                 if (action.autoNegate !== false) {
                     const negPayloadBase = { campaignId: entity.sourceCampaignId, adGroupId: entity.sourceAdGroupId };

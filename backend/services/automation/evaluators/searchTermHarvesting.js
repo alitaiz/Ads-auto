@@ -36,6 +36,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
 
     let createdCount = 0, negatedCount = 0, failureCount = 0, skippedCount = 0;
     const failures = [];
+    const actedOnEntities = []; // BUG FIX: Initialize array to track acted-upon entities.
     
     // 1. Pre-fetch all throttled entities for this rule
     const throttleResult = await pool.query(
@@ -186,6 +187,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
                 );
 
                 harvestSuccessful = true;
+                actedOnEntities.push(uniqueKey); // BUG FIX: Add to actedOnEntities to signal success to processor
                 createdCount++;
                 
                 // --- Add successful action to log details ---
@@ -237,6 +239,6 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
     return {
         summary: summaryParts.length > 0 ? summaryParts.join(', ') + '.' : 'No new search terms met the criteria for harvesting.',
         details: { actions_by_campaign: actionsByCampaign, failures },
-        actedOnEntities: [] // Cooldown is handled internally now
+        actedOnEntities: actedOnEntities,
     };
 };

@@ -351,3 +351,60 @@ export interface ProductListing {
     sku: string;
     title: string;
 }
+
+// --- Types for Automation Logs ---
+
+export interface TriggeringMetric {
+  metric: 'spend' | 'sales' | 'acos' | 'orders' | 'clicks' | 'impressions' | 'roas' | 'budgetUtilization';
+  timeWindow: number | 'TODAY';
+  value: number;
+  condition: string;
+}
+
+export interface LogChange {
+  entityText: string;
+  oldBid?: number;
+  newBid?: number;
+  oldBudget?: number;
+  newBudget?: number;
+  triggeringMetrics: TriggeringMetric[];
+}
+
+export interface LogNegative {
+    searchTerm: string;
+    matchType: string;
+    triggeringMetrics?: TriggeringMetric[];
+}
+
+export interface LogHarvest {
+    searchTerm: string;
+    sourceAsin: string;
+    actionType: 'CREATE_NEW_CAMPAIGN' | 'ADD_TO_EXISTING_CAMPAIGN';
+    newCampaignId?: string;
+    newCampaignName?: string;
+    targetCampaignId?: string;
+    triggeringMetrics?: TriggeringMetric[];
+}
+
+export interface DataDateRange {
+    report?: { start: string; end: string } | null;
+    stream?: { start: string; end: string } | null;
+}
+
+export interface CampaignLogDetails {
+  changes?: LogChange[];
+  newNegatives?: LogNegative[];
+  newHarvests?: LogHarvest[];
+  failures?: any[];
+  actions_by_campaign?: Record<string, Omit<CampaignLogDetails, 'actions_by_campaign'>>;
+  data_date_range?: DataDateRange;
+}
+
+export interface AutomationLog {
+    id: number;
+    rule_name: string;
+    run_at: string;
+    status: string;
+    summary: string;
+    details: CampaignLogDetails;
+}

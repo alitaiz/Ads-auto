@@ -256,7 +256,15 @@ interface LogChange {
 interface LogNegative {
     searchTerm: string;
     matchType: string;
-    triggeringMetrics: TriggeringMetric[];
+    triggeringMetrics?: TriggeringMetric[]; // Made optional for backward compatibility
+}
+interface LogHarvest {
+    searchTerm: string;
+    sourceAsin: string;
+    sourceCampaignId: string;
+    actionType: 'CREATE_NEW_CAMPAIGN' | 'ADD_TO_EXISTING_CAMPAIGN';
+    newCampaignId?: string;
+    targetCampaignId?: string;
 }
 interface DataDateRange {
     report?: { start: string; end: string };
@@ -265,6 +273,7 @@ interface DataDateRange {
 interface CampaignLogDetails {
   changes?: LogChange[];
   newNegatives?: LogNegative[];
+  newHarvests?: LogHarvest[];
   data_date_range?: DataDateRange;
 }
 interface AutomationLog {
@@ -407,13 +416,23 @@ export function CampaignTable({
 
         const changes = details.changes || [];
         const newNegatives = details.newNegatives || [];
+        const newHarvests = details.newHarvests || [];
         
-        if (changes.length === 0 && newNegatives.length === 0) {
+        if (changes.length === 0 && newNegatives.length === 0 && newHarvests.length === 0) {
             return <span>{log.summary}</span>;
         }
         
         return (
             <ul style={styles.detailsList}>
+                {newHarvests.map((harvest, index) => {
+                    let text = `Harvested "${harvest.searchTerm}"`;
+                    if (harvest.actionType === 'CREATE_NEW_CAMPAIGN') {
+                        text += ` into new campaign ${harvest.newCampaignId}.`;
+                    } else {
+                        text += ` into existing campaign ${harvest.targetCampaignId}.`;
+                    }
+                    return <li key={`h-${index}`}>{text}</li>
+                })}
                 {changes.map((change, index) => {
                     const timeWindowText = (metric: TriggeringMetric) => 
                         metric.timeWindow === 'TODAY' ? 'Today' : `${metric.timeWindow} days`;
@@ -457,13 +476,15 @@ export function CampaignTable({
                 {newNegatives.map((neg, index) => (
                     <li key={`n-${index}`}>
                          Negated "{neg.searchTerm}" as {neg.matchType?.replace(/_/g, ' ')}
-                         <ul style={styles.metricList}>
-                            {neg.triggeringMetrics.map((metric, mIndex) => (
-                                <li key={mIndex} style={styles.metricListItem}>
-                                    {metric.metric} ({metric.timeWindow} days) was <strong>{formatMetricValue(metric.value, metric.metric)}</strong> (Condition: {metric.condition})
-                                </li>
-                            ))}
-                        </ul>
+                         {neg.triggeringMetrics && neg.triggeringMetrics.length > 0 && (
+                             <ul style={styles.metricList}>
+                                {neg.triggeringMetrics.map((metric, mIndex) => (
+                                    <li key={mIndex} style={styles.metricListItem}>
+                                        {metric.metric} ({metric.timeWindow} days) was <strong>{formatMetricValue(metric.value, metric.metric)}</strong> (Condition: {metric.condition})
+                                    </li>
+                                ))}
+                            </ul>
+                         )}
                     </li>
                 ))}
             </ul>

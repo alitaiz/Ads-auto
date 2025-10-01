@@ -135,11 +135,32 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                     headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
                                 });
                             }
+
+                            // --- LOG HARVEST ACTION ---
+                            const harvestDetails = {
+                                searchTerm: entity.entityText,
+                                sourceAsin: entity.sourceAsin,
+                                sourceCampaignId: entity.sourceCampaignId,
+                                actionType: action.type,
+                                newBid: newBid,
+                                ...(action.type === 'CREATE_NEW_CAMPAIGN'
+                                    ? { newCampaignId, newAdGroupId }
+                                    : { targetCampaignId: newCampaignId, targetAdGroupId: newAdGroupId })
+                            };
+                            const logCampaignId = action.type === 'CREATE_NEW_CAMPAIGN' ? newCampaignId : action.targetCampaignId;
+                            if (logCampaignId) {
+                                if (!actionsByCampaign[logCampaignId]) {
+                                    actionsByCampaign[logCampaignId] = { changes: [], newNegatives: [], newHarvests: [] };
+                                }
+                                actionsByCampaign[logCampaignId].newHarvests.push(harvestDetails);
+                            }
+                            // -------------------------
+
                             createdCount++;
                             actedOnEntities.add(throttleKey);
                         }
                     } catch (e) {
-                         console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, e);
+                         console.error(`[Harvesting] Raw error object in flow:`, e);
                          const errorMessage = e.details?.message || e.message || 'Unknown error during harvesting flow';
                          console.error(`[Harvesting] Extracted error message in flow:`, errorMessage);
                          throw new Error(`Harvesting flow failed: ${errorMessage}`);
@@ -150,19 +171,36 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                 
                 if (action.autoNegate !== false) {
                     try {
+                        const negPayloadBase = {
+                            campaignId: entity.sourceCampaignId,
+                            adGroupId: entity.sourceAdGroupId,
+                        };
+
                         if (isAsin) {
-                            const negTargetPayload = { campaignId: entity.sourceCampaignId, adGroupId: entity.sourceAdGroupId, expression: [{ type: 'ASIN_SAME_AS', value: entity.entityText }] };
+                            const negTargetPayload = { ...negPayloadBase, expression: [{ type: 'ASIN_SAME_AS', value: entity.entityText }] };
                             await amazonAdsApiRequest({
                                 method: 'post', url: '/sp/negativeTargets', profileId: rule.profile_id, data: { negativeTargetingClauses: [negTargetPayload] },
                                 headers: { 'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json', 'Accept': 'application/vnd.spNegativeTargetingClause.v3+json' },
                             });
                         } else {
-                            const negKwPayload = { campaignId: entity.sourceCampaignId, adGroupId: entity.sourceAdGroupId, keywordText: entity.entityText, matchType: 'NEGATIVE_EXACT' };
+                            const negKwPayload = { ...negPayloadBase, keywordText: entity.entityText, matchType: 'NEGATIVE_EXACT' };
                             await amazonAdsApiRequest({
                                 method: 'post', url: '/sp/negativeKeywords', profileId: rule.profile_id, data: { negativeKeywords: [negKwPayload] },
                                 headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json', 'Accept': 'application/vnd.spNegativeKeyword.v3+json' },
                             });
                         }
+                        
+                        // --- LOG NEGATION ACTION ---
+                        const sourceCampaignId = entity.sourceCampaignId.toString();
+                        if (!actionsByCampaign[sourceCampaignId]) {
+                            actionsByCampaign[sourceCampaignId] = { changes: [], newNegatives: [], newHarvests: [] };
+                        }
+                        actionsByCampaign[sourceCampaignId].newNegatives.push({
+                            searchTerm: entity.entityText,
+                            matchType: isAsin ? 'NEGATIVE_PRODUCT_TARGET' : 'NEGATIVE_EXACT'
+                        });
+                        // -------------------------
+
                         console.log(`[Harvesting] Negated "${entity.entityText}" in source Ad Group ${entity.sourceAdGroupId}`);
                         negatedCount++;
                     } catch (e) { console.error(`[Harvesting] Error negating source term:`, e.details || e); }

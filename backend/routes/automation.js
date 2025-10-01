@@ -131,6 +131,7 @@ router.get('/automation/logs', async (req, res) => {
             if (campaignActions) {
                 const changeCount = campaignActions.changes?.length || 0;
                 const negativeCount = campaignActions.newNegatives?.length || 0;
+                const harvestCount = campaignActions.newHarvests?.length || 0;
                 
                 let summary;
                 if (log.status === 'NO_ACTION') {
@@ -138,6 +139,7 @@ router.get('/automation/logs', async (req, res) => {
                 } else {
                     const summaryParts = [];
                     if (changeCount > 0) summaryParts.push(`Performed ${changeCount} bid adjustment(s)`);
+                    if (harvestCount > 0) summaryParts.push(`Harvested ${harvestCount} term(s)`);
                     if (negativeCount > 0) summaryParts.push(`Created ${negativeCount} new negative keyword(s)`);
                     summary = summaryParts.length > 0 ? summaryParts.join(' and ') + '.' : 'No changes were made for this campaign.';
                 }

@@ -12,10 +12,17 @@ const sanitizeForCampaignName = (name) => {
 const checkCampaignExists = async (campaignId, profileId) => {
     if (!campaignId) return false;
     try {
+        // FIX: Added headers to specify the v3 API contract. This prevents Amazon
+        // from defaulting to a legacy authentication scheme that is incompatible
+        // with the Bearer token being sent, which was causing the "Invalid key=value pair" error.
         await amazonAdsApiRequest({
             method: 'get',
             url: `/sp/campaigns/${campaignId}`,
             profileId,
+            headers: {
+                'Accept': 'application/vnd.spCampaign.v3+json',
+                'Content-Type': 'application/vnd.spCampaign.v3+json'
+            },
         });
         return true; // If it doesn't throw, it exists
     } catch (error) {

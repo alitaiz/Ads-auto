@@ -22,9 +22,10 @@ const checkCampaignExists = async (campaignId, profileId) => {
         if (error.status === 404) {
             return false; // Not found, so it doesn't exist
         }
-        // For any other error (auth, server error, etc.), re-throw it to be handled by the caller.
-        // This prevents the rule from getting stuck on an assumption.
-        throw error;
+        // For any other error (auth, server error, etc.), log it and return null
+        // to signify an indeterminate state that the caller must handle.
+        console.error(`[Harvesting] Error checking for campaign ${campaignId}:`, error.details || error);
+        return null;
     }
 };
 
@@ -37,9 +38,8 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
 
     let createdCount = 0, negatedCount = 0, failureCount = 0, skippedCount = 0;
     const failures = [];
-    const actedOnEntities = []; // BUG FIX: Initialize array to track acted-upon entities.
+    const actedOnEntities = [];
     
-    // 1. Pre-fetch all throttled entities for this rule
     const throttleResult = await pool.query(
         'SELECT entity_id, details FROM automation_action_throttle WHERE rule_id = $1 AND throttle_until > NOW()',
         [rule.id]
@@ -51,7 +51,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
         
         let isWinner = false;
         let matchedGroup = null;
-        let triggeringMetrics = []; // Variable to hold metrics for the winning group
+        let triggeringMetrics = [];
 
         for (const group of rule.config.conditionGroups) {
             let allConditionsMet = true;
@@ -75,35 +75,36 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
             if (allConditionsMet) {
                 isWinner = true;
                 matchedGroup = group;
-                triggeringMetrics = evaluatedMetricsForGroup; // Capture the metrics
+                triggeringMetrics = evaluatedMetricsForGroup;
                 break;
             }
         }
 
         if (isWinner) {
-            try {
+             try {
                 console.log(`[Harvesting] Term "${entity.entityText}" for ASIN ${entity.sourceAsin} is a winner.`);
                 
-                // 2. Self-Healing Cooldown Check
                 if (throttledMap.has(uniqueKey)) {
                     const createdCampaignId = throttledMap.get(uniqueKey)?.createdCampaignId;
                     console.log(`[Harvesting] Found throttled entry. Checking if campaign ${createdCampaignId} still exists...`);
+                    
                     const campaignStillExists = await checkCampaignExists(createdCampaignId, rule.profile_id);
 
-                    if (campaignStillExists) {
+                    if (campaignStillExists === true) {
                         console.log(`[Harvesting] Campaign ${createdCampaignId} still exists. Skipping harvest.`);
                         skippedCount++;
-                        continue; // Skip this entity entirely
-                    } else {
+                        continue; 
+                    } else if (campaignStillExists === false) {
                         console.log(`[Harvesting] Campaign ${createdCampaignId} was deleted or is inaccessible. Healing throttle and proceeding with harvest.`);
                         await pool.query('DELETE FROM automation_action_throttle WHERE rule_id = $1 AND entity_id = $2', [rule.id, uniqueKey]);
+                    } else { // campaignStillExists is null, meaning an API error occurred
+                        throw new Error(`Could not verify existence of campaign ${createdCampaignId} due to an API error.`);
                     }
                 }
                 
                 const { action } = matchedGroup;
                 const isAsin = asinRegex.test(entity.entityText);
                 
-                // --- Start Harvest Action ---
                 const retrievedSku = await getSkuByAsin(entity.sourceAsin);
                 if (!retrievedSku) throw new Error(`Could not find a SKU for ASIN ${entity.sourceAsin}.`);
 
@@ -130,7 +131,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
                     const campaignName = `[H] - ${entity.sourceAsin} - ${sanitizedSearchTerm.substring(0, 80)} - ${action.matchType}`;
                     newCampaignName = campaignName;
 
-                    const campResponse = await amazonAdsApiRequest({ /* create campaign */
+                    const campResponse = await amazonAdsApiRequest({
                         method: 'post', url: '/sp/campaigns', profileId: rule.profile_id, data: { campaigns: [{
                             name: campaignName, targetingType: 'MANUAL', state: 'ENABLED',
                             budget: { budget: Number(action.newCampaignBudget ?? 10.00), budgetType: 'DAILY' },
@@ -141,7 +142,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
                     newCampaignId = campResponse?.campaigns?.success?.[0]?.campaignId;
                     if (!newCampaignId) throw { message: 'Campaign creation failed.', details: campResponse };
 
-                    const agResponse = await amazonAdsApiRequest({ /* create ad group */
+                    const agResponse = await amazonAdsApiRequest({
                         method: 'post', url: '/sp/adGroups', profileId: rule.profile_id, data: { adGroups: [{
                             name: sanitizedSearchTerm.substring(0, 255), campaignId: newCampaignId, state: 'ENABLED', defaultBid: newBid
                         }] },
@@ -150,25 +151,25 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
                     newAdGroupId = agResponse?.adGroups?.success?.[0]?.adGroupId;
                     if (!newAdGroupId) throw { message: 'Ad group creation failed.', details: agResponse };
                     
-                    await amazonAdsApiRequest({ /* create product ad */
+                    await amazonAdsApiRequest({
                          method: 'post', url: '/sp/productAds', profileId: rule.profile_id, data: { productAds: [{
                             campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', sku: retrievedSku
                         }] },
                         headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json', 'Accept': 'application/vnd.spProductAd.v3+json' },
                     });
-                } else { // ADD_TO_EXISTING_CAMPAIGN
+                } else {
                     newCampaignId = action.targetCampaignId;
                     newAdGroupId = action.targetAdGroupId;
                 }
 
-                if (isAsin) { /* create target */
+                if (isAsin) {
                     await amazonAdsApiRequest({
                         method: 'post', url: '/sp/targets', profileId: rule.profile_id, data: { targetingClauses: [{
                             campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', expression: [{ type: 'ASIN_SAME_AS', value: entity.entityText }], bid: newBid, expressionType: 'MANUAL'
                         }] },
                         headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' },
                     });
-                } else { /* create keyword */
+                } else {
                     await amazonAdsApiRequest({
                         method: 'post', url: '/sp/keywords', profileId: rule.profile_id, data: { keywords: [{
                              campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', keywordText: entity.entityText, matchType: action.matchType, bid: newBid
@@ -177,7 +178,6 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
                     });
                 }
                 
-                // 3. Add to throttle table on successful creation
                 const interval = `${rule.config.cooldown?.value || 90} ${rule.config.cooldown?.unit || 'days'}`;
                 await pool.query(
                     `INSERT INTO automation_action_throttle (rule_id, entity_id, throttle_until, details)
@@ -186,10 +186,9 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
                     [rule.id, uniqueKey, interval, { createdCampaignId: newCampaignId }]
                 );
 
-                actedOnEntities.push(uniqueKey); // BUG FIX: Add to actedOnEntities to signal success to processor
+                actedOnEntities.push(uniqueKey);
                 createdCount++;
                 
-                // --- Add successful action to log details ---
                 const sourceCampaignId = entity.sourceCampaignId;
                 if (!actionsByCampaign[sourceCampaignId]) {
                     actionsByCampaign[sourceCampaignId] = { changes: [], newNegatives: [], newHarvests: [] };
@@ -204,7 +203,6 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
                     triggeringMetrics: triggeringMetrics
                 });
 
-                // --- Conditional Negation ---
                 if (action.autoNegate !== false) {
                     const negPayloadBase = { campaignId: entity.sourceCampaignId, adGroupId: entity.sourceAdGroupId };
                     if (isAsin) {
@@ -223,8 +221,9 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
                 
             } catch (e) {
                 failureCount++;
-                console.error(`[Harvesting] Failed to process winner "${entity.entityText}". Reason:`, e.details || e.message);
-                failures.push({ searchTerm: entity.entityText, sourceAsin: entity.sourceAsin, error: e.message, rawError: e.details });
+                const errorMessage = e.details?.message || e.message || 'An unknown error occurred during harvesting.';
+                console.error(`[Harvesting] Failed to process winner "${entity.entityText}". Reason:`, e.details || e);
+                failures.push({ searchTerm: entity.entityText, sourceAsin: entity.sourceAsin, error: errorMessage, rawError: e.details });
             }
         }
     }

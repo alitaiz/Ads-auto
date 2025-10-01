@@ -22,8 +22,9 @@ const checkCampaignExists = async (campaignId, profileId) => {
         if (error.status === 404) {
             return false; // Not found, so it doesn't exist
         }
-        console.error(`[Harvesting] Error checking for campaign ${campaignId}:`, error.details || error);
-        return true; // Assume it exists to be safe on non-404 errors
+        // For any other error (auth, server error, etc.), re-throw it to be handled by the caller.
+        // This prevents the rule from getting stuck on an assumption.
+        throw error;
     }
 };
 
@@ -80,29 +81,28 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
         }
 
         if (isWinner) {
-            console.log(`[Harvesting] Term "${entity.entityText}" for ASIN ${entity.sourceAsin} is a winner.`);
-            
-            // 2. Self-Healing Cooldown Check
-            if (throttledMap.has(uniqueKey)) {
-                const createdCampaignId = throttledMap.get(uniqueKey)?.createdCampaignId;
-                console.log(`[Harvesting] Found throttled entry. Checking if campaign ${createdCampaignId} still exists...`);
-                const campaignStillExists = await checkCampaignExists(createdCampaignId, rule.profile_id);
-
-                if (campaignStillExists) {
-                    console.log(`[Harvesting] Campaign ${createdCampaignId} still exists. Skipping harvest.`);
-                    skippedCount++;
-                    continue; // Skip this entity entirely
-                } else {
-                    console.log(`[Harvesting] Campaign ${createdCampaignId} was deleted. Healing throttle and proceeding with harvest.`);
-                    await pool.query('DELETE FROM automation_action_throttle WHERE rule_id = $1 AND entity_id = $2', [rule.id, uniqueKey]);
-                }
-            }
-            
-            const { action } = matchedGroup;
-            const isAsin = asinRegex.test(entity.entityText);
-            let harvestSuccessful = false;
-
             try {
+                console.log(`[Harvesting] Term "${entity.entityText}" for ASIN ${entity.sourceAsin} is a winner.`);
+                
+                // 2. Self-Healing Cooldown Check
+                if (throttledMap.has(uniqueKey)) {
+                    const createdCampaignId = throttledMap.get(uniqueKey)?.createdCampaignId;
+                    console.log(`[Harvesting] Found throttled entry. Checking if campaign ${createdCampaignId} still exists...`);
+                    const campaignStillExists = await checkCampaignExists(createdCampaignId, rule.profile_id);
+
+                    if (campaignStillExists) {
+                        console.log(`[Harvesting] Campaign ${createdCampaignId} still exists. Skipping harvest.`);
+                        skippedCount++;
+                        continue; // Skip this entity entirely
+                    } else {
+                        console.log(`[Harvesting] Campaign ${createdCampaignId} was deleted or is inaccessible. Healing throttle and proceeding with harvest.`);
+                        await pool.query('DELETE FROM automation_action_throttle WHERE rule_id = $1 AND entity_id = $2', [rule.id, uniqueKey]);
+                    }
+                }
+                
+                const { action } = matchedGroup;
+                const isAsin = asinRegex.test(entity.entityText);
+                
                 // --- Start Harvest Action ---
                 const retrievedSku = await getSkuByAsin(entity.sourceAsin);
                 if (!retrievedSku) throw new Error(`Could not find a SKU for ASIN ${entity.sourceAsin}.`);
@@ -186,7 +186,6 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData) =>
                     [rule.id, uniqueKey, interval, { createdCampaignId: newCampaignId }]
                 );
 
-                harvestSuccessful = true;
                 actedOnEntities.push(uniqueKey); // BUG FIX: Add to actedOnEntities to signal success to processor
                 createdCount++;
                 

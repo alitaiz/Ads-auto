@@ -1,8 +1,6 @@
 // backend/helpers/amazon-api.js
 import axios from 'axios';
-import https from 'https';
 import { URLSearchParams } from 'url';
-import crypto from 'crypto';
 
 const LWA_TOKEN_URL = 'https://api.amazon.com/auth/o2/token';
 const ADS_API_ENDPOINT = 'https://advertising-api.amazon.com';

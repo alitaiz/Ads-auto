@@ -17,36 +17,6 @@ const REPORTING_TIMEZONE = 'America/Los_Angeles';
 
 let isProcessing = false; // Global lock to prevent overlapping cron jobs
 
-const fetchAllCampaigns = async (profileId) => {
-    let allCampaigns = [];
-    let nextToken = null;
-    const body = { stateFilter: { include: ["ENABLED", "PAUSED", "ARCHIVED"] }, maxResults: 500 };
-    const headers = { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' };
-    
-    do {
-        const requestBody = { ...body };
-        if (nextToken) {
-            requestBody.nextToken = nextToken;
-        }
-
-        const data = await amazonAdsApiRequest({
-            method: 'post',
-            url: '/sp/campaigns/list',
-            profileId,
-            data: requestBody,
-            headers,
-        });
-
-        if (data.campaigns) {
-            allCampaigns = allCampaigns.concat(data.campaigns);
-        }
-        nextToken = data.nextToken;
-    } while (nextToken);
-
-    return allCampaigns;
-};
-
-
 const processRule = async (rule) => {
     console.log(`[RulesEngine] ⚙️  Processing rule "${rule.name}" (ID: ${rule.id}).`);
     
@@ -67,49 +37,25 @@ const processRule = async (rule) => {
             const performanceDataResult = await getPerformanceData(rule, campaignIds);
             const performanceMap = performanceDataResult.performanceMap;
             dataDateRange = performanceDataResult.dataDateRange;
-
-            const cooldownConfig = rule.config.cooldown || { value: 0 };
-            let throttledEntities = new Set();
-            if (cooldownConfig.value > 0) {
-                const throttleCheckResult = await pool.query(
-                    'SELECT entity_id FROM automation_action_throttle WHERE rule_id = $1 AND throttle_until > NOW()',
-                    [rule.id]
-                );
-                throttledEntities = new Set(throttleCheckResult.rows.map(r => r.entity_id));
-            }
-
+            
+            // The cooldown/throttle mechanism is now handled within each evaluator where applicable.
+            
             if (performanceMap.size === 0) {
                 finalResult = { summary: 'No performance data found for the specified scope.', details: { actions_by_campaign: {} }, actedOnEntities: [] };
             } else if (rule.rule_type === 'BID_ADJUSTMENT') {
                 if (rule.ad_type === 'SB' || rule.ad_type === 'SD') {
-                    finalResult = await evaluateSbSdBidAdjustmentRule(rule, performanceMap, throttledEntities);
+                    finalResult = await evaluateSbSdBidAdjustmentRule(rule, performanceMap);
                 } else {
-                    finalResult = await evaluateBidAdjustmentRule(rule, performanceMap, throttledEntities);
+                    finalResult = await evaluateBidAdjustmentRule(rule, performanceMap);
                 }
             } else if (rule.rule_type === 'SEARCH_TERM_AUTOMATION') {
-                finalResult = await evaluateSearchTermAutomationRule(rule, performanceMap, throttledEntities);
+                finalResult = await evaluateSearchTermAutomationRule(rule, performanceMap);
             } else if (rule.rule_type === 'BUDGET_ACCELERATION') {
                 finalResult = await evaluateBudgetAccelerationRule(rule, performanceMap);
             } else if (rule.rule_type === 'SEARCH_TERM_HARVESTING') {
-                 // Fetch all existing campaign names once for this rule evaluation
-                const allExistingCampaigns = await fetchAllCampaigns(rule.profile_id);
-                const existingCampaignNames = allExistingCampaigns.map(c => c.name);
-                finalResult = await evaluateSearchTermHarvestingRule(rule, performanceMap, existingCampaignNames);
+                finalResult = await evaluateSearchTermHarvestingRule(rule, performanceMap);
             } else {
                 finalResult = { summary: 'Rule type not recognized.', details: { actions_by_campaign: {} }, actedOnEntities: [] };
-            }
-            
-            // The cooldown mechanism is no longer used by SEARCH_TERM_HARVESTING, but is kept for other rule types.
-            if (finalResult.actedOnEntities.length > 0 && cooldownConfig.value > 0 && rule.rule_type !== 'SEARCH_TERM_HARVESTING') {
-                const { value, unit } = cooldownConfig;
-                const interval = `${value} ${unit}`;
-                const upsertQuery = `
-                    INSERT INTO automation_action_throttle (rule_id, entity_id, throttle_until)
-                    SELECT $1, unnest($2::text[]), NOW() + $3::interval
-                    ON CONFLICT (rule_id, entity_id) DO UPDATE
-                    SET throttle_until = EXCLUDED.throttle_until;
-                `;
-                await pool.query(upsertQuery, [rule.id, finalResult.actedOnEntities, interval]);
             }
         }
         
@@ -185,8 +131,6 @@ export const resetBudgets = async () => {
     try {
         client = await pool.connect();
         
-        // Find campaigns that had their budget overridden today and haven't been reverted yet.
-        // Join with automation_rules to get the profile_id needed for the API call.
         const { rows: overrides } = await client.query(
             `SELECT d.id, d.campaign_id, d.original_budget, r.profile_id 
              FROM daily_budget_overrides d
@@ -202,13 +146,12 @@ export const resetBudgets = async () => {
 
         console.log(`[Budget Reset] Found ${overrides.length} campaign(s) to reset.`);
 
-        // Group by profile ID since API calls are profile-specific
         const updatesByProfile = overrides.reduce((acc, override) => {
             if (!acc[override.profile_id]) {
                 acc[override.profile_id] = [];
             }
             acc[override.profile_id].push({
-                campaignId: String(override.campaign_id), // API expects string IDs
+                campaignId: String(override.campaign_id),
                 budget: { budget: parseFloat(override.original_budget), budgetType: 'DAILY' }
             });
             return acc;
@@ -230,7 +173,6 @@ export const resetBudgets = async () => {
                     },
                 });
 
-                // Check response for successful updates
                 if (response.campaigns && Array.isArray(response.campaigns)) {
                     response.campaigns.forEach(result => {
                         if (result.code === 'SUCCESS') {
@@ -245,7 +187,6 @@ export const resetBudgets = async () => {
             }
         }
 
-        // Update the database for successfully reset campaigns
         if (successfulResets.length > 0) {
             await client.query(
                 `UPDATE daily_budget_overrides SET reverted_at = NOW() WHERE campaign_id = ANY($1::bigint[]) AND override_date = $2`,

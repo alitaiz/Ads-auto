@@ -256,16 +256,7 @@ interface LogChange {
 interface LogNegative {
     searchTerm: string;
     matchType: string;
-    triggeringMetrics?: TriggeringMetric[]; // Made optional for backward compatibility
-}
-interface LogHarvest {
-    searchTerm: string;
-    sourceAsin: string;
-    actionType: 'CREATE_NEW_CAMPAIGN' | 'ADD_TO_EXISTING_CAMPAIGN';
-    newCampaignId?: string;
-    newCampaignName?: string;
-    targetCampaignId?: string;
-    triggeringMetrics?: TriggeringMetric[];
+    triggeringMetrics: TriggeringMetric[];
 }
 interface DataDateRange {
     report?: { start: string; end: string };
@@ -274,7 +265,6 @@ interface DataDateRange {
 interface CampaignLogDetails {
   changes?: LogChange[];
   newNegatives?: LogNegative[];
-  newHarvests?: LogHarvest[];
   data_date_range?: DataDateRange;
 }
 interface AutomationLog {
@@ -417,40 +407,17 @@ export function CampaignTable({
 
         const changes = details.changes || [];
         const newNegatives = details.newNegatives || [];
-        const newHarvests = details.newHarvests || [];
         
-        if (changes.length === 0 && newNegatives.length === 0 && newHarvests.length === 0) {
+        if (changes.length === 0 && newNegatives.length === 0) {
             return <span>{log.summary}</span>;
         }
         
-        const timeWindowText = (metric: TriggeringMetric) => 
-            metric.timeWindow === 'TODAY' ? 'Today' : `${metric.timeWindow} days`;
-
         return (
             <ul style={styles.detailsList}>
-                {newHarvests.map((harvest, index) => {
-                    let text = `Harvested "${harvest.searchTerm}"`;
-                    if (harvest.actionType === 'CREATE_NEW_CAMPAIGN') {
-                        text += harvest.newCampaignName ? ` into new campaign "${harvest.newCampaignName}".` : ` into new campaign ${harvest.newCampaignId}.`;
-                    } else {
-                        text += ` into existing campaign ${harvest.targetCampaignId}.`;
-                    }
-                    return (
-                         <li key={`h-${index}`}>
-                            {text}
-                            {(harvest.triggeringMetrics && harvest.triggeringMetrics.length > 0) && (
-                                <ul style={styles.metricList}>
-                                    {harvest.triggeringMetrics.map((metric, mIndex) => (
-                                        <li key={mIndex} style={styles.metricListItem}>
-                                            {metric.metric} ({timeWindowText(metric)}) was <strong>{formatMetricValue(metric.value, metric.metric)}</strong> (Condition: {metric.condition})
-                                        </li>
-                                    ))}
-                                </ul>
-                            )}
-                        </li>
-                    )
-                })}
                 {changes.map((change, index) => {
+                    const timeWindowText = (metric: TriggeringMetric) => 
+                        metric.timeWindow === 'TODAY' ? 'Today' : `${metric.timeWindow} days`;
+
                     // BUDGET ACCELERATION LOG
                     if (typeof change.oldBudget !== 'undefined' && typeof change.newBudget !== 'undefined') {
                         return (
@@ -490,15 +457,13 @@ export function CampaignTable({
                 {newNegatives.map((neg, index) => (
                     <li key={`n-${index}`}>
                          Negated "{neg.searchTerm}" as {neg.matchType?.replace(/_/g, ' ')}
-                         {neg.triggeringMetrics && neg.triggeringMetrics.length > 0 && (
-                             <ul style={styles.metricList}>
-                                {neg.triggeringMetrics.map((metric, mIndex) => (
-                                    <li key={mIndex} style={styles.metricListItem}>
-                                        {metric.metric} ({metric.timeWindow} days) was <strong>{formatMetricValue(metric.value, metric.metric)}</strong> (Condition: {metric.condition})
-                                    </li>
-                                ))}
-                            </ul>
-                         )}
+                         <ul style={styles.metricList}>
+                            {neg.triggeringMetrics.map((metric, mIndex) => (
+                                <li key={mIndex} style={styles.metricListItem}>
+                                    {metric.metric} ({metric.timeWindow} days) was <strong>{formatMetricValue(metric.value, metric.metric)}</strong> (Condition: {metric.condition})
+                                </li>
+                            ))}
+                        </ul>
                     </li>
                 ))}
             </ul>

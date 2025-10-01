@@ -1,9 +1,0 @@
--- Migration: Add details column to automation_action_throttle
--- This allows storing contextual information, like the created campaignId for harvesting rules.
-
-ALTER TABLE automation_action_throttle
-ADD COLUMN IF NOT EXISTS details JSONB;
-
--- Grant permission to the app user again in case it was missed
--- IMPORTANT: Replace 'yourdbuser' with the actual DB_USER from your .env file.
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE automation_action_throttle TO yourdbuser;

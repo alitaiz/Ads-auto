@@ -48,7 +48,27 @@ const styles: { [key: string]: React.CSSProperties } = {
   thenHeader: { fontWeight: 'bold', fontSize: '1rem', marginBottom: '15px', color: '#333' },
   thenGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '15px' },
   radioGroup: { display: 'flex', gap: '15px', alignItems: 'center' },
-  infoBox: { backgroundColor: '#e6f7ff', border: '1px solid #91d5ff', borderRadius: 'var(--border-radius)', padding: '10px 15px', fontSize: '0.9rem', color: '#0050b3' }
+  infoBox: { backgroundColor: '#e6f7ff', border: '1px solid #91d5ff', borderRadius: 'var(--border-radius)', padding: '10px 15px', fontSize: '0.9rem', color: '#0050b3' },
+  ruleCheckboxList: {
+    maxHeight: '120px',
+    overflowY: 'auto',
+    border: '1px solid var(--border-color)',
+    borderRadius: '4px',
+    padding: '10px',
+    backgroundColor: 'white'
+  },
+  ruleCheckboxItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '5px 0',
+  },
+  ruleCheckboxLabel: {
+    fontWeight: 'normal',
+    cursor: 'pointer',
+    whiteSpace: 'normal',
+    wordBreak: 'break-word',
+  },
 };
 
 const getDefaultCondition = (): AutomationRuleCondition => ({
@@ -745,9 +765,17 @@ const BudgetAccelerationActionForm = ({ action, onActionChange }: { action: Auto
 
 const SearchTermHarvestingActionForm = ({ action, onActionChange, bidAdjustmentRules, budgetAccelerationRules }: { action: AutomationRuleAction, onActionChange: (field: string, value: any) => void, bidAdjustmentRules: AutomationRule[], budgetAccelerationRules: AutomationRule[] }) => {
     
-    const handleMultiSelectChange = (e: React.ChangeEvent<HTMLSelectElement>, field: 'applyBidRuleIds' | 'applyBudgetRuleIds') => {
-        const selectedIds = Array.from(e.target.selectedOptions, option => option.value);
-        onActionChange(field, selectedIds);
+    const handleCheckboxChange = (ruleId: number | string, field: 'applyBidRuleIds' | 'applyBudgetRuleIds') => {
+        const currentIds = (action[field] || []).map(String);
+        const ruleIdStr = String(ruleId);
+        const newIds = new Set(currentIds);
+
+        if (newIds.has(ruleIdStr)) {
+            newIds.delete(ruleIdStr);
+        } else {
+            newIds.add(ruleIdStr);
+        }
+        onActionChange(field, Array.from(newIds));
     };
 
     return (
@@ -844,18 +872,49 @@ const SearchTermHarvestingActionForm = ({ action, onActionChange, bidAdjustmentR
                 <div style={{...styles.thenGrid, gridTemplateColumns: '1fr 1fr'}}>
                     <div style={styles.formGroup}>
                         <label style={styles.label}>SP Bid Adjustment Rules</label>
-                        <select multiple style={{...styles.conditionInput, height: '100px'}} value={action.applyBidRuleIds?.map(String) || []} onChange={e => handleMultiSelectChange(e, 'applyBidRuleIds')}>
-                            {bidAdjustmentRules.map(rule => <option key={rule.id} value={rule.id}>{rule.name}</option>)}
-                        </select>
+                        <div style={styles.ruleCheckboxList}>
+                            {bidAdjustmentRules.length > 0 ? (
+                                bidAdjustmentRules.map(rule => (
+                                    <div key={rule.id} style={styles.ruleCheckboxItem}>
+                                        <input
+                                            type="checkbox"
+                                            id={`bid-rule-${rule.id}`}
+                                            checked={(action.applyBidRuleIds || []).map(String).includes(String(rule.id))}
+                                            onChange={() => handleCheckboxChange(rule.id, 'applyBidRuleIds')}
+                                        />
+                                        <label htmlFor={`bid-rule-${rule.id}`} style={styles.ruleCheckboxLabel}>
+                                            {rule.name}
+                                        </label>
+                                    </div>
+                                ))
+                            ) : (
+                                <span style={{ color: '#888', fontSize: '0.9rem' }}>No bid adjustment rules available.</span>
+                            )}
+                        </div>
                     </div>
                     <div style={styles.formGroup}>
                         <label style={styles.label}>SP Budget Acceleration Rules</label>
-                        <select multiple style={{...styles.conditionInput, height: '100px'}} value={action.applyBudgetRuleIds?.map(String) || []} onChange={e => handleMultiSelectChange(e, 'applyBudgetRuleIds')}>
-                            {budgetAccelerationRules.map(rule => <option key={rule.id} value={rule.id}>{rule.name}</option>)}
-                        </select>
+                         <div style={styles.ruleCheckboxList}>
+                            {budgetAccelerationRules.length > 0 ? (
+                                budgetAccelerationRules.map(rule => (
+                                    <div key={rule.id} style={styles.ruleCheckboxItem}>
+                                        <input
+                                            type="checkbox"
+                                            id={`budget-rule-${rule.id}`}
+                                            checked={(action.applyBudgetRuleIds || []).map(String).includes(String(rule.id))}
+                                            onChange={() => handleCheckboxChange(rule.id, 'applyBudgetRuleIds')}
+                                        />
+                                        <label htmlFor={`budget-rule-${rule.id}`} style={styles.ruleCheckboxLabel}>
+                                            {rule.name}
+                                        </label>
+                                    </div>
+                                ))
+                            ) : (
+                                 <span style={{ color: '#888', fontSize: '0.9rem' }}>No budget acceleration rules available.</span>
+                            )}
+                        </div>
                     </div>
                 </div>
-                <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>Select rules to automatically apply to the newly created campaign. Use Ctrl/Cmd + Click to select multiple.</p>
             </div>
         )}
 

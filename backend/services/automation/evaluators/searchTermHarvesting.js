@@ -59,7 +59,17 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                         const totalClicks = entity.dailyData.reduce((s, d) => s + d.clicks, 0);
                         const totalSpend = entity.dailyData.reduce((s, d) => s + d.spend, 0);
                         const avgCpc = totalClicks > 0 ? totalSpend / totalClicks : 0.50;
-                        const newBid = parseFloat(Math.max(0.02, action.bidOption.type === 'CUSTOM_BID' ? action.bidOption.value : avgCpc * (action.bidOption.value || 1.15)).toFixed(2));
+                        
+                        let calculatedBid;
+                        if (action.bidOption.type === 'CUSTOM_BID') {
+                            calculatedBid = action.bidOption.value;
+                        } else { // CPC_MULTIPLIER
+                            calculatedBid = avgCpc * (action.bidOption.value || 1.15);
+                            if (typeof action.bidOption.maxBid === 'number') {
+                                calculatedBid = Math.min(calculatedBid, action.bidOption.maxBid);
+                            }
+                        }
+                        const newBid = parseFloat(Math.max(0.02, calculatedBid).toFixed(2));
                         
                         let newCampaignId, newAdGroupId;
                         const sanitizedSearchTerm = sanitizeForCampaignName(entity.entityText);

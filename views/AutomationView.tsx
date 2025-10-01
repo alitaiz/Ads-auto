@@ -775,12 +775,47 @@ const SearchTermHarvestingActionForm = ({ action, onActionChange }: { action: Au
                 <label><input type="radio" value="CPC_MULTIPLIER" checked={action.bidOption?.type === 'CPC_MULTIPLIER'} onChange={e => onActionChange('bidOption.type', e.target.value)} /> Based on Search Term CPC</label>
                 <label><input type="radio" value="CUSTOM_BID" checked={action.bidOption?.type === 'CUSTOM_BID'} onChange={e => onActionChange('bidOption.type', e.target.value)} /> Set custom bid</label>
             </div></div>
-            <div style={{...styles.formGroup, marginTop: '10px'}}>
-                <input type="number" step="0.01" min="0" style={{...styles.conditionInput, width: '200px'}} placeholder={action.bidOption?.type === 'CPC_MULTIPLIER' ? "e.g., 1.15 for +15%" : "e.g., 0.75"} value={action.bidOption?.value ?? ''} onChange={e => onActionChange('bidOption.value', Number(e.target.value))} />
-                {action.bidOption?.type === 'CPC_MULTIPLIER' && (
-                    <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>
-                        hệ số nhân (ví dụ: <code style={{backgroundColor: '#e9ecef', padding: '2px 4px', borderRadius: '3px'}}>1.15</code> để đặt giá thầu cao hơn 15% so với CPC)
-                    </p>
+             <div style={{...styles.formGroup, marginTop: '10px'}}>
+                {action.bidOption?.type === 'CPC_MULTIPLIER' ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', alignItems: 'flex-start' }}>
+                        <div>
+                            <label style={{...styles.label, fontSize: '0.85rem'}}>Multiplier</label>
+                            <input 
+                                type="number" 
+                                step="0.01" 
+                                min="0" 
+                                style={{...styles.conditionInput, width: '100%'}} 
+                                placeholder="e.g., 1.15 for +15%" 
+                                value={action.bidOption?.value ?? ''} 
+                                onChange={e => onActionChange('bidOption.value', Number(e.target.value))} 
+                            />
+                        </div>
+                        <div>
+                            <label style={{...styles.label, fontSize: '0.85rem'}}>Max Bid (Optional)</label>
+                            <input 
+                                type="number" 
+                                step="0.01" 
+                                min="0.02" 
+                                style={{...styles.conditionInput, width: '100%'}} 
+                                placeholder="e.g., 2.00" 
+                                value={action.bidOption?.maxBid ?? ''} 
+                                onChange={e => onActionChange('bidOption.maxBid', e.target.value ? Number(e.target.value) : undefined)} 
+                            />
+                        </div>
+                    </div>
+                ) : (
+                    <div>
+                        <label style={{...styles.label, fontSize: '0.85rem'}}>Custom Bid Amount</label>
+                        <input 
+                            type="number" 
+                            step="0.01" 
+                            min="0.02" 
+                            style={{...styles.conditionInput, width: '200px'}} 
+                            placeholder="e.g., 0.75" 
+                            value={action.bidOption?.value ?? ''} 
+                            onChange={e => onActionChange('bidOption.value', Number(e.target.value))} 
+                        />
+                    </div>
                 )}
             </div>
         </div>

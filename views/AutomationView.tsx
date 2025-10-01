@@ -79,7 +79,7 @@ const getDefaultHarvestingAction = (): AutomationRuleAction => ({
     type: 'CREATE_NEW_CAMPAIGN',
     matchType: 'EXACT',
     newCampaignBudget: 10,
-    bidOption: { type: 'CPC_MULTIPLIER', value: 1.15 },
+    bidOption: { type: 'CPC_MULTIPLIER', value: 1.0 },
     autoNegate: true,
 });
 
@@ -776,10 +776,10 @@ const SearchTermHarvestingActionForm = ({ action, onActionChange }: { action: Au
                 <label><input type="radio" value="CUSTOM_BID" checked={action.bidOption?.type === 'CUSTOM_BID'} onChange={e => onActionChange('bidOption.type', e.target.value)} /> Set custom bid</label>
             </div></div>
             <div style={{...styles.formGroup, marginTop: '10px'}}>
-                <input type="number" step="0.01" min="0" style={{...styles.conditionInput, width: '200px'}} placeholder={action.bidOption?.type === 'CPC_MULTIPLIER' ? "e.g., 1.15 for +15%" : "e.g., 0.75"} value={action.bidOption?.value ?? ''} onChange={e => onActionChange('bidOption.value', Number(e.target.value))} />
+                <input type="number" step="0.01" min="0" style={{...styles.conditionInput, width: '200px'}} placeholder={action.bidOption?.type === 'CPC_MULTIPLIER' ? "e.g., 1.0 for exact CPC" : "e.g., 0.75"} value={action.bidOption?.value ?? ''} onChange={e => onActionChange('bidOption.value', Number(e.target.value))} />
                 {action.bidOption?.type === 'CPC_MULTIPLIER' && (
                     <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>
-                        hệ số nhân (ví dụ: <code style={{backgroundColor: '#e9ecef', padding: '2px 4px', borderRadius: '3px'}}>1.15</code> để đặt giá thầu cao hơn 15% so với CPC)
+                        hệ số nhân (ví dụ: <code style={{backgroundColor: '#e9ecef', padding: '2px 4px', borderRadius: '3px'}}>1.0</code> để dùng CPC, <code style={{backgroundColor: '#e9ecef', padding: '2px 4px', borderRadius: '3px'}}>1.15</code> để tăng 15%)
                     </p>
                 )}
             </div>

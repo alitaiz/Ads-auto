@@ -17,6 +17,36 @@ const REPORTING_TIMEZONE = 'America/Los_Angeles';
 
 let isProcessing = false; // Global lock to prevent overlapping cron jobs
 
+const fetchAllCampaigns = async (profileId) => {
+    let allCampaigns = [];
+    let nextToken = null;
+    const body = { stateFilter: { include: ["ENABLED", "PAUSED", "ARCHIVED"] }, maxResults: 500 };
+    const headers = { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' };
+    
+    do {
+        const requestBody = { ...body };
+        if (nextToken) {
+            requestBody.nextToken = nextToken;
+        }
+
+        const data = await amazonAdsApiRequest({
+            method: 'post',
+            url: '/sp/campaigns/list',
+            profileId,
+            data: requestBody,
+            headers,
+        });
+
+        if (data.campaigns) {
+            allCampaigns = allCampaigns.concat(data.campaigns);
+        }
+        nextToken = data.nextToken;
+    } while (nextToken);
+
+    return allCampaigns;
+};
+
+
 const processRule = async (rule) => {
     console.log(`[RulesEngine] ⚙️  Processing rule "${rule.name}" (ID: ${rule.id}).`);
     
@@ -61,12 +91,16 @@ const processRule = async (rule) => {
             } else if (rule.rule_type === 'BUDGET_ACCELERATION') {
                 finalResult = await evaluateBudgetAccelerationRule(rule, performanceMap);
             } else if (rule.rule_type === 'SEARCH_TERM_HARVESTING') {
-                finalResult = await evaluateSearchTermHarvestingRule(rule, performanceMap, throttledEntities);
+                 // Fetch all existing campaign names once for this rule evaluation
+                const allExistingCampaigns = await fetchAllCampaigns(rule.profile_id);
+                const existingCampaignNames = allExistingCampaigns.map(c => c.name);
+                finalResult = await evaluateSearchTermHarvestingRule(rule, performanceMap, existingCampaignNames);
             } else {
                 finalResult = { summary: 'Rule type not recognized.', details: { actions_by_campaign: {} }, actedOnEntities: [] };
             }
-
-            if (finalResult.actedOnEntities.length > 0 && cooldownConfig.value > 0) {
+            
+            // The cooldown mechanism is no longer used by SEARCH_TERM_HARVESTING, but is kept for other rule types.
+            if (finalResult.actedOnEntities.length > 0 && cooldownConfig.value > 0 && rule.rule_type !== 'SEARCH_TERM_HARVESTING') {
                 const { value, unit } = cooldownConfig;
                 const interval = `${value} ${unit}`;
                 const upsertQuery = `

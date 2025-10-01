@@ -96,6 +96,8 @@ export interface AutomationRuleAction {
         maxBid?: number;
     };
     autoNegate?: boolean;
+    applyBidRuleIds?: (number | string)[];
+    applyBudgetRuleIds?: (number | string)[];
 }
 
 // The structure of a single IF/THEN block within a rule.

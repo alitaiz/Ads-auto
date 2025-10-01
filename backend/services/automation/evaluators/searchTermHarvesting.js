@@ -2,6 +2,7 @@
 import { amazonAdsApiRequest } from '../../../helpers/amazon-api.js';
 import { getSkuByAsin } from '../../../helpers/spApiHelper.js';
 import { getLocalDateString, calculateMetricsForWindow, checkCondition } from '../utils.js';
+import pool from '../../../db.js';
 
 /**
  * Sanitizes a string to be safe for use in an Amazon campaign or ad group name.
@@ -122,6 +123,32 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                     await amazonAdsApiRequest({ method: 'post', url: '/sp/keywords', profileId: rule.profile_id, data: { keywords: [kwPayload] }, headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' } });
                                 }
 
+                                const newCampaignIdStr = newCampaignId.toString();
+
+                                const applyRules = async (ruleIds, newCampaignIdStr) => {
+                                    if (!ruleIds || ruleIds.length === 0) return;
+                                    console.log(`[Harvesting] Associating new campaign ${newCampaignIdStr} with rules: ${ruleIds.join(', ')}`);
+                                    for (const ruleId of ruleIds) {
+                                        try {
+                                            const { rows: rulesToUpdate } = await pool.query('SELECT id, scope FROM automation_rules WHERE id = $1', [ruleId]);
+                                            if (rulesToUpdate.length > 0) {
+                                                const ruleToUpdate = rulesToUpdate[0];
+                                                const currentCampaignIds = new Set((ruleToUpdate.scope?.campaignIds || []).map(String));
+                                                if (!currentCampaignIds.has(newCampaignIdStr)) {
+                                                    currentCampaignIds.add(newCampaignIdStr);
+                                                    const newScope = { ...ruleToUpdate.scope, campaignIds: Array.from(currentCampaignIds) };
+                                                    await pool.query('UPDATE automation_rules SET scope = $1 WHERE id = $2', [newScope, ruleToUpdate.id]);
+                                                    console.log(`[Harvesting] Associated campaign ${newCampaignIdStr} with rule ID ${ruleToUpdate.id}`);
+                                                }
+                                            }
+                                        } catch (e) {
+                                            console.error(`[Harvesting] Failed to associate rule ID ${ruleId} with new campaign ${newCampaignIdStr}:`, e);
+                                        }
+                                    }
+                                };
+                                await applyRules(action.applyBidRuleIds, newCampaignIdStr);
+                                await applyRules(action.applyBudgetRuleIds, newCampaignIdStr);
+                                
                                 createdCount++;
                                 actedOnEntities.add(throttleKey);
                                 shouldNegate = true;

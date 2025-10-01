@@ -1,5 +1,5 @@
 // views/AutomationView.tsx
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { AutomationRule, AutomationRuleCondition, AutomationConditionGroup, AutomationRuleAction, Campaign, AdGroup } from '../types';
 import { RuleGuideContent } from './components/RuleGuideContent';
 
@@ -81,6 +81,8 @@ const getDefaultHarvestingAction = (): AutomationRuleAction => ({
     newCampaignBudget: 10,
     bidOption: { type: 'CPC_MULTIPLIER', value: 1.15 },
     autoNegate: true,
+    applyBidRuleIds: [],
+    applyBudgetRuleIds: [],
 });
 
 const getDefaultBidAdjustmentGroup = (): AutomationConditionGroup => ({
@@ -290,6 +292,10 @@ export function AutomationView() {
     }
     return true;
   });
+  
+  const profileId = localStorage.getItem('selectedProfileId');
+  const bidAdjustmentRules = useMemo(() => rules.filter(r => r.rule_type === 'BID_ADJUSTMENT' && r.ad_type === 'SP' && r.profile_id === profileId), [rules, profileId]);
+  const budgetAccelerationRules = useMemo(() => rules.filter(r => r.rule_type === 'BUDGET_ACCELERATION' && r.ad_type === 'SP' && r.profile_id === profileId), [rules, profileId]);
 
   return (
     <div style={styles.container}>
@@ -326,6 +332,8 @@ export function AutomationView() {
               modalTitle={editingRule && editingRule.id ? `Edit ${activeTab.label} Rule` : `Create New ${activeTab.label} Rule`}
               onClose={() => setIsModalOpen(false)}
               onSave={handleSaveRule}
+              bidAdjustmentRules={bidAdjustmentRules}
+              budgetAccelerationRules={budgetAccelerationRules}
           />
       )}
     </div>
@@ -470,7 +478,7 @@ const LogsTab = ({ logs, loading, expandedLogId, setExpandedLogId }: { logs: any
     );
 };
 
-const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: AutomationRule | null, modalTitle: string, onClose: () => void, onSave: (data: any) => void }) => {
+const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave, bidAdjustmentRules, budgetAccelerationRules }: { rule: AutomationRule | null, modalTitle: string, onClose: () => void, onSave: (data: any) => void, bidAdjustmentRules: AutomationRule[], budgetAccelerationRules: AutomationRule[] }) => {
     const [formData, setFormData] = useState<Partial<AutomationRule>>(() => {
         if (rule) return JSON.parse(JSON.stringify(rule));
         return {};
@@ -683,7 +691,7 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave }: { rule: Automat
                                                 {rule_type === 'BID_ADJUSTMENT' && <BidAdjustmentActionForm action={group.action} onActionChange={(f,v) => handleActionChange(groupIndex, f, v)} />}
                                                 {rule_type === 'SEARCH_TERM_AUTOMATION' && <SearchTermNegationActionForm action={group.action} onActionChange={(f,v) => handleActionChange(groupIndex, f, v)} />}
                                                 {rule_type === 'BUDGET_ACCELERATION' && <BudgetAccelerationActionForm action={group.action} onActionChange={(f,v) => handleActionChange(groupIndex, f, v)} />}
-                                                {rule_type === 'SEARCH_TERM_HARVESTING' && <SearchTermHarvestingActionForm action={group.action} onActionChange={(f,v) => handleActionChange(groupIndex, f, v)} />}
+                                                {rule_type === 'SEARCH_TERM_HARVESTING' && <SearchTermHarvestingActionForm action={group.action} onActionChange={(f,v) => handleActionChange(groupIndex, f, v)} bidAdjustmentRules={bidAdjustmentRules} budgetAccelerationRules={budgetAccelerationRules} />}
                                              </div>
                                         </div>
                                        {groupIndex < formData.config!.conditionGroups!.length - 1 && <div style={{textAlign: 'center', margin: '15px 0', fontWeight: 'bold', color: '#555'}}>OR</div>}
@@ -735,7 +743,14 @@ const BudgetAccelerationActionForm = ({ action, onActionChange }: { action: Auto
     </div>
 );
 
-const SearchTermHarvestingActionForm = ({ action, onActionChange }: { action: AutomationRuleAction, onActionChange: (field: string, value: any) => void }) => (
+const SearchTermHarvestingActionForm = ({ action, onActionChange, bidAdjustmentRules, budgetAccelerationRules }: { action: AutomationRuleAction, onActionChange: (field: string, value: any) => void, bidAdjustmentRules: AutomationRule[], budgetAccelerationRules: AutomationRule[] }) => {
+    
+    const handleMultiSelectChange = (e: React.ChangeEvent<HTMLSelectElement>, field: 'applyBidRuleIds' | 'applyBudgetRuleIds') => {
+        const selectedIds = Array.from(e.target.selectedOptions, option => option.value);
+        onActionChange(field, selectedIds);
+    };
+
+    return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
         <div style={styles.formGroup}><label style={styles.label}>Action</label><div style={styles.radioGroup}>
             <label><input type="radio" value="CREATE_NEW_CAMPAIGN" checked={action.type === 'CREATE_NEW_CAMPAIGN'} onChange={e => onActionChange('type', e.target.value)} /> Create a new campaign</label>
@@ -823,6 +838,27 @@ const SearchTermHarvestingActionForm = ({ action, onActionChange }: { action: Au
             </div>
         </div>
         
+        {action.type === 'CREATE_NEW_CAMPAIGN' && (
+            <div style={{ paddingTop: '20px', borderTop: '1px dashed #ccc' }}>
+                <h4 style={{ margin: '0 0 10px 0', fontSize: '1rem', color: '#333' }}>Apply Existing Rules to New Campaign</h4>
+                <div style={{...styles.thenGrid, gridTemplateColumns: '1fr 1fr'}}>
+                    <div style={styles.formGroup}>
+                        <label style={styles.label}>SP Bid Adjustment Rules</label>
+                        <select multiple style={{...styles.conditionInput, height: '100px'}} value={action.applyBidRuleIds?.map(String) || []} onChange={e => handleMultiSelectChange(e, 'applyBidRuleIds')}>
+                            {bidAdjustmentRules.map(rule => <option key={rule.id} value={rule.id}>{rule.name}</option>)}
+                        </select>
+                    </div>
+                    <div style={styles.formGroup}>
+                        <label style={styles.label}>SP Budget Acceleration Rules</label>
+                        <select multiple style={{...styles.conditionInput, height: '100px'}} value={action.applyBudgetRuleIds?.map(String) || []} onChange={e => handleMultiSelectChange(e, 'applyBudgetRuleIds')}>
+                            {budgetAccelerationRules.map(rule => <option key={rule.id} value={rule.id}>{rule.name}</option>)}
+                        </select>
+                    </div>
+                </div>
+                <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>Select rules to automatically apply to the newly created campaign. Use Ctrl/Cmd + Click to select multiple.</p>
+            </div>
+        )}
+
         <div style={{ paddingTop: '20px', borderTop: '1px dashed #ccc' }}>
             <div style={styles.formGroup}>
                 <label style={{...styles.label, display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer'}}>
@@ -842,3 +878,4 @@ const SearchTermHarvestingActionForm = ({ action, onActionChange }: { action: Au
         </div>
     </div>
 );
+}

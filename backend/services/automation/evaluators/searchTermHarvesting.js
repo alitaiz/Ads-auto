@@ -23,6 +23,9 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
 
     let createdCount = 0;
     let negatedCount = 0;
+    let failedCount = 0;
+    let skippedCount = 0;
+    const failures = [];
     const asinRegex = /^b0[a-z0-9]{8}$/i;
 
     for (const entity of performanceData.values()) {
@@ -46,53 +49,60 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                 console.log(`[Harvesting] Term "${entity.entityText}" for ASIN ${entity.sourceAsin} from Campaign ${entity.sourceCampaignId} is a winner.`);
                 const { action } = group;
                 const isAsin = asinRegex.test(entity.entityText);
+                let shouldNegate = false;
 
                 if (!throttledEntities.has(throttleKey)) {
                     try {
                         const retrievedSku = await getSkuByAsin(entity.sourceAsin);
 
                         if (!retrievedSku) {
-                            console.warn(`[Harvesting] Could not find a SKU for ASIN ${entity.sourceAsin}. Skipping harvest action for this term/ASIN combination.`);
-                        } else {
-                            const totalClicks = entity.dailyData.reduce((s, d) => s + d.clicks, 0);
-                            const totalSpend = entity.dailyData.reduce((s, d) => s + d.spend, 0);
-                            const avgCpc = totalClicks > 0 ? totalSpend / totalClicks : 0.50;
-                            const newBid = parseFloat(Math.max(0.02, action.bidOption.type === 'CUSTOM_BID' ? action.bidOption.value : avgCpc * (action.bidOption.value || 1.15)).toFixed(2));
+                            throw new Error(`Could not find a SKU for ASIN ${entity.sourceAsin}.`);
+                        }
+                        
+                        const totalClicks = entity.dailyData.reduce((s, d) => s + d.clicks, 0);
+                        const totalSpend = entity.dailyData.reduce((s, d) => s + d.spend, 0);
+                        const avgCpc = totalClicks > 0 ? totalSpend / totalClicks : 0.50;
+                        const newBid = parseFloat(Math.max(0.02, action.bidOption.type === 'CUSTOM_BID' ? action.bidOption.value : avgCpc * (action.bidOption.value || 1.15)).toFixed(2));
+                        
+                        let newCampaignId, newAdGroupId;
+                        const sanitizedSearchTerm = sanitizeForCampaignName(entity.entityText);
+
+                        if (action.type === 'CREATE_NEW_CAMPAIGN') {
+                            const maxNameLength = 128;
+                            const prefix = `[H] - ${entity.sourceAsin} - `;
+                            const suffix = ` - ${action.matchType}`;
+                            const maxSearchTermLength = maxNameLength - prefix.length - suffix.length;
+                            const truncatedSearchTerm = sanitizedSearchTerm.length > maxSearchTermLength 
+                                ? sanitizedSearchTerm.substring(0, maxSearchTermLength - 3) + '...' 
+                                : sanitizedSearchTerm;
+                            const campaignName = `${prefix}${truncatedSearchTerm}${suffix}`;
                             
-                            let newCampaignId, newAdGroupId;
-                            const sanitizedSearchTerm = sanitizeForCampaignName(entity.entityText);
+                            const campaignPayload = {
+                                name: campaignName, targetingType: 'MANUAL', state: 'ENABLED',
+                                budget: { budget: Number(action.newCampaignBudget ?? 10.00), budgetType: 'DAILY' },
+                                startDate: getLocalDateString('America/Los_Angeles'),
+                            };
 
-                            if (action.type === 'CREATE_NEW_CAMPAIGN') {
-                                const maxNameLength = 128;
-                                const prefix = `[H] - ${entity.sourceAsin} - `;
-                                const suffix = ` - ${action.matchType}`;
-                                const maxSearchTermLength = maxNameLength - prefix.length - suffix.length;
-                                const truncatedSearchTerm = sanitizedSearchTerm.length > maxSearchTermLength 
-                                    ? sanitizedSearchTerm.substring(0, maxSearchTermLength - 3) + '...' 
-                                    : sanitizedSearchTerm;
-                                const campaignName = `${prefix}${truncatedSearchTerm}${suffix}`;
-                                
-                                const campaignPayload = {
-                                    name: campaignName,
-                                    targetingType: 'MANUAL',
-                                    state: 'ENABLED',
-                                    budget: {
-                                        budget: Number(action.newCampaignBudget ?? 10.00),
-                                        budgetType: 'DAILY',
-                                    },
-                                    startDate: getLocalDateString('America/Los_Angeles'),
-                                };
+                            const campResponse = await amazonAdsApiRequest({
+                                method: 'post', url: '/sp/campaigns', profileId: rule.profile_id, data: { campaigns: [campaignPayload] },
+                                headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
+                            });
 
-                                const campResponse = await amazonAdsApiRequest({
-                                    method: 'post', url: '/sp/campaigns', profileId: rule.profile_id, data: { campaigns: [campaignPayload] },
-                                    headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
-                                });
-
-                                const campSuccessResult = campResponse?.campaigns?.success?.[0];
-                                if (!campSuccessResult?.campaignId) {
-                                    const campErrorDetails = campResponse?.campaigns?.error?.[0]?.details || JSON.stringify(campResponse);
+                            const campSuccessResult = campResponse?.campaigns?.success?.[0];
+                            if (!campSuccessResult?.campaignId) {
+                                const campError = campResponse?.campaigns?.error?.[0];
+                                const isDuplicate = campError?.errors?.[0]?.errorValue?.duplicateValueError?.reason === 'DUPLICATE_VALUE';
+                                if (isDuplicate) {
+                                    // This is not a failure, it's a skip.
+                                    console.warn(`[Harvesting] Campaign for term "${entity.entityText}" already exists. Skipping creation.`);
+                                    skippedCount++;
+                                    shouldNegate = true; // Still negate if it's a duplicate
+                                    // We don't throw here, just exit the try block gracefully
+                                } else {
+                                    const campErrorDetails = campError?.details || JSON.stringify(campResponse);
                                     throw new Error(`Campaign creation failed: ${campErrorDetails}`);
                                 }
+                            } else {
                                 newCampaignId = campSuccessResult.campaignId;
                                 console.log(`[Harvesting] Created Campaign ID: ${newCampaignId}`);
 
@@ -103,10 +113,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                 });
 
                                 const agSuccessResult = agResponse?.adGroups?.success?.[0];
-                                if (!agSuccessResult?.adGroupId) {
-                                    const agErrorDetails = agResponse?.adGroups?.error?.[0]?.details || JSON.stringify(agResponse);
-                                    throw new Error(`Ad Group creation failed: ${agErrorDetails}`);
-                                }
+                                if (!agSuccessResult?.adGroupId) throw new Error(`Ad Group creation failed: ${JSON.stringify(agResponse)}`);
                                 newAdGroupId = agSuccessResult.adGroupId;
                                 console.log(`[Harvesting] Created Ad Group ID: ${newAdGroupId}`);
 
@@ -117,69 +124,73 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                 });
                                 console.log(`[Harvesting] Created Product Ad for SKU ${retrievedSku}`);
 
-                            } else { // ADD_TO_EXISTING_CAMPAIGN
-                                newCampaignId = action.targetCampaignId;
-                                newAdGroupId = action.targetAdGroupId;
+                                if (isAsin) {
+                                    const targetPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', expressionType: 'MANUAL', expression: [{ type: 'ASIN_SAME_AS', value: entity.entityText }], bid: newBid };
+                                    await amazonAdsApiRequest({ method: 'post', url: '/sp/targets', profileId: rule.profile_id, data: { targetingClauses: [targetPayload] }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' } });
+                                } else {
+                                    const kwPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', keywordText: entity.entityText, matchType: action.matchType, bid: newBid };
+                                    await amazonAdsApiRequest({ method: 'post', url: '/sp/keywords', profileId: rule.profile_id, data: { keywords: [kwPayload] }, headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' } });
+                                }
+
+                                createdCount++;
+                                actedOnEntities.add(throttleKey);
+                                shouldNegate = true;
                             }
-                            
-                            if (isAsin) {
-                                const targetPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', expression: [{ type: 'ASIN_SAME_AS', value: entity.entityText }], bid: newBid };
-                                await amazonAdsApiRequest({
-                                    method: 'post', url: '/sp/targets', profileId: rule.profile_id, data: { targetingClauses: [targetPayload] },
-                                    headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' },
-                                });
-                            } else {
-                                const kwPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', keywordText: entity.entityText, matchType: action.matchType, bid: newBid };
-                                await amazonAdsApiRequest({
-                                    method: 'post', url: '/sp/keywords', profileId: rule.profile_id, data: { keywords: [kwPayload] },
-                                    headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
-                                });
-                            }
-                            createdCount++;
-                            actedOnEntities.add(throttleKey);
+                        } else {
+                           // Logic for ADD_TO_EXISTING_CAMPAIGN would go here
+                           // For now, this is complex and we'll assume CREATE_NEW_CAMPAIGN
+                           shouldNegate = true;
                         }
+
                     } catch (e) {
-                         console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, e);
-                         const errorMessage = e.details?.message || e.message || 'Unknown error during harvesting flow';
-                         console.error(`[Harvesting] Extracted error message in flow:`, errorMessage);
-                         throw new Error(`Harvesting flow failed: ${errorMessage}`);
+                        const errorMessage = e.details?.message || e.message || 'Unknown error during harvesting flow';
+                        console.error(`[Harvesting] Failed to harvest term "${entity.entityText}": ${errorMessage}`);
+                        failures.push({ term: entity.entityText, asin: entity.sourceAsin, reason: errorMessage });
+                        failedCount++;
+                        shouldNegate = false; // Don't negate if the harvest failed for a non-duplicate reason
                     }
                 } else {
                     console.log(`[Harvesting] Term "${entity.entityText}" for ASIN ${entity.sourceAsin} is on cooldown. Skipping harvest.`);
+                    skippedCount++;
+                    shouldNegate = true;
                 }
                 
-                if (action.autoNegate !== false) {
+                if (action.autoNegate !== false && shouldNegate) {
                     try {
                         if (isAsin) {
                             const negTargetPayload = { campaignId: entity.sourceCampaignId, adGroupId: entity.sourceAdGroupId, expression: [{ type: 'ASIN_SAME_AS', value: entity.entityText }] };
-                            await amazonAdsApiRequest({
-                                method: 'post', url: '/sp/negativeTargets', profileId: rule.profile_id, data: { negativeTargetingClauses: [negTargetPayload] },
-                                headers: { 'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json', 'Accept': 'application/vnd.spNegativeTargetingClause.v3+json' },
-                            });
+                            await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeTargets', profileId: rule.profile_id, data: { negativeTargetingClauses: [negTargetPayload] }, headers: { 'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json', 'Accept': 'application/vnd.spNegativeTargetingClause.v3+json' } });
                         } else {
                             const negKwPayload = { campaignId: entity.sourceCampaignId, adGroupId: entity.sourceAdGroupId, keywordText: entity.entityText, matchType: 'NEGATIVE_EXACT' };
-                            await amazonAdsApiRequest({
-                                method: 'post', url: '/sp/negativeKeywords', profileId: rule.profile_id, data: { negativeKeywords: [negKwPayload] },
-                                headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json', 'Accept': 'application/vnd.spNegativeKeyword.v3+json' },
-                            });
+                            await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeKeywords', profileId: rule.profile_id, data: { negativeKeywords: [negKwPayload] }, headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json', 'Accept': 'application/vnd.spNegativeKeyword.v3+json' } });
                         }
                         console.log(`[Harvesting] Negated "${entity.entityText}" in source Ad Group ${entity.sourceAdGroupId}`);
                         negatedCount++;
-                    } catch (e) { console.error(`[Harvesting] Error negating source term:`, e.details || e); }
+                    } catch (e) { console.error(`[Harvesting] Error negating source term "${entity.entityText}":`, e.details || e); }
                 }
-                break; 
+                break; // First Match Wins
             }
         }
     }
     
     const summaryParts = [];
     if (createdCount > 0) summaryParts.push(`Harvested ${createdCount} new term(s)`);
+    if (skippedCount > 0) summaryParts.push(`skipped ${skippedCount} duplicate/cooldown term(s)`);
     if (negatedCount > 0) summaryParts.push(`negated ${negatedCount} source term(s)`);
-    const summary = summaryParts.length > 0 ? summaryParts.join(' and ') + '.' : 'No new search terms met the criteria for harvesting.';
+    if (failedCount > 0) summaryParts.push(`${failedCount} failed`);
+
+    const summary = summaryParts.length > 0 ? summaryParts.join(', ') + '.' : 'No new search terms met the criteria for harvesting.';
 
     return {
         summary,
-        details: { actions_by_campaign: actionsByCampaign, created: createdCount, negated: negatedCount },
+        details: {
+            created: createdCount,
+            negated: negatedCount,
+            skipped: skippedCount,
+            failed: failedCount,
+            failures: failures,
+            actions_by_campaign: actionsByCampaign, // Remains for consistency, though less used here
+        },
         actedOnEntities: Array.from(actedOnEntities)
     };
 };

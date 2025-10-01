@@ -84,9 +84,13 @@ const processRule = async (rule) => {
             finalResult.details.data_date_range = dataDateRange;
         }
 
-        const totalChanges = Object.values(finalResult.details.actions_by_campaign || finalResult.details.changes || {}).length;
+        const totalCampaignActions = Object.values(finalResult.details.actions_by_campaign || {}).length > 0;
+        const hasPriceChanges = finalResult.details.changes && finalResult.details.changes.length > 0;
+        const hasHarvestActions = (finalResult.details.created || 0) > 0 || (finalResult.details.negated || 0) > 0;
+        
+        const actionWasTaken = totalCampaignActions || hasPriceChanges || hasHarvestActions;
 
-        if (totalChanges > 0 || (finalResult.details.changes && finalResult.details.changes.length > 0)) {
+        if (actionWasTaken) {
             await logAction(rule, 'SUCCESS', finalResult.summary, finalResult.details);
         } else {
             await logAction(rule, 'NO_ACTION', finalResult.summary || 'No entities met the rule criteria.', finalResult.details);
@@ -197,13 +201,14 @@ export const resetBudgets = async () => {
                 });
 
                 // Check response for successful updates
-                if (response.campaigns && Array.isArray(response.campaigns)) {
-                    response.campaigns.forEach(result => {
-                        if (result.code === 'SUCCESS') {
-                            successfulResets.push(result.campaignId);
-                        } else {
-                            console.error(`[Budget Reset] Failed to reset budget for campaign ${result.campaignId}. Reason: ${result.description}`);
-                        }
+                if (response.campaigns && Array.isArray(response.campaigns.success)) {
+                    response.campaigns.success.forEach(result => {
+                        successfulResets.push(result.campaignId);
+                    });
+                }
+                if (response.campaigns && Array.isArray(response.campaigns.error)) {
+                     response.campaigns.error.forEach(result => {
+                        console.error(`[Budget Reset] Failed to reset budget for campaign ${result.campaignId}. Reason: ${result.errors?.[0]?.errorValue?.message || 'Unknown API error'}`);
                     });
                 }
             } catch (error) {

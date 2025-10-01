@@ -215,12 +215,10 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
     return {
         summary,
         details: {
-            summary: {
-                created: createdCount,
-                negated: negatedCount,
-                skipped: skippedCount,
-                failed: failedCount,
-            },
+            created: createdCount,
+            negated: negatedCount,
+            skipped: skippedCount,
+            failed: failedCount,
             actions: detailedActions,
         },
         actedOnEntities: Array.from(actedOnEntities)

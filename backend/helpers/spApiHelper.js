@@ -1,6 +1,7 @@
 // backend/helpers/spApiHelper.js
 import axios from 'axios';
 import { URLSearchParams } from 'url';
+import pool from '../db.js';
 
 const LWA_TOKEN_URL = 'https://api.amazon.com/auth/o2/token';
 const SP_API_ENDPOINT = 'https://sellingpartnerapi-na.amazon.com';
@@ -73,16 +74,34 @@ export async function spApiRequest({ method, url, data, params }) {
 }
 
 /**
- * Retrieves the Seller SKU for a given ASIN using the Listings Items API.
- * This is the recommended method as it directly queries the seller's own listings.
+ * Retrieves the Seller SKU for a given ASIN by first checking the local database,
+ * then falling back to the Listings Items API.
  * @param {string} asin The ASIN of the product.
  * @returns {Promise<string|null>} The SKU, or null if not found.
  */
 export async function getSkuByAsin(asin) {
+    // 1. Try fetching from the local database first.
+    try {
+        const { rows } = await pool.query(
+            'SELECT sku FROM product_listings WHERE asin = $1',
+            [asin]
+        );
+        if (rows.length > 0 && rows[0].sku) {
+            console.log(`[Local DB] Found SKU '${rows[0].sku}' for ASIN ${asin} in product_listings table.`);
+            return rows[0].sku;
+        }
+    } catch (dbError) {
+        console.error(`[Local DB] Error querying for SKU for ASIN ${asin}:`, dbError);
+        // Don't throw, just log and fall through to the API call.
+    }
+
+    console.log(`[Local DB] No SKU found for ASIN ${asin}. Falling back to SP-API.`);
+    
+    // 2. If not found in DB, fall back to SP-API.
     const { SP_API_MARKETPLACE_ID, SP_API_SELLER_ID } = process.env;
 
     if (!SP_API_SELLER_ID || !SP_API_SELLER_ID.startsWith('A')) {
-        throw new Error('Invalid or missing SP_API_SELLER_ID in .env file. It is required to fetch SKU from ASIN.');
+        throw new Error('Invalid or missing SP_API_SELLER_ID in .env file. It is required to fetch SKU from ASIN via API.');
     }
 
     console.log(`[SP-API] Fetching SKU for ASIN: ${asin} using Listings API for Seller: ${SP_API_SELLER_ID}`);

@@ -225,7 +225,11 @@ export const evaluateBidAdjustmentRule = async (rule, performanceData, throttled
                     if (newBid !== entity.currentBid) {
                         const campaignId = entity.campaignId;
                         if (!actionsByCampaign[campaignId]) {
-                            actionsByCampaign[campaignId] = { changes: [], newNegatives: [] };
+                            actionsByCampaign[campaignId] = { 
+                                campaignName: entity.campaignName || `Campaign ${campaignId}`,
+                                changes: [], 
+                                newNegatives: [] 
+                            };
                         }
                         
                         actionsByCampaign[campaignId].changes.push({

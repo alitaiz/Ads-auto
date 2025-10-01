@@ -202,14 +202,23 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
         const allRows = [];
         if (foundDatesInHistory.size > 0) {
             const historicalQuery = `
-                SELECT report_date AS performance_date, keyword_id::text AS entity_id_text, COALESCE(keyword_text, targeting) AS entity_text,
-                       match_type, campaign_id::text AS campaign_id_text, ad_group_id::text AS ad_group_id_text,
-                       SUM(COALESCE(impressions, 0))::bigint AS impressions, SUM(COALESCE(cost, 0))::numeric AS spend,
-                       SUM(COALESCE(clicks, 0))::bigint AS clicks, SUM(COALESCE(sales_1d, 0))::numeric AS sales,
-                       SUM(COALESCE(purchases_1d, 0))::bigint AS orders
+                SELECT 
+                    report_date AS performance_date, 
+                    keyword_id::text AS entity_id_text, 
+                    COALESCE(keyword_text, targeting) AS entity_text,
+                    match_type, 
+                    campaign_id::text AS campaign_id_text, 
+                    campaign_name,
+                    ad_group_id::text AS ad_group_id_text,
+                    ad_group_name,
+                    SUM(COALESCE(impressions, 0))::bigint AS impressions, 
+                    SUM(COALESCE(cost, 0))::numeric AS spend,
+                    SUM(COALESCE(clicks, 0))::bigint AS clicks, 
+                    SUM(COALESCE(sales_1d, 0))::numeric AS sales,
+                    SUM(COALESCE(purchases_1d, 0))::bigint AS orders
                 FROM sponsored_products_search_term_report
                 WHERE report_date = ANY($1::date[]) AND keyword_id IS NOT NULL AND campaign_id::text = ANY($2::text[])
-                GROUP BY 1, 2, 3, 4, 5, 6;
+                GROUP BY 1, 2, 3, 4, 5, 6, 7, 8;
             `;
             const historicalResult = await pool.query(historicalQuery, [[...foundDatesInHistory], campaignIds.map(String)]);
             allRows.push(...historicalResult.rows);
@@ -246,7 +255,10 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
                     entityId: row.entity_id_text,
                     entityType: ['BROAD', 'PHRASE', 'EXACT'].includes(row.match_type) ? 'keyword' : 'target',
                     entityText: row.entity_text, matchType: row.match_type, campaignId: row.campaign_id_text,
-                    adGroupId: row.ad_group_id_text, dailyData: []
+                    adGroupId: row.ad_group_id_text, 
+                    campaignName: row.campaign_name, // Can be undefined for stream data
+                    adGroupName: row.ad_group_name,   // Can be undefined for stream data
+                    dailyData: []
                 });
             }
             const entityData = performanceMap.get(key);
@@ -412,6 +424,7 @@ const getSearchTermHarvestingPerformanceData = async (rule, campaignIds, maxLook
             customer_search_term,
             asin,
             campaign_id,
+            campaign_name,
             ad_group_id,
             COALESCE(SUM(impressions), 0)::bigint AS impressions,
             COALESCE(SUM(cost), 0)::numeric AS spend,
@@ -422,7 +435,7 @@ const getSearchTermHarvestingPerformanceData = async (rule, campaignIds, maxLook
         WHERE report_date >= $1 AND report_date <= $2
           AND customer_search_term IS NOT NULL
           AND campaign_id::text = ANY($3)
-        GROUP BY 1, 2, 3, 4, 5;`,
+        GROUP BY 1, 2, 3, 4, 5, 6;`,
         [startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0], campaignIds.map(String)]
     );
 
@@ -435,6 +448,7 @@ const getSearchTermHarvestingPerformanceData = async (rule, campaignIds, maxLook
                 entityText: row.customer_search_term,
                 sourceAsin: row.asin,
                 sourceCampaignId: row.campaign_id,
+                sourceCampaignName: row.campaign_name,
                 sourceAdGroupId: row.ad_group_id,
                 dailyData: []
             });

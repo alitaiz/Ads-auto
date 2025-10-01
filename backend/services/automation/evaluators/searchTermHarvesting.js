@@ -78,7 +78,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                         if (action.type === 'CREATE_NEW_CAMPAIGN') {
                             const maxNameLength = 128;
                             const prefix = `[H] - ${entity.sourceAsin} - `;
-                            const suffix = ` - ${action.matchType}`;
+                            const suffix = isAsin ? '' : ` - ${action.matchType}`;
                             const maxSearchTermLength = maxNameLength - prefix.length - suffix.length;
                             const truncatedSearchTerm = sanitizedSearchTerm.length > maxSearchTermLength ? sanitizedSearchTerm.substring(0, maxSearchTermLength - 3) + '...' : sanitizedSearchTerm;
                             const campaignName = `${prefix}${truncatedSearchTerm}${suffix}`;
@@ -173,10 +173,21 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                 if (action.autoNegate !== false && shouldNegate) {
                     try {
                         if (isAsin) {
-                            const negTargetPayload = { campaignId: entity.sourceCampaignId, adGroupId: entity.sourceAdGroupId, expression: [{ type: 'ASIN_SAME_AS', value: entity.entityText }] };
+                            const negTargetPayload = { 
+                                campaignId: entity.sourceCampaignId, 
+                                adGroupId: entity.sourceAdGroupId, 
+                                expression: [{ type: 'ASIN_SAME_AS', value: entity.entityText }],
+                                state: 'ENABLED'
+                            };
                             await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeTargets', profileId: rule.profile_id, data: { negativeTargetingClauses: [negTargetPayload] }, headers: { 'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json', 'Accept': 'application/vnd.spNegativeTargetingClause.v3+json' } });
                         } else {
-                            const negKwPayload = { campaignId: entity.sourceCampaignId, adGroupId: entity.sourceAdGroupId, keywordText: entity.entityText, matchType: 'NEGATIVE_EXACT' };
+                            const negKwPayload = { 
+                                campaignId: entity.sourceCampaignId, 
+                                adGroupId: entity.sourceAdGroupId, 
+                                keywordText: entity.entityText, 
+                                matchType: 'NEGATIVE_EXACT',
+                                state: 'ENABLED'
+                            };
                             await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeKeywords', profileId: rule.profile_id, data: { negativeKeywords: [negKwPayload] }, headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json', 'Accept': 'application/vnd.spNegativeKeyword.v3+json' } });
                         }
                         console.log(`[Harvesting] Negated "${entity.entityText}" in source Ad Group ${entity.sourceAdGroupId}`);

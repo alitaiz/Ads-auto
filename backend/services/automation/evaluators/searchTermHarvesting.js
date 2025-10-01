@@ -3,6 +3,18 @@ import { amazonAdsApiRequest } from '../../../helpers/amazon-api.js';
 import { getSkuByAsin } from '../../../helpers/spApiHelper.js';
 import { getLocalDateString, calculateMetricsForWindow, checkCondition } from '../utils.js';
 
+/**
+ * Sanitizes a string to be safe for use in an Amazon campaign or ad group name.
+ * Removes characters that are commonly disallowed by the API.
+ * @param {string} name The input string.
+ * @returns {string} The sanitized string.
+ */
+const sanitizeForCampaignName = (name) => {
+    if (!name) return '';
+    // Removes characters like < > \ / | ? * : " ^ and trims whitespace
+    return name.replace(/[<>\\/|?*:"^]/g, '').trim();
+};
+
 export const evaluateSearchTermHarvestingRule = async (rule, performanceData, throttledEntities) => {
     const actionsByCampaign = {};
     const actedOnEntities = new Set();
@@ -48,15 +60,16 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             const newBid = parseFloat(Math.max(0.02, action.bidOption.type === 'CUSTOM_BID' ? action.bidOption.value : avgCpc * (action.bidOption.value || 1.15)).toFixed(2));
                             
                             let newCampaignId, newAdGroupId;
+                            const sanitizedSearchTerm = sanitizeForCampaignName(entity.entityText);
 
                             if (action.type === 'CREATE_NEW_CAMPAIGN') {
                                 const maxNameLength = 128;
                                 const prefix = `[H] - ${entity.sourceAsin} - `;
                                 const suffix = ` - ${action.matchType}`;
                                 const maxSearchTermLength = maxNameLength - prefix.length - suffix.length;
-                                const truncatedSearchTerm = entity.entityText.length > maxSearchTermLength 
-                                    ? entity.entityText.substring(0, maxSearchTermLength - 3) + '...' 
-                                    : entity.entityText;
+                                const truncatedSearchTerm = sanitizedSearchTerm.length > maxSearchTermLength 
+                                    ? sanitizedSearchTerm.substring(0, maxSearchTermLength - 3) + '...' 
+                                    : sanitizedSearchTerm;
                                 const campaignName = `${prefix}${truncatedSearchTerm}${suffix}`;
                                 
                                 const campaignPayload = {
@@ -77,13 +90,13 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
 
                                 const campSuccessResult = campResponse?.campaigns?.success?.[0];
                                 if (!campSuccessResult?.campaignId) {
-                                    const campError = campResponse?.campaigns?.error?.[0] || campResponse;
-                                    throw new Error(`Campaign creation failed: ${JSON.stringify(campError)}`);
+                                    const campErrorDetails = campResponse?.campaigns?.error?.[0]?.details || JSON.stringify(campResponse);
+                                    throw new Error(`Campaign creation failed: ${campErrorDetails}`);
                                 }
                                 newCampaignId = campSuccessResult.campaignId;
                                 console.log(`[Harvesting] Created Campaign ID: ${newCampaignId}`);
 
-                                const adGroupPayload = { name: entity.entityText, campaignId: newCampaignId, state: 'ENABLED', defaultBid: newBid };
+                                const adGroupPayload = { name: sanitizedSearchTerm.substring(0, 255), campaignId: newCampaignId, state: 'ENABLED', defaultBid: newBid };
                                 const agResponse = await amazonAdsApiRequest({
                                     method: 'post', url: '/sp/adGroups', profileId: rule.profile_id, data: { adGroups: [adGroupPayload] },
                                     headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' },
@@ -91,7 +104,8 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
 
                                 const agSuccessResult = agResponse?.adGroups?.success?.[0];
                                 if (!agSuccessResult?.adGroupId) {
-                                    throw new Error(`Ad Group creation failed: ${JSON.stringify(agResponse?.adGroups?.error?.[0])}`);
+                                    const agErrorDetails = agResponse?.adGroups?.error?.[0]?.details || JSON.stringify(agResponse);
+                                    throw new Error(`Ad Group creation failed: ${agErrorDetails}`);
                                 }
                                 newAdGroupId = agSuccessResult.adGroupId;
                                 console.log(`[Harvesting] Created Ad Group ID: ${newAdGroupId}`);
@@ -125,7 +139,10 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                             actedOnEntities.add(throttleKey);
                         }
                     } catch (e) {
-                         console.error(`[Harvesting] Error during harvest action for term "${entity.entityText}":`, e.message || e);
+                         console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, e);
+                         const errorMessage = e.details?.message || e.message || 'Unknown error during harvesting flow';
+                         console.error(`[Harvesting] Extracted error message in flow:`, errorMessage);
+                         throw new Error(`Harvesting flow failed: ${errorMessage}`);
                     }
                 } else {
                     console.log(`[Harvesting] Term "${entity.entityText}" for ASIN ${entity.sourceAsin} is on cooldown. Skipping harvest.`);

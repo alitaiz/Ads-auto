@@ -789,6 +789,9 @@ const SearchTermHarvestingActionForm = ({ action, onActionChange }: { action: Au
                                 value={action.bidOption?.value ?? ''} 
                                 onChange={e => onActionChange('bidOption.value', Number(e.target.value))} 
                             />
+                            <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>
+                                e.g., <code style={{backgroundColor: '#e9ecef', padding: '2px 4px', borderRadius: '3px'}}>1.15</code> means the new bid will be 115% of the original CPC (a 15% increase).
+                            </p>
                         </div>
                         <div>
                             <label style={{...styles.label, fontSize: '0.85rem'}}>Max Bid (Optional)</label>

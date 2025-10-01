@@ -34,50 +34,55 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                 console.log(`[Harvesting] Term "${entity.entityText}" for ASIN ${entity.sourceAsin} from Campaign ${entity.sourceCampaignId} is a winner.`);
                 const { action } = group;
                 const isAsin = asinRegex.test(entity.entityText);
-                let newCampaignId;
-                let newAdGroupId;
-                let harvestSuccess = false;
-                let newBid;
 
                 if (!throttledEntities.has(throttleKey)) {
-                    const totalClicks = entity.dailyData.reduce((s, d) => s + d.clicks, 0);
-                    const totalSpend = entity.dailyData.reduce((s, d) => s + d.spend, 0);
-                    const avgCpc = totalClicks > 0 ? totalSpend / totalClicks : 0.50;
-                    newBid = parseFloat(Math.max(0.02, action.bidOption.type === 'CUSTOM_BID' ? action.bidOption.value : avgCpc * (action.bidOption.value || 1.15)).toFixed(2));
-                    
-                    if (action.type === 'CREATE_NEW_CAMPAIGN') {
-                        const maxNameLength = 128;
-                        const prefix = `[H] - ${entity.sourceAsin} - `;
-                        const suffix = ` - ${action.matchType}`;
-                        const maxSearchTermLength = maxNameLength - prefix.length - suffix.length;
-                        const truncatedSearchTerm = entity.entityText.length > maxSearchTermLength 
-                            ? entity.entityText.substring(0, maxSearchTermLength - 3) + '...' 
-                            : entity.entityText;
-                        const campaignName = `${prefix}${truncatedSearchTerm}${suffix}`;
-                        
-                        const campaignPayload = {
-                            name: campaignName,
-                            targetingType: 'MANUAL',
-                            state: 'ENABLED',
-                            budget: {
-                                budget: Number(action.newCampaignBudget ?? 10.00),
-                                budgetType: 'DAILY',
-                            },
-                            startDate: getLocalDateString('America/Los_Angeles'),
-                        };
+                    try {
+                        const retrievedSku = await getSkuByAsin(entity.sourceAsin);
 
-                        try {
-                            const campResponse = await amazonAdsApiRequest({
-                                method: 'post', url: '/sp/campaigns', profileId: rule.profile_id, data: { campaigns: [campaignPayload] },
-                                headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
-                            });
+                        if (!retrievedSku) {
+                            console.warn(`[Harvesting] Could not find a SKU for ASIN ${entity.sourceAsin}. Skipping harvest action for this term/ASIN combination.`);
+                        } else {
+                            const totalClicks = entity.dailyData.reduce((s, d) => s + d.clicks, 0);
+                            const totalSpend = entity.dailyData.reduce((s, d) => s + d.spend, 0);
+                            const avgCpc = totalClicks > 0 ? totalSpend / totalClicks : 0.50;
+                            const newBid = parseFloat(Math.max(0.02, action.bidOption.type === 'CUSTOM_BID' ? action.bidOption.value : avgCpc * (action.bidOption.value || 1.15)).toFixed(2));
                             
-                            const campSuccessResult = campResponse?.campaigns?.success?.[0];
+                            let newCampaignId, newAdGroupId;
 
-                            if (campSuccessResult && campSuccessResult.campaignId) {
+                            if (action.type === 'CREATE_NEW_CAMPAIGN') {
+                                const maxNameLength = 128;
+                                const prefix = `[H] - ${entity.sourceAsin} - `;
+                                const suffix = ` - ${action.matchType}`;
+                                const maxSearchTermLength = maxNameLength - prefix.length - suffix.length;
+                                const truncatedSearchTerm = entity.entityText.length > maxSearchTermLength 
+                                    ? entity.entityText.substring(0, maxSearchTermLength - 3) + '...' 
+                                    : entity.entityText;
+                                const campaignName = `${prefix}${truncatedSearchTerm}${suffix}`;
+                                
+                                const campaignPayload = {
+                                    name: campaignName,
+                                    targetingType: 'MANUAL',
+                                    state: 'ENABLED',
+                                    budget: {
+                                        budget: Number(action.newCampaignBudget ?? 10.00),
+                                        budgetType: 'DAILY',
+                                    },
+                                    startDate: getLocalDateString('America/Los_Angeles'),
+                                };
+
+                                const campResponse = await amazonAdsApiRequest({
+                                    method: 'post', url: '/sp/campaigns', profileId: rule.profile_id, data: { campaigns: [campaignPayload] },
+                                    headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
+                                });
+
+                                const campSuccessResult = campResponse?.campaigns?.success?.[0];
+                                if (!campSuccessResult?.campaignId) {
+                                    const campError = campResponse?.campaigns?.error?.[0] || campResponse;
+                                    throw new Error(`Campaign creation failed: ${JSON.stringify(campError)}`);
+                                }
                                 newCampaignId = campSuccessResult.campaignId;
                                 console.log(`[Harvesting] Created Campaign ID: ${newCampaignId}`);
-                                
+
                                 const adGroupPayload = { name: entity.entityText, campaignId: newCampaignId, state: 'ENABLED', defaultBid: newBid };
                                 const agResponse = await amazonAdsApiRequest({
                                     method: 'post', url: '/sp/adGroups', profileId: rule.profile_id, data: { adGroups: [adGroupPayload] },
@@ -85,116 +90,47 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                 });
 
                                 const agSuccessResult = agResponse?.adGroups?.success?.[0];
-
-                                if (agSuccessResult && agSuccessResult.adGroupId) {
-                                    newAdGroupId = agSuccessResult.adGroupId;
-                                    console.log(`[Harvesting] Created Ad Group ID: ${newAdGroupId}`);
-                                    
-                                    // CRITICAL STEP: Fetch the SKU using the ASIN before creating the product ad.
-                                    const retrievedSku = await getSkuByAsin(entity.sourceAsin);
-                                    if (!retrievedSku) {
-                                        throw new Error(`Could not find a valid SKU for ASIN ${entity.sourceAsin}. Cannot create product ad.`);
-                                    }
-
-                                    const productAdPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', sku: retrievedSku };
-                                    const adResponse = await amazonAdsApiRequest({
-                                        method: 'post', url: '/sp/productAds', profileId: rule.profile_id, data: { productAds: [productAdPayload] },
-                                        headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json', 'Accept': 'application/vnd.spProductAd.v3+json' },
-                                    });
-                                    
-                                    const adSuccessResult = adResponse?.productAds?.success?.[0];
-
-                                    if(adSuccessResult && adSuccessResult.adId) {
-                                        console.log(`[Harvesting] Created Product Ad for SKU ${retrievedSku}`);
-                                        harvestSuccess = true;
-                                    } else {
-                                        const adError = adResponse?.productAds?.error?.[0];
-                                        const adErrorDetails = adError?.errors?.[0]?.message || adError?.errors?.[0]?.details || `Unknown product ad error (Code: ${adError?.code})`;
-                                        throw new Error(`Product Ad creation failed: ${adErrorDetails}`);
-                                    }
-                                } else {
-                                    const agError = agResponse?.adGroups?.error?.[0];
-                                    const agErrorDetails = agError?.errors?.[0]?.message || agError?.errors?.[0]?.details || `Unknown ad group error (Code: ${agError?.code})`;
-                                    throw new Error(`Ad Group creation failed: ${agErrorDetails}`);
+                                if (!agSuccessResult?.adGroupId) {
+                                    throw new Error(`Ad Group creation failed: ${JSON.stringify(agResponse?.adGroups?.error?.[0])}`);
                                 }
+                                newAdGroupId = agSuccessResult.adGroupId;
+                                console.log(`[Harvesting] Created Ad Group ID: ${newAdGroupId}`);
+
+                                const productAdPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', sku: retrievedSku };
+                                await amazonAdsApiRequest({
+                                    method: 'post', url: '/sp/productAds', profileId: rule.profile_id, data: { productAds: [productAdPayload] },
+                                    headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json', 'Accept': 'application/vnd.spProductAd.v3+json' },
+                                });
+                                console.log(`[Harvesting] Created Product Ad for SKU ${retrievedSku}`);
+
+                            } else { // ADD_TO_EXISTING_CAMPAIGN
+                                newCampaignId = action.targetCampaignId;
+                                newAdGroupId = action.targetAdGroupId;
+                            }
+                            
+                            if (isAsin) {
+                                const targetPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', expression: [{ type: 'ASIN_SAME_AS', value: entity.entityText }], bid: newBid };
+                                await amazonAdsApiRequest({
+                                    method: 'post', url: '/sp/targets', profileId: rule.profile_id, data: { targetingClauses: [targetPayload] },
+                                    headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' },
+                                });
                             } else {
-                                const campError = campResponse?.campaigns?.error?.[0];
-                                let campErrorDetails = 'Unknown campaign error';
-
-                                if (campError) {
-                                    const firstSubError = campError.errors?.[0];
-                                    const errorValueObject = firstSubError?.errorValue;
-                                    
-                                    if (errorValueObject && typeof errorValueObject === 'object') {
-                                        // The errorValue is a selector object, e.g., { "biddingError": { "message": "..." } }.
-                                        // We need to find the key of the actual error object inside it.
-                                        const errorDetailKey = Object.keys(errorValueObject).find(
-                                            key => errorValueObject[key] && typeof errorValueObject[key].message === 'string'
-                                        );
-                                        
-                                        if (errorDetailKey) {
-                                            campErrorDetails = errorValueObject[errorDetailKey].message;
-                                        } else {
-                                            // Fallback if the structure is unexpected but errorValueObject exists.
-                                            campErrorDetails = `Error type ${firstSubError.errorType || 'Unknown'}: ${JSON.stringify(errorValueObject)}`;
-                                        }
-                                    } else {
-                                        // Fallback if the error structure doesn't match expectations at all.
-                                        campErrorDetails = JSON.stringify(campError);
-                                    }
-                                } else if (campResponse.message) {
-                                    campErrorDetails = campResponse.message;
-                                } else if (campResponse) {
-                                    // Handle cases where the response is not the expected 207 structure
-                                    campErrorDetails = JSON.stringify(campResponse);
-                                }
-                                
-                                throw new Error(`Campaign creation failed: ${campErrorDetails}`);
+                                const kwPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', keywordText: entity.entityText, matchType: action.matchType, bid: newBid };
+                                await amazonAdsApiRequest({
+                                    method: 'post', url: '/sp/keywords', profileId: rule.profile_id, data: { keywords: [kwPayload] },
+                                    headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
+                                });
                             }
-                        } catch (e) {
-                            console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, e);
-                            let errorMessage = 'An unknown error occurred. See server logs.';
-                            if (e instanceof Error) {
-                                errorMessage = e.message;
-                            } else if (e?.details) {
-                                 // Handle structured errors from amazonAdsApiRequest
-                                errorMessage = typeof e.details === 'string' ? e.details : JSON.stringify(e.details);
-                            } else if (e?.message) {
-                                errorMessage = e.message;
-                            }
-                             console.error(`[Harvesting] Extracted error message in flow:`, errorMessage);
-                            throw new Error(`Harvesting flow failed: ${errorMessage}`);
+                            createdCount++;
+                            actedOnEntities.add(throttleKey);
                         }
-                    } else {
-                        harvestSuccess = true; 
-                        newCampaignId = action.targetCampaignId;
-                        newAdGroupId = action.targetAdGroupId;
+                    } catch (e) {
+                         console.error(`[Harvesting] Error during harvest action for term "${entity.entityText}":`, e.message || e);
                     }
                 } else {
-                    console.log(`[Harvesting] Term "${entity.entityText}" for ASIN ${entity.sourceAsin} is a winner, but is currently on cooldown. Skipping harvest action.`);
-                    harvestSuccess = false;
+                    console.log(`[Harvesting] Term "${entity.entityText}" for ASIN ${entity.sourceAsin} is on cooldown. Skipping harvest.`);
                 }
-
-                if (harvestSuccess && newAdGroupId) {
-                    try {
-                        if (isAsin) {
-                            const targetPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', expression: [{ type: 'ASIN_SAME_AS', value: entity.entityText }], bid: newBid };
-                            await amazonAdsApiRequest({
-                                method: 'post', url: '/sp/targets', profileId: rule.profile_id, data: { targetingClauses: [targetPayload] },
-                                headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' },
-                            });
-                        } else {
-                            const kwPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', keywordText: entity.entityText, matchType: action.matchType, bid: newBid };
-                            await amazonAdsApiRequest({
-                                method: 'post', url: '/sp/keywords', profileId: rule.profile_id, data: { keywords: [kwPayload] },
-                                headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
-                            });
-                        }
-                        createdCount++;
-                        actedOnEntities.add(throttleKey);
-                    } catch (e) { console.error(`[Harvesting] Error creating keyword/target:`, e); harvestSuccess = false; }
-                }
-
+                
                 if (action.autoNegate !== false) {
                     try {
                         if (isAsin) {
@@ -212,7 +148,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                         }
                         console.log(`[Harvesting] Negated "${entity.entityText}" in source Ad Group ${entity.sourceAdGroupId}`);
                         negatedCount++;
-                    } catch (e) { console.error(`[Harvesting] Error negating source term:`, e); }
+                    } catch (e) { console.error(`[Harvesting] Error negating source term:`, e.details || e); }
                 }
                 break; 
             }

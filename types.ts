@@ -342,3 +342,11 @@ export interface ProductDetails {
     error?: string;
     rank?: string;
 }
+
+// --- New type for Listings View ---
+export interface ProductListing {
+    id: number;
+    asin: string;
+    sku: string;
+    title: string;
+}

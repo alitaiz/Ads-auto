@@ -13,6 +13,7 @@ import { AICopilotView } from './views/AICopilotView';
 import { DataViewer } from './views/components/DataViewer';
 import { SearchQueryPerformanceView } from './views/SearchQueryPerformanceView';
 import { DataCacheProvider } from './contexts/DataCacheContext';
+import { ListingView } from './views/ListingView';
 
 // Basic global styles
 const styles = `
@@ -73,6 +74,7 @@ function App() {
           <Route path="database" element={<DatabaseView />} />
           <Route path="automation" element={<AutomationView />} />
           <Route path="ai-copilot" element={<AICopilotView />} />
+          <Route path="listings" element={<ListingView />} />
           <Route path="*" element={<Navigate to="/campaigns" replace />} />
         </Route>
       </Routes>

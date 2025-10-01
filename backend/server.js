@@ -14,6 +14,7 @@ import aiRoutes from './routes/ai.js';
 import aiConversationRoutes from './routes/aiConversations.js'; // New route for chat history
 import queryPerformanceRoutes from './routes/queryPerformance.js';
 import productDetailsRoutes from './routes/productDetails.js';
+import listingsRoutes from './routes/listings.js';
 import { startRulesEngine } from './services/rulesEngine.js';
 
 const app = express();
@@ -39,6 +40,7 @@ app.use('/api', aiRoutes);
 app.use('/api/ai/conversations', aiConversationRoutes); // Mount the new conversation routes
 app.use('/api', queryPerformanceRoutes);
 app.use('/api', productDetailsRoutes);
+app.use('/api', listingsRoutes);
 
 
 // --- Root Endpoint for health checks ---

@@ -80,6 +80,9 @@ export function Layout() {
                     <NavLink to="/ai-copilot" style={getNavLinkStyle}>
                         AI Co-Pilot
                     </NavLink>
+                    <NavLink to="/listings" style={getNavLinkStyle}>
+                        Listing
+                    </NavLink>
                 </nav>
             </header>
             <main style={styles.mainContent}>

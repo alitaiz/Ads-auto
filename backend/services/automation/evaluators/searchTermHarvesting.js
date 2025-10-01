@@ -119,15 +119,49 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
                                 }
                             } else {
                                 const campError = campResponse?.campaigns?.error?.[0];
-                                const campErrorDetails = campError?.errors?.[0]?.message || campError?.errors?.[0]?.details || campResponse.message || 'Unknown campaign error';
+                                let campErrorDetails = 'Unknown campaign error';
+
+                                if (campError) {
+                                    const firstSubError = campError.errors?.[0];
+                                    const errorValueObject = firstSubError?.errorValue;
+                                    
+                                    if (errorValueObject && typeof errorValueObject === 'object') {
+                                        // The errorValue is a selector object, e.g., { "biddingError": { "message": "..." } }.
+                                        // We need to find the key of the actual error object inside it.
+                                        const errorDetailKey = Object.keys(errorValueObject).find(
+                                            key => errorValueObject[key] && typeof errorValueObject[key].message === 'string'
+                                        );
+                                        
+                                        if (errorDetailKey) {
+                                            campErrorDetails = errorValueObject[errorDetailKey].message;
+                                        } else {
+                                            // Fallback if the structure is unexpected but errorValueObject exists.
+                                            campErrorDetails = `Error type ${firstSubError.errorType || 'Unknown'}: ${JSON.stringify(errorValueObject)}`;
+                                        }
+                                    } else {
+                                        // Fallback if the error structure doesn't match expectations at all.
+                                        campErrorDetails = JSON.stringify(campError);
+                                    }
+                                } else if (campResponse.message) {
+                                    campErrorDetails = campResponse.message;
+                                } else if (campResponse) {
+                                    // Handle cases where the response is not the expected 207 structure
+                                    campErrorDetails = JSON.stringify(campResponse);
+                                }
+                                
                                 throw new Error(`Campaign creation failed: ${campErrorDetails}`);
                             }
                         } catch (e) {
                             console.error(`[Harvesting] Raw error object in CREATE_NEW_CAMPAIGN flow:`, e);
                             let errorMessage = 'An unknown error occurred. See server logs.';
-                            if (e instanceof Error) errorMessage = e.message;
-                            else if (e?.details) errorMessage = typeof e.details === 'string' ? e.details : JSON.stringify(e.details);
-                            else if (e?.message) errorMessage = e.message;
+                            if (e instanceof Error) {
+                                errorMessage = e.message;
+                            } else if (e?.details) {
+                                 // Handle structured errors from amazonAdsApiRequest
+                                errorMessage = typeof e.details === 'string' ? e.details : JSON.stringify(e.details);
+                            } else if (e?.message) {
+                                errorMessage = e.message;
+                            }
                              console.error(`[Harvesting] Extracted error message in flow:`, errorMessage);
                             throw new Error(`Harvesting flow failed: ${errorMessage}`);
                         }

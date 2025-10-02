@@ -14,6 +14,7 @@ import { DataViewer } from './views/components/DataViewer';
 import { SearchQueryPerformanceView } from './views/SearchQueryPerformanceView';
 import { DataCacheProvider } from './contexts/DataCacheContext';
 import { ListingView } from './views/ListingView';
+import { CreateAdsView } from './views/CreateAdsView';
 
 // Basic global styles
 const styles = `
@@ -75,6 +76,7 @@ function App() {
           <Route path="automation" element={<AutomationView />} />
           <Route path="ai-copilot" element={<AICopilotView />} />
           <Route path="listings" element={<ListingView />} />
+          <Route path="create-ads" element={<CreateAdsView />} />
           <Route path="*" element={<Navigate to="/campaigns" replace />} />
         </Route>
       </Routes>

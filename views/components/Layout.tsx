@@ -83,6 +83,9 @@ export function Layout() {
                     <NavLink to="/listings" style={getNavLinkStyle}>
                         Listing
                     </NavLink>
+                    <NavLink to="/create-ads" style={getNavLinkStyle}>
+                        Create Ads
+                    </NavLink>
                 </nav>
             </header>
             <main style={styles.mainContent}>

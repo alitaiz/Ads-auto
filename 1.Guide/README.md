@@ -41,6 +41,9 @@
     -   Kích hoạt HTTPS: `6.SECURITY_SSL_CERTBOT_GUIDE.md`
     -   Thêm lớp mật khẩu: `5.SECURITY_NGINX_BASIC_AUTH_GUIDE.md`
 
+5.  **(MỚI) Chiến lược Khởi chạy PPC cho Sản phẩm Mới**
+    -   Xem file: `PPC_LAUNCH_STRATEGY.md`
+
 ## Chạy trên Máy tính Cá nhân (Local Development)
 
 **Yêu cầu:** Node.js, PostgreSQL đang chạy trên máy của bạn.

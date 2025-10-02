@@ -13,8 +13,13 @@ export const logAction = async (rule, status, summary, details = {}) => {
     const replacer = (key, value) => (typeof value === 'bigint' ? value.toString() : value);
     const detailsJson = JSON.stringify(details, replacer);
 
+    // Determine the correct table based on the presence of rule_type.
+    // This allows logging for both standard automation and campaign creation rules.
+    const tableName = rule.rule_type ? 'automation_logs' : 'automation_logs';
+    const ruleIdColumn = rule.rule_type ? 'rule_id' : 'rule_id';
+
     await pool.query(
-      `INSERT INTO automation_logs (rule_id, status, summary, details) VALUES ($1, $2, $3, $4)`,
+      `INSERT INTO ${tableName} (${ruleIdColumn}, status, summary, details) VALUES ($1, $2, $3, $4)`,
       [rule.id, status, summary, detailsJson]
     );
     console.log(`[RulesEngine] Logged action for rule "${rule.name}": ${summary}`);
@@ -99,13 +104,14 @@ export const checkCondition = (metricValue, operator, conditionValue) => {
 
 /**
  * Determines if a rule is due to be run based on its frequency and last run time.
- * @param {object} rule - The rule object from the database.
+ * @param {object} rule - The rule object from the database (works for both standard and creation rules).
  * @returns {boolean} - True if the rule is due.
  */
 export const isRuleDue = (rule) => {
     const now = new Date();
     const lastRun = rule.last_run_at ? new Date(rule.last_run_at) : null;
-    const frequency = rule.config.frequency;
+    // Handles both standard rules (config.frequency) and creation rules (frequency)
+    const frequency = rule.config?.frequency || rule.frequency;
 
     if (!frequency || !frequency.unit || !frequency.value) {
         console.warn(`[RulesEngine] Rule ${rule.id} has invalid frequency config.`);
@@ -121,14 +127,18 @@ export const isRuleDue = (rule) => {
         return diffMs >= requiredMs;
     }
 
-    if (frequency.unit === 'days') {
+    if (frequency.unit === 'days' || frequency.unit === 'weeks') {
+        const requiredDays = frequency.unit === 'weeks' ? frequency.value * 7 : frequency.value;
+
+        // Logic for simple interval-based day/week checks (no specific time)
         if (!frequency.startTime) {
             if (!lastRun) return true;
             const diffMs = now.getTime() - lastRun.getTime();
-            const requiredMs = frequency.value * 24 * 60 * 60 * 1000;
+            const requiredMs = requiredDays * 24 * 60 * 60 * 1000;
             return diffMs >= requiredMs;
         }
 
+        // Logic for schedules with a specific start time (e.g., "run daily at 2 AM")
         const timeZone = 'America/Phoenix';
         const nowInTz = new Date(now.toLocaleString('en-US', { timeZone }));
         const [startHour, startMinute] = frequency.startTime.split(':').map(Number);
@@ -149,7 +159,7 @@ export const isRuleDue = (rule) => {
         const diffTime = startOfTodayInTz.getTime() - startOfLastRunDayInTz.getTime();
         const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
-        return diffDays >= frequency.value;
+        return diffDays >= requiredDays;
     }
 
     return false;

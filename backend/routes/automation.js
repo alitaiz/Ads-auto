@@ -43,14 +43,13 @@ router.put('/automation/rules/:id', async (req, res) => {
 
   try {
     // 1. Fetch the current rule from the database to prevent accidental data loss from partial updates.
-    const existingResult = await pool.query('SELECT * FROM automation_rules WHERE id = $1', [id]);
-    if (existingResult.rows.length === 0) {
+    const { rows: existingRows } = await pool.query('SELECT * FROM automation_rules WHERE id = $1', [id]);
+    if (existingRows.length === 0) {
       return res.status(404).json({ error: 'Rule not found' });
     }
-    const existingRule = existingResult.rows[0];
+    const existingRule = existingRows[0];
 
-    // 2. Merge the provided updates onto the existing rule data.
-    //    This ensures that any fields not sent in the request body are not overwritten.
+    // 2. Merge the provided updates onto the existing rule data safely.
     const mergedRule = {
       name: updates.name ?? existingRule.name,
       config: updates.config ?? existingRule.config,
@@ -166,6 +165,76 @@ router.get('/automation/logs', async (req, res) => {
     console.error('Failed to fetch automation logs', err);
     res.status(500).json({ error: 'Failed to fetch logs' });
   }
+});
+
+// --- Campaign Creation Rules CRUD ---
+
+// GET all campaign creation rules for a profile
+router.get('/automation/campaign-creation-rules', async (req, res) => {
+    const { profileId } = req.query;
+    if (!profileId) return res.status(400).json({ error: 'Profile ID is required.' });
+    try {
+        const { rows } = await pool.query('SELECT * FROM campaign_creation_rules WHERE profile_id = $1 ORDER BY created_at DESC', [profileId]);
+        res.json(rows);
+    } catch (err) {
+        console.error('Failed to fetch campaign creation rules', err);
+        res.status(500).json({ error: 'Failed to fetch schedules' });
+    }
+});
+
+// POST a new campaign creation rule
+router.post('/automation/campaign-creation-rules', async (req, res) => {
+    const { name, profile_id, is_active, frequency, creation_parameters, associated_rule_ids } = req.body;
+    if (!name || !profile_id || !frequency || !creation_parameters) {
+        return res.status(400).json({ error: 'Missing required fields for schedule.' });
+    }
+    try {
+        const { rows } = await pool.query(
+            `INSERT INTO campaign_creation_rules (name, profile_id, is_active, frequency, creation_parameters, associated_rule_ids)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+            [name, profile_id, is_active ?? true, frequency, creation_parameters, JSON.stringify(associated_rule_ids || [])]
+        );
+        res.status(201).json(rows[0]);
+    } catch (err) {
+        console.error('Failed to create campaign creation rule', err);
+        res.status(500).json({ error: 'Failed to create schedule' });
+    }
+});
+
+// PUT (update) an existing campaign creation rule
+router.put('/automation/campaign-creation-rules/:id', async (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
+    try {
+        const { rows: existing } = await pool.query('SELECT * FROM campaign_creation_rules WHERE id = $1', [id]);
+        if (existing.length === 0) return res.status(404).json({ error: 'Schedule not found' });
+        
+        const merged = { ...existing[0], ...updates };
+        const { name, is_active, frequency, creation_parameters, associated_rule_ids } = merged;
+
+        const { rows } = await pool.query(
+            `UPDATE campaign_creation_rules SET name = $1, is_active = $2, frequency = $3, creation_parameters = $4, associated_rule_ids = $5
+             WHERE id = $6 RETURNING *`,
+            [name, is_active, frequency, creation_parameters, JSON.stringify(associated_rule_ids || []), id]
+        );
+        res.json(rows[0]);
+    } catch (err) {
+        console.error(`Failed to update schedule ${id}`, err);
+        res.status(500).json({ error: 'Failed to update schedule' });
+    }
+});
+
+// DELETE a campaign creation rule
+router.delete('/automation/campaign-creation-rules/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM campaign_creation_rules WHERE id = $1', [id]);
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Schedule not found' });
+        res.status(204).send();
+    } catch (err) {
+        console.error(`Failed to delete schedule ${id}`, err);
+        res.status(500).json({ error: 'Failed to delete schedule' });
+    }
 });
 
 export default router;

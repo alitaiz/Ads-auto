@@ -7,6 +7,99 @@ import pool from '../db.js';
 const router = express.Router();
 
 /**
+ * Encapsulates the logic to create a full SP Auto campaign from an ASIN.
+ * This function is exported so it can be used by both the API endpoint and the rules engine.
+ * @param {string} profileId - The Amazon Ads profile ID.
+ * @param {string} asin - The product ASIN.
+ * @param {number} budget - The daily budget.
+ * @param {number} defaultBid - The default ad group bid.
+ * @param {number[]} associatedRuleIds - An array of automation rule IDs to associate.
+ * @returns {Promise<object>} - An object with details of the created entities.
+ */
+export async function createAutoCampaign(profileId, asin, budget, defaultBid, associatedRuleIds = []) {
+    let client;
+    try {
+        console.log(`[Action:CreateAutoCampaign] Starting creation for ASIN ${asin}`);
+        // 1. Get SKU from ASIN
+        const sku = await getSkuByAsin(asin);
+        if (!sku) {
+            throw new Error(`Could not find a valid SKU for ASIN ${asin}. Add it to your Listings or ensure it's in Seller Central.`);
+        }
+        console.log(`[Action:CreateAutoCampaign] Found SKU: ${sku}`);
+
+        // 2. Create Campaign
+        const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const campaignName = `[A] - ${asin} - ${date}`;
+        const campaignPayload = {
+            name: campaignName,
+            targetingType: 'AUTO',
+            state: 'ENABLED',
+            budget: { budget: Number(budget), budgetType: 'DAILY' },
+            startDate: new Date().toISOString().slice(0, 10)
+        };
+        const campResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/campaigns', profileId, data: { campaigns: [campaignPayload] }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json' } });
+        const campSuccess = campResponse?.campaigns?.success?.[0];
+        if (!campSuccess?.campaignId) {
+            const errorDetail = campResponse?.campaigns?.error?.[0]?.errors?.[0]?.errorValue?.message;
+            throw new Error(`Campaign creation failed: ${errorDetail || JSON.stringify(campResponse?.campaigns?.error?.[0])}`);
+        }
+        const newCampaignId = campSuccess.campaignId;
+        console.log(`[Action:CreateAutoCampaign] Created Campaign ID: ${newCampaignId}`);
+
+        // 3. Create Ad Group
+        const adGroupPayload = { name: `Ad Group - ${asin}`, campaignId: newCampaignId, state: 'ENABLED', defaultBid: Number(defaultBid) };
+        const agResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/adGroups', profileId, data: { adGroups: [adGroupPayload] }, headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json' } });
+        const agSuccess = agResponse?.adGroups?.success?.[0];
+        if (!agSuccess?.adGroupId) throw new Error(`Ad Group creation failed: ${JSON.stringify(agResponse?.adGroups?.error?.[0])}`);
+        const newAdGroupId = agSuccess.adGroupId;
+        console.log(`[Action:CreateAutoCampaign] Created Ad Group ID: ${newAdGroupId}`);
+
+        // 4. Create Product Ad
+        const adPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', sku };
+        const adResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/productAds', profileId, data: { productAds: [adPayload] }, headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json' } });
+        const adSuccess = adResponse?.productAds?.success?.[0];
+        if (!adSuccess?.adId) throw new Error(`Product Ad creation failed: ${JSON.stringify(adResponse?.productAds?.error?.[0])}`);
+        console.log(`[Action:CreateAutoCampaign] Created Product Ad ID: ${adSuccess.adId}`);
+
+        // 5. Associate Rules
+        let rulesAssociated = 0;
+        if (associatedRuleIds && associatedRuleIds.length > 0) {
+            console.log(`[Action:CreateAutoCampaign] Associating ${associatedRuleIds.length} rules...`);
+            client = await pool.connect();
+            await client.query('BEGIN');
+            for (const ruleId of associatedRuleIds) {
+                const { rows } = await client.query('SELECT scope FROM automation_rules WHERE id = $1', [ruleId]);
+                if (rows.length > 0) {
+                    const scope = rows[0].scope || {};
+                    const campaignIds = new Set(scope.campaignIds?.map(String) || []);
+                    campaignIds.add(String(newCampaignId));
+                    const newScope = { ...scope, campaignIds: Array.from(campaignIds) };
+                    await client.query('UPDATE automation_rules SET scope = $1 WHERE id = $2', [newScope, ruleId]);
+                    rulesAssociated++;
+                }
+            }
+            await client.query('COMMIT');
+            console.log(`[Action:CreateAutoCampaign] Associated ${rulesAssociated} rules.`);
+        }
+
+        return {
+            campaignId: newCampaignId,
+            campaignName: campaignName,
+            adGroupId: newAdGroupId,
+            adId: adSuccess.adId,
+            rulesAssociated
+        };
+    } catch (error) {
+        if (client) await client.query('ROLLBACK');
+        console.error('[Action:CreateAutoCampaign] Error during campaign creation:', error);
+        throw error;
+    } finally {
+        if (client) client.release();
+    }
+}
+
+
+/**
  * GET /api/amazon/profiles
  * Fetches all available advertising profiles.
  */
@@ -177,7 +270,7 @@ router.post('/campaigns/list', async (req, res) => {
         const sdPromise = fetchCampaignsForTypeGet(profileId, '/sd/campaigns', { 'Accept': 'application/json' }, sdParams)
             .catch(err => { console.error("SD Campaign fetch failed:", err.details || err); return []; });
 
-        const [spCampaigns, sbCampaigns, sdCampaigns] = await Promise.all([spPromise, sbPromise, sdPromise]);
+        const [spCampaigns, sbCampaigns, sdCampaigns] = await Promise.all([spPromise, sbCampaigns, sdCampaigns]);
 
         // --- Transform and Merge Results (Portfolio logic removed) ---
         const transformCampaign = (campaign, type) => {
@@ -588,70 +681,15 @@ router.post('/create-auto-campaign', async (req, res) => {
         return res.status(400).json({ message: 'profileId, asin, budget, and defaultBid are required.' });
     }
 
-    let client;
     try {
-        // 1. Get SKU from ASIN
-        const sku = await getSkuByAsin(asin);
-        if (!sku) {
-            throw new Error(`Could not find a valid SKU for ASIN ${asin}. Please add it to your Listings or ensure it's in your Seller Central inventory.`);
-        }
-
-        // 2. Create Campaign
-        const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-        const campaignName = `[A] - ${asin} - ${date}`;
-        const campaignPayload = { name: campaignName, targetingType: 'AUTO', state: 'ENABLED', budget: { budget: Number(budget), budgetType: 'DAILY' }, startDate: new Date().toISOString().slice(0, 10) };
-        const campResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/campaigns', profileId, data: { campaigns: [campaignPayload] }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json' } });
-        const campSuccess = campResponse?.campaigns?.success?.[0];
-        if (!campSuccess?.campaignId) throw new Error(`Campaign creation failed: ${JSON.stringify(campResponse?.campaigns?.error?.[0])}`);
-        const newCampaignId = campSuccess.campaignId;
-
-        // 3. Create Ad Group
-        const adGroupPayload = { name: `Ad Group - ${asin}`, campaignId: newCampaignId, state: 'ENABLED', defaultBid: Number(defaultBid) };
-        const agResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/adGroups', profileId, data: { adGroups: [adGroupPayload] }, headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json' } });
-        const agSuccess = agResponse?.adGroups?.success?.[0];
-        if (!agSuccess?.adGroupId) throw new Error(`Ad Group creation failed: ${JSON.stringify(agResponse?.adGroups?.error?.[0])}`);
-        const newAdGroupId = agSuccess.adGroupId;
-
-        // 4. Create Product Ad
-        const adPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', sku };
-        const adResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/productAds', profileId, data: { productAds: [adPayload] }, headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json' } });
-        const adSuccess = adResponse?.productAds?.success?.[0];
-        if (!adSuccess?.adId) throw new Error(`Product Ad creation failed: ${JSON.stringify(adResponse?.productAds?.error?.[0])}`);
-        
-        // 5. Associate Rules
-        let rulesAssociated = 0;
-        if (ruleIds && ruleIds.length > 0) {
-            client = await pool.connect();
-            await client.query('BEGIN');
-            for (const ruleId of ruleIds) {
-                const { rows } = await client.query('SELECT scope FROM automation_rules WHERE id = $1', [ruleId]);
-                if (rows.length > 0) {
-                    const scope = rows[0].scope || {};
-                    const campaignIds = new Set(scope.campaignIds || []);
-                    campaignIds.add(newCampaignId);
-                    const newScope = { ...scope, campaignIds: Array.from(campaignIds) };
-                    await client.query('UPDATE automation_rules SET scope = $1 WHERE id = $2', [newScope, ruleId]);
-                    rulesAssociated++;
-                }
-            }
-            await client.query('COMMIT');
-        }
-
+        const result = await createAutoCampaign(profileId, asin, budget, defaultBid, ruleIds);
         res.status(201).json({ 
             message: 'Campaign created successfully.', 
-            campaignId: newCampaignId, 
-            campaignName: campaignName,
-            adGroupId: newAdGroupId,
-            adId: adSuccess.adId,
-            rulesAssociated
+            ...result,
         });
-
     } catch (error) {
-        if (client) await client.query('ROLLBACK');
         console.error('[Create Auto Campaign] Error:', error);
         res.status(500).json({ message: error.message || 'An unknown server error occurred.' });
-    } finally {
-        if (client) client.release();
     }
 });
 

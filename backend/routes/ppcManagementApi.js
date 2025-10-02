@@ -237,12 +237,14 @@ router.post('/campaigns/list', async (req, res) => {
         // --- Sponsored Products (POST) ---
         const spBody = { maxResults: 500, stateFilter: { include: baseStateFilter } };
         if (campaignIdFilter?.length > 0) spBody.campaignIdFilter = { include: campaignIdFilter.map(String) };
-        const spPromise = fetchCampaignsForTypePost(profileId, '/sp/campaigns/list', { 'Content-Type': 'application/vnd.spCampaign.v3+json' }, spBody);
+        const spPromise = fetchCampaignsForTypePost(profileId, '/sp/campaigns/list', { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' }, spBody)
+            .catch(err => { console.error("SP Campaign fetch failed:", err.details || err); return []; });
+
 
         // --- Sponsored Brands (POST v4) ---
         const sbBody = { pageSize: 100, stateFilter: { include: baseStateFilter } };
         if (campaignIdFilter?.length > 0) sbBody.campaignIdFilter = { include: campaignIdFilter.map(String) };
-        const sbPromise = fetchCampaignsForTypePost(profileId, '/sb/v4/campaigns/list', { 'Content-Type': 'application/vnd.sbcampaigns.v4+json' }, sbBody)
+        const sbPromise = fetchCampaignsForTypePost(profileId, '/sb/campaigns/list', { 'Content-Type': 'application/vnd.sbcampaigns.v4+json', 'Accept': 'application/vnd.sbcampaigns.v4+json' }, sbBody)
             .catch(err => { console.error("SB Campaign fetch failed:", err.details || err); return []; });
 
         // --- Sponsored Display (GET) ---
@@ -251,7 +253,7 @@ router.post('/campaigns/list', async (req, res) => {
         const sdPromise = fetchCampaignsForTypeGet(profileId, '/sd/campaigns', {}, sdParams)
             .catch(err => { console.error("SD Campaign fetch failed:", err.details || err); return []; });
 
-        const [spCampaigns, sbCampaigns, sdCampaigns] = await Promise.all([spPromise, sbCampaigns, sdPromise]);
+        const [spCampaigns, sbCampaigns, sdCampaigns] = await Promise.all([spPromise, sbPromise, sdPromise]);
 
         const transformCampaign = (c, type) => ({
             campaignId: c.campaignId, name: c.name, campaignType: type,
@@ -291,7 +293,7 @@ router.put('/campaigns', async (req, res) => {
         });
         const data = await amazonAdsApiRequest({
             method: 'put', url: '/sp/campaigns', profileId,
-            data: { campaigns: transformedUpdates }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json' },
+            data: { campaigns: transformedUpdates }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
         });
         res.json(data);
     } catch (error) {
@@ -334,7 +336,7 @@ router.post('/campaigns/:campaignId/adgroups', async (req, res) => {
         const data = await amazonAdsApiRequest({
             method: 'post', url: '/sp/adGroups/list', profileId,
             data: { campaignIdFilter: { include: [campaignId] }, stateFilter: { include: ["ENABLED", "PAUSED", "ARCHIVED"] }, maxResults: 500 },
-            headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json' },
+            headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' },
         });
         const adGroups = (data.adGroups || []).map(ag => ({ adGroupId: ag.adGroupId, name: ag.name, campaignId: ag.campaignId, defaultBid: ag.defaultBid, state: (ag.state || 'archived').toLowerCase() }));
         res.json({ adGroups });
@@ -356,7 +358,7 @@ router.post('/adgroups/:adGroupId/keywords', async (req, res) => {
         const data = await amazonAdsApiRequest({
             method: 'post', url: '/sp/keywords/list', profileId,
             data: { adGroupIdFilter: { include: [adGroupId] }, stateFilter: { include: ["ENABLED", "PAUSED", "ARCHIVED"] }, maxResults: 1000 },
-            headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json' },
+            headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
         });
         const keywords = (data.keywords || []).map(kw => ({ keywordId: kw.keywordId, adGroupId: kw.adGroupId, campaignId: kw.campaignId, keywordText: kw.keywordText, matchType: (kw.matchType || 'unknown').toLowerCase(), state: (kw.state || 'archived').toLowerCase(), bid: kw.bid }));
         res.json({ keywords, campaignId: keywords[0]?.campaignId });
@@ -379,7 +381,7 @@ router.put('/keywords', async (req, res) => {
          const transformedUpdates = updates.map(u => ({ keywordId: u.keywordId, state: u.state?.toUpperCase(), bid: u.bid }));
         const data = await amazonAdsApiRequest({
             method: 'put', url: '/sp/keywords', profileId,
-            data: { keywords: transformedUpdates }, headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json' },
+            data: { keywords: transformedUpdates }, headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
         });
         res.json(data);
     } catch (error) {
@@ -399,7 +401,7 @@ router.post('/targets/list', async (req, res) => {
     try {
         const data = await amazonAdsApiRequest({
             method: 'post', url: '/sp/targets/list', profileId,
-            data: { targetIdFilter: { include: targetIdFilter } }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json' }
+            data: { targetIdFilter: { include: targetIdFilter } }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' }
         });
         res.json(data);
     } catch (error) {
@@ -420,7 +422,7 @@ router.put('/targets', async (req, res) => {
         const transformedUpdates = updates.map(u => ({ targetId: u.targetId, state: u.state?.toUpperCase(), bid: u.bid }));
         const data = await amazonAdsApiRequest({
             method: 'put', url: '/sp/targets', profileId,
-            data: { targetingClauses: transformedUpdates }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json' },
+            data: { targetingClauses: transformedUpdates }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' },
         });
         res.json(data);
     } catch (error) {
@@ -441,7 +443,7 @@ router.post('/negativeKeywords', async (req, res) => {
         const transformedKeywords = negativeKeywords.map(kw => ({ ...kw, state: 'ENABLED', matchType: kw.matchType }));
         const data = await amazonAdsApiRequest({
             method: 'post', url: '/sp/negativeKeywords', profileId,
-            data: { negativeKeywords: transformedKeywords }, headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json' },
+            data: { negativeKeywords: transformedKeywords }, headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json', 'Accept': 'application/vnd.spNegativeKeyword.v3+json' },
         });
         res.status(207).json(data);
     } catch (error) {
@@ -461,8 +463,14 @@ router.post('/negativeTargets', async (req, res) => {
     try {
         const transformedTargets = negativeTargets.map(t => ({ ...t, state: 'ENABLED' }));
         const data = await amazonAdsApiRequest({
-            method: 'post', url: '/sp/negativeTargets', profileId,
-            data: { negativeTargetingClauses: transformedTargets }, headers: { 'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json' },
+            method: 'post',
+            url: '/sp/negativeTargets',
+            profileId,
+            data: { negativeTargetingClauses: transformedTargets },
+            headers: {
+                'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json',
+                'Accept': 'application/vnd.spNegativeTargetingClause.v3+json',
+            }
         });
         res.status(207).json(data);
     } catch (error) {
@@ -475,7 +483,7 @@ router.post('/campaigns', async (req, res) => {
     const { profileId, campaigns } = req.body;
     if (!profileId || !Array.isArray(campaigns) || campaigns.length === 0) return res.status(400).json({ message: 'profileId and campaigns array required.' });
     try {
-        const data = await amazonAdsApiRequest({ method: 'post', url: '/sp/campaigns', profileId, data: { campaigns }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json' } });
+        const data = await amazonAdsApiRequest({ method: 'post', url: '/sp/campaigns', profileId, data: { campaigns }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' } });
         res.status(207).json(data);
     } catch (error) { res.status(error.status || 500).json(error.details || { message: 'Failed to create campaigns' }); }
 });
@@ -485,7 +493,7 @@ router.post('/adGroups', async (req, res) => {
     const { profileId, adGroups } = req.body;
     if (!profileId || !Array.isArray(adGroups) || adGroups.length === 0) return res.status(400).json({ message: 'profileId and adGroups array required.' });
     try {
-        const data = await amazonAdsApiRequest({ method: 'post', url: '/sp/adGroups', profileId, data: { adGroups }, headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json' } });
+        const data = await amazonAdsApiRequest({ method: 'post', url: '/sp/adGroups', profileId, data: { adGroups }, headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' } });
         res.status(207).json(data);
     } catch (error) { res.status(error.status || 500).json(error.details || { message: 'Failed to create ad groups' }); }
 });
@@ -495,7 +503,7 @@ router.post('/productAds', async (req, res) => {
     const { profileId, productAds } = req.body;
     if (!profileId || !Array.isArray(productAds) || productAds.length === 0) return res.status(400).json({ message: 'profileId and productAds array required.' });
     try {
-        const data = await amazonAdsApiRequest({ method: 'post', url: '/sp/productAds', profileId, data: { productAds }, headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json' } });
+        const data = await amazonAdsApiRequest({ method: 'post', url: '/sp/productAds', profileId, data: { productAds }, headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json', 'Accept': 'application/vnd.spProductAd.v3+json' } });
         res.status(207).json(data);
     } catch (error) { res.status(error.status || 500).json(error.details || { message: 'Failed to create product ads' }); }
 });
@@ -505,7 +513,7 @@ router.post('/keywords', async (req, res) => {
     const { profileId, keywords } = req.body;
     if (!profileId || !Array.isArray(keywords) || keywords.length === 0) return res.status(400).json({ message: 'profileId and keywords array required.' });
     try {
-        const data = await amazonAdsApiRequest({ method: 'post', url: '/sp/keywords', profileId, data: { keywords }, headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json' } });
+        const data = await amazonAdsApiRequest({ method: 'post', url: '/sp/keywords', profileId, data: { keywords }, headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' } });
         res.status(207).json(data);
     } catch (error) { res.status(error.status || 500).json(error.details || { message: 'Failed to create keywords' }); }
 });
@@ -515,7 +523,7 @@ router.post('/targets', async (req, res) => {
     const { profileId, targets } = req.body;
     if (!profileId || !Array.isArray(targets) || targets.length === 0) return res.status(400).json({ message: 'profileId and targets array required.' });
     try {
-        const data = await amazonAdsApiRequest({ method: 'post', url: '/sp/targets', profileId, data: { targetingClauses: targets }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json' } });
+        const data = await amazonAdsApiRequest({ method: 'post', url: '/sp/targets', profileId, data: { targetingClauses: targets }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' } });
         res.status(207).json(data);
     } catch (error) { res.status(error.status || 500).json(error.details || { message: 'Failed to create targets' }); }
 });

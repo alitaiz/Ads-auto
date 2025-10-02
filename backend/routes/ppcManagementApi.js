@@ -56,26 +56,26 @@ export async function createAutoCampaignSet(profileId, asin, budget, defaultBid,
 
                 // 3. Create Campaign
                 const campaignPayload = { name: campaignName, targetingType: 'AUTO', state: 'ENABLED', budget: { budget: Number(budget), budgetType: 'DAILY' }, startDate: new Date().toISOString().slice(0, 10), dynamicBidding };
-                const campResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/campaigns', profileId, data: { campaigns: [campaignPayload] }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json' } });
+                const campResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/campaigns', profileId, data: { campaigns: [campaignPayload] }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' } });
                 const campSuccess = campResponse?.campaigns?.success?.[0];
                 if (!campSuccess?.campaignId) throw new Error(`Campaign creation failed for "${campaignName}": ${JSON.stringify(campResponse?.campaigns?.error?.[0])}`);
                 const newCampaignId = campSuccess.campaignId;
 
                 // 4. Create Ad Group
                 const adGroupPayload = { name: `Ad Group - ${asin}`, campaignId: newCampaignId, state: 'ENABLED', defaultBid: Number(defaultBid) };
-                const agResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/adGroups', profileId, data: { adGroups: [adGroupPayload] }, headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json' } });
+                const agResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/adGroups', profileId, data: { adGroups: [adGroupPayload] }, headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' } });
                 const agSuccess = agResponse?.adGroups?.success?.[0];
                 if (!agSuccess?.adGroupId) throw new Error(`Ad Group creation failed for campaign "${campaignName}"`);
                 const newAdGroupId = agSuccess.adGroupId;
 
                 // 5. Create Product Ad
                 const adPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', sku };
-                await amazonAdsApiRequest({ method: 'post', url: '/sp/productAds', profileId, data: { productAds: [adPayload] }, headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json' } });
+                await amazonAdsApiRequest({ method: 'post', url: '/sp/productAds', profileId, data: { productAds: [adPayload] }, headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json', 'Accept': 'application/vnd.spProductAd.v3+json' } });
 
                 // 6. Adjust Auto-Targeting Clauses
                 const listTargetsResponse = await amazonAdsApiRequest({
                     method: 'post', url: '/sp/targets/list', profileId,
-                    data: { adGroupIdFilter: { include: [newAdGroupId] } }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json' }
+                    data: { adGroupIdFilter: { include: [newAdGroupId] } }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' }
                 });
                 
                 const targetUpdates = listTargetsResponse.targetingClauses
@@ -85,7 +85,7 @@ export async function createAutoCampaignSet(profileId, asin, budget, defaultBid,
                 if (targetUpdates.length > 0) {
                     await amazonAdsApiRequest({
                         method: 'put', url: '/sp/targets', profileId,
-                        data: { targetingClauses: targetUpdates }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json' }
+                        data: { targetingClauses: targetUpdates }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' }
                     });
                 }
                 

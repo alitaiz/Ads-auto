@@ -26,10 +26,7 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
                     metricValue = metrics[condition.metric];
                 }
 
-                let conditionValue = condition.value;
-                if (condition.metric === 'acos') {
-                    conditionValue = condition.value / 100;
-                }
+                const conditionValue = condition.value;
                 
                 evaluatedMetrics.push({
                     metric: condition.metric,

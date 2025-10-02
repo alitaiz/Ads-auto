@@ -20,13 +20,9 @@ export const evaluateSearchTermAutomationRule = async (rule, performanceData, th
             for (const condition of group.conditions) {
                 const metrics = calculateMetricsForWindow(entity.dailyData, condition.timeWindow, referenceDate);
                 const metricValue = metrics[condition.metric];
-                let conditionValue = condition.value;
+                const conditionValue = condition.value;
 
-                if (condition.metric === 'acos') {
-                    conditionValue = condition.value / 100;
-                }
-                
-                 evaluatedMetrics.push({
+                evaluatedMetrics.push({
                     metric: condition.metric,
                     timeWindow: condition.timeWindow,
                     value: metricValue,

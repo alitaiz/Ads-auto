@@ -37,8 +37,7 @@ export const evaluateSearchTermHarvestingRule = async (rule, performanceData, th
             for (const condition of group.conditions) {
                 const metrics = calculateMetricsForWindow(entity.dailyData, condition.timeWindow, referenceDate);
                 const metricValue = metrics[condition.metric];
-                let conditionValue = condition.value;
-                if (condition.metric === 'acos') conditionValue /= 100;
+                const conditionValue = condition.value;
 
                 if (!checkCondition(metricValue, condition.operator, conditionValue)) {
                     allConditionsMet = false;

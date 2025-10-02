@@ -1,0 +1,51 @@
+-- Migration: Create Campaign Creation Rules Table
+-- This script creates the table to store scheduled campaign creation jobs.
+
+CREATE TABLE IF NOT EXISTS campaign_creation_rules (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    
+    -- Frequency of the creation job, e.g., {"unit": "days", "value": 7}
+    frequency JSONB NOT NULL,
+    
+    -- Parameters needed to create the campaign, e.g., {"asin": "...", "budget": ..., "defaultBid": ...}
+    creation_parameters JSONB NOT NULL,
+    
+    -- IDs of automation_rules to associate with the new campaign
+    associated_rule_ids JSONB DEFAULT '[]'::jsonb,
+    
+    last_run_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Use the existing function to update the 'updated_at' timestamp.
+-- This function is assumed to be created by other migrations.
+CREATE OR REPLACE FUNCTION trigger_set_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS set_timestamp_on_campaign_creation_rules ON campaign_creation_rules;
+CREATE TRIGGER set_timestamp_on_campaign_creation_rules
+BEFORE UPDATE ON campaign_creation_rules
+FOR EACH ROW
+EXECUTE PROCEDURE trigger_set_timestamp();
+
+
+-- Add indexes for performance
+CREATE INDEX IF NOT EXISTS idx_ccr_profile_id ON campaign_creation_rules(profile_id);
+CREATE INDEX IF NOT EXISTS idx_ccr_is_active ON campaign_creation_rules(is_active);
+
+
+-- =============================================================================
+-- Grant Permissions to Application User
+-- =============================================================================
+-- IMPORTANT: Replace 'yourdbuser' with the actual DB_USER from your .env file.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE campaign_creation_rules TO yourdbuser;
+GRANT USAGE, SELECT ON SEQUENCE campaign_creation_rules_id_seq TO yourdbuser;

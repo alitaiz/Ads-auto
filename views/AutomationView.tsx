@@ -627,7 +627,63 @@ const RuleBuilderModal = ({ rule, modalTitle, onClose, onSave, bidAdjustmentRule
                     </div>
 
                     {rule_type === 'PRICE_ADJUSTMENT' ? (
-                       <></> // Price adjustment UI from previous step
+                       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                            <div style={styles.card}>
+                                <h3 style={styles.cardTitle}>Scheduling</h3>
+                                <div style={styles.formGroup}>
+                                    <label style={styles.label}>Run Time (UTC-7)</label>
+                                    <input 
+                                        type="time" 
+                                        style={{...styles.input, width: '150px'}} 
+                                        value={formData.config.runAtTime || '02:00'} 
+                                        onChange={e => handleConfigChange('runAtTime', e.target.value)} 
+                                        required 
+                                    />
+                                    <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>The rule will run once daily at this time.</p>
+                                </div>
+                            </div>
+                            <div style={styles.card}>
+                                <h3 style={styles.cardTitle}>Price Adjustment Logic</h3>
+                                <div style={styles.formGroup}>
+                                    <label style={styles.label}>SKUs to Adjust (comma-separated)</label>
+                                    <textarea
+                                        style={styles.textarea}
+                                        value={(formData.config.skus || []).join(', ')}
+                                        onChange={e => handleConfigChange('skus', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                                        placeholder="SKU-001, SKU-002, SKU-003"
+                                        required
+                                    />
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '20px' }}>
+                                    <div style={styles.formGroup}>
+                                        <label style={styles.label}>Price Step ($)</label>
+                                        <input 
+                                            type="number" 
+                                            step="0.01" 
+                                            style={styles.input} 
+                                            value={formData.config.priceStep ?? ''}
+                                            onChange={e => handleConfigChange('priceStep', Number(e.target.value))}
+                                            placeholder="e.g., 0.50 or -0.25"
+                                            required 
+                                        />
+                                         <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>The amount to add/subtract from the price each time the rule runs.</p>
+                                    </div>
+                                    <div style={styles.formGroup}>
+                                        <label style={styles.label}>Price Limit ($)</label>
+                                        <input 
+                                            type="number" 
+                                            step="0.01" 
+                                            style={styles.input} 
+                                            value={formData.config.priceLimit ?? ''}
+                                            onChange={e => handleConfigChange('priceLimit', Number(e.target.value))}
+                                            placeholder="e.g., 99.99"
+                                            required 
+                                        />
+                                        <p style={{fontSize: '0.8rem', color: '#666', margin: '5px 0 0 0'}}>When the price hits this limit, it will reset based on the defined logic.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     ) : (
                         <>
                             <div style={styles.card}>

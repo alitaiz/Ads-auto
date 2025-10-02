@@ -31,6 +31,7 @@ const styles: { [key: string]: React.CSSProperties } = {
     successMessage: { backgroundColor: '#d4edda', color: '#155724', border: '1px solid #c3e6cb' },
     errorMessage: { backgroundColor: '#f8d7da', color: '#721c24', border: '1px solid #f5c6cb' },
 
+    scheduleToggleContainer: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' },
     scheduleGrid: { display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '20px', alignItems: 'center' },
     frequencyControls: { display: 'flex', alignItems: 'center', gap: '10px' },
     
@@ -71,24 +72,24 @@ interface CampaignCreationRule {
 }
 
 export function CreateAdsView() {
-    // UI State
     const [activeTab, setActiveTab] = useState<'create' | 'manage'>('create');
     const [loading, setLoading] = useState({ form: false, schedules: true });
     const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     const [openRuleSections, setOpenRuleSections] = useState<Set<string>>(new Set(['BID_ADJUSTMENT']));
     
-    // Common Form state
+    // Form state (used in Create tab)
     const [asin, setAsin] = useState('');
     const [budget, setBudget] = useState('10');
     const [defaultBid, setDefaultBid] = useState('0.75');
     const [placementBids, setPlacementBids] = useState({ top: 50, rest: 0, product: 0 });
     const [allRules, setAllRules] = useState<AutomationRule[]>([]);
     const [selectedRuleIds, setSelectedRuleIds] = useState<Set<number>>(new Set());
-    
-    // Schedule specific state
-    const [schedules, setSchedules] = useState<CampaignCreationRule[]>([]);
+    const [isScheduled, setIsScheduled] = useState(false);
     const [scheduleName, setScheduleName] = useState('');
     const [frequency, setFrequency] = useState({ value: 7, unit: 'days' as 'days' | 'weeks', startTime: '01:00' });
+    
+    // Management state (used in Manage tab)
+    const [schedules, setSchedules] = useState<CampaignCreationRule[]>([]);
 
     const profileId = useMemo(() => localStorage.getItem('selectedProfileId'), []);
     
@@ -149,11 +150,11 @@ export function CreateAdsView() {
             if (!response.ok) throw new Error('Failed to delete schedule.');
         } catch (err) {
             setStatusMessage({ type: 'error', text: err instanceof Error ? err.message : 'Delete failed.' });
-            fetchSchedulesAndRules(); // Re-fetch to restore state
+            fetchSchedulesAndRules();
         }
     };
 
-    const handleSubmit = async (e: React.FormEvent, isSchedule: boolean) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(prev => ({ ...prev, form: true }));
         setStatusMessage(null);
@@ -168,7 +169,7 @@ export function CreateAdsView() {
             const commonPayload = { asin, budget: parseFloat(budget), defaultBid: parseFloat(defaultBid), placementBids };
             let response;
 
-            if (isSchedule) {
+            if (isScheduled) {
                 const schedulePayload = { name: scheduleName, profile_id: profileId, is_active: true, frequency, creation_parameters: commonPayload, associated_rule_ids: Array.from(selectedRuleIds) };
                 response = await fetch('/api/automation/campaign-creation-rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(schedulePayload) });
             } else {
@@ -179,11 +180,10 @@ export function CreateAdsView() {
             const result = await response.json();
             if (!response.ok) throw new Error(result.message || 'An unknown error occurred.');
             
-            setStatusMessage({ type: 'success', text: isSchedule ? `Successfully created schedule "${result.name}".` : `Successfully created ${result.createdCampaigns.length} campaigns.` });
-            if (isSchedule) fetchSchedulesAndRules();
+            setStatusMessage({ type: 'success', text: isScheduled ? `Successfully created schedule "${result.name}". You can manage it in the 'Manage' tab.` : `Successfully created ${result.createdCampaigns.length} campaigns.` });
+            if (isScheduled) fetchSchedulesAndRules();
 
-            // Reset form fields
-            setAsin(''); setSelectedRuleIds(new Set()); setScheduleName('');
+            setAsin(''); setSelectedRuleIds(new Set()); setScheduleName(''); setIsScheduled(false);
         } catch (err) {
             setStatusMessage({ type: 'error', text: err instanceof Error ? err.message : 'Operation failed.' });
         } finally {
@@ -194,7 +194,7 @@ export function CreateAdsView() {
     const formatFrequency = (rule: CampaignCreationRule) => `Every ${rule.frequency.value} ${rule.frequency.unit} at ${rule.frequency.startTime} (UTC-7)`;
 
     const renderCreateSetForm = () => (
-        <form style={styles.form} onSubmit={(e) => handleSubmit(e, false)}>
+        <form style={styles.form} onSubmit={handleSubmit}>
             <div style={styles.card}>
                 <h2 style={styles.cardTitle}>Step 1: Campaign Details</h2>
                 <div style={styles.formGrid}>
@@ -215,70 +215,61 @@ export function CreateAdsView() {
                 </div>
             </div>
             {renderRuleAssociation()}
+            <div style={styles.card}>
+                <h2 style={styles.cardTitle}>Step 4: Schedule Creation (Optional)</h2>
+                <div style={styles.scheduleToggleContainer}>
+                    <label className="switch"><input type="checkbox" checked={isScheduled} onChange={e => setIsScheduled(e.target.checked)} /><span className="slider round"></span></label>
+                    <label style={{ fontWeight: 500, cursor: 'pointer' }} onClick={() => setIsScheduled(!isScheduled)}>Turn this into a recurring schedule</label>
+                </div>
+                {isScheduled && (
+                    <div style={{display: 'flex', flexDirection: 'column', gap: '20px'}}>
+                        <div style={styles.formGroup}>
+                            <label style={styles.label} htmlFor="scheduleName">Schedule Name</label>
+                            <input id="scheduleName" style={styles.input} value={scheduleName} onChange={e => setScheduleName(e.target.value)} placeholder="e.g., Weekly New Auto Set for..." required={isScheduled} />
+                        </div>
+                        <div style={styles.scheduleGrid}>
+                            <div style={styles.formGroup}><label style={styles.label}>Frequency</label><div style={styles.frequencyControls}><span>Every</span><input type="number" min="1" style={{ ...styles.input, width: '70px' }} value={frequency.value} onChange={e => setFrequency(p => ({ ...p, value: parseInt(e.target.value, 10) || 1 }))} /><select style={styles.input} value={frequency.unit} onChange={e => setFrequency(p => ({ ...p, unit: e.target.value as any }))}><option value="days">Days</option><option value="weeks">Weeks</option></select></div></div>
+                            <div style={styles.formGroup}><label style={styles.label}>Time (UTC-7)</label><input type="time" style={styles.input} value={frequency.startTime} onChange={e => setFrequency(p => ({ ...p, startTime: e.target.value }))} required={isScheduled} /></div>
+                        </div>
+                    </div>
+                )}
+            </div>
             <div style={styles.buttonContainer}>
-                <button type="submit" style={loading.form ? { ...styles.button, ...styles.buttonDisabled } : styles.button} disabled={loading.form}>{loading.form ? 'Submitting...' : 'Create Campaign Set (12 Campaigns)'}</button>
+                <button type="submit" style={loading.form ? { ...styles.button, ...styles.buttonDisabled } : styles.button} disabled={loading.form}>
+                    {loading.form ? 'Submitting...' : isScheduled ? 'Create & Schedule' : 'Create Campaign Set'}
+                </button>
             </div>
         </form>
     );
 
     const renderManageSchedules = () => (
-        <>
-            <div style={styles.card}>
-                <h2 style={styles.cardTitle}>Existing Schedules</h2>
-                {loading.schedules ? <p>Loading schedules...</p> : schedules.length > 0 ? (
-                    <div style={{overflowX: 'auto'}}>
-                        <table style={styles.scheduleTable}>
-                            <thead><tr>
-                                <th style={styles.scheduleTh}>Status</th><th style={styles.scheduleTh}>Schedule Name</th>
-                                <th style={styles.scheduleTh}>Target ASIN</th><th style={styles.scheduleTh}>Frequency</th><th style={styles.scheduleTh}>Actions</th>
-                            </tr></thead>
-                            <tbody>{schedules.map(schedule => (
-                                <tr key={schedule.id}>
-                                    <td style={styles.scheduleTd}><label className="switch"><input type="checkbox" checked={schedule.is_active} onChange={() => handleScheduleStatusToggle(schedule)} /><span className="slider round"></span></label></td>
-                                    <td style={styles.scheduleTd} title={schedule.name}>{schedule.name}</td>
-                                    <td style={styles.scheduleTd}>{schedule.creation_parameters.asin}</td>
-                                    <td style={styles.scheduleTd}>{formatFrequency(schedule)}</td>
-                                    <td style={{...styles.scheduleTd, ...styles.actionCell}}><button style={styles.deleteButton} title="Delete Schedule" onClick={() => handleScheduleDelete(schedule.id)}>🗑️</button></td>
-                                </tr>
-                            ))}</tbody>
-                        </table>
-                    </div>
-                ) : <p style={{color: '#666'}}>You have no scheduled campaign creations.</p>}
-            </div>
-            <form style={styles.form} onSubmit={(e) => handleSubmit(e, true)}>
-                <div style={styles.card}>
-                    <h2 style={styles.cardTitle}>Create New Schedule</h2>
-                    <div style={{display: 'flex', flexDirection: 'column', gap: '20px'}}>
-                        <div style={styles.formGroup}>
-                            <label style={styles.label} htmlFor="scheduleName">Schedule Name</label>
-                            <input id="scheduleName" style={styles.input} value={scheduleName} onChange={e => setScheduleName(e.target.value)} placeholder="e.g., Weekly New Auto Set for..." required />
-                        </div>
-                        <div style={styles.scheduleGrid}>
-                            <div style={styles.formGroup}><label style={styles.label}>Frequency</label><div style={styles.frequencyControls}><span>Every</span><input type="number" min="1" style={{ ...styles.input, width: '70px' }} value={frequency.value} onChange={e => setFrequency(p => ({ ...p, value: parseInt(e.target.value, 10) || 1 }))} /><select style={styles.input} value={frequency.unit} onChange={e => setFrequency(p => ({ ...p, unit: e.target.value as any }))}><option value="days">Days</option><option value="weeks">Weeks</option></select></div></div>
-                            <div style={styles.formGroup}><label style={styles.label}>Time (UTC-7)</label><input type="time" style={styles.input} value={frequency.startTime} onChange={e => setFrequency(p => ({ ...p, startTime: e.target.value }))} required /></div>
-                        </div>
-                        <hr style={{border: 'none', borderTop: '1px solid var(--border-color)', margin: '10px 0'}}/>
-                        <div style={styles.formGrid}>
-                            <div style={styles.formGroup}><label style={styles.label} htmlFor="asin_schedule">Product ASIN</label><input id="asin_schedule" style={styles.input} value={asin} onChange={e => setAsin(e.target.value.toUpperCase())} placeholder="B0..." required /></div><div/>
-                            <div style={styles.formGroup}><label style={styles.label} htmlFor="budget_schedule">Daily Budget</label><input id="budget_schedule" type="number" step="0.01" min="1" style={styles.input} value={budget} onChange={e => setBudget(e.target.value)} required /></div>
-                            <div style={styles.formGroup}><label style={styles.label} htmlFor="bid_schedule">Default Bid</label><input id="bid_schedule" type="number" step="0.01" min="0.02" style={styles.input} value={defaultBid} onChange={e => setDefaultBid(e.target.value)} required /></div>
-                        </div>
-                        <div style={styles.biddingGrid}>
-                             <div style={styles.formGroup}><label style={styles.label}>Top of search (%)</label><input type="number" min="0" max="900" style={styles.input} value={placementBids.top} onChange={e => setPlacementBids(p => ({ ...p, top: parseInt(e.target.value, 10) || 0 }))} /></div>
-                             <div style={styles.formGroup}><label style={styles.label}>Rest of search (%)</label><input type="number" min="0" max="900" style={styles.input} value={placementBids.rest} onChange={e => setPlacementBids(p => ({ ...p, rest: parseInt(e.target.value, 10) || 0 }))} /></div>
-                             <div style={styles.formGroup}><label style={styles.label}>Product pages (%)</label><input type="number" min="0" max="900" style={styles.input} value={placementBids.product} onChange={e => setPlacementBids(p => ({ ...p, product: parseInt(e.target.value, 10) || 0 }))} /></div>
-                        </div>
-                        {renderRuleAssociation()}
-                    </div>
-                     <div style={styles.buttonContainer}><button type="submit" style={loading.form ? { ...styles.button, ...styles.buttonDisabled } : styles.button} disabled={loading.form}>{loading.form ? 'Saving...' : 'Save Schedule'}</button></div>
+        <div style={styles.card}>
+            <h2 style={styles.cardTitle}>Existing Schedules</h2>
+            {loading.schedules ? <p>Loading schedules...</p> : schedules.length > 0 ? (
+                <div style={{overflowX: 'auto'}}>
+                    <table style={styles.scheduleTable}>
+                        <thead><tr>
+                            <th style={styles.scheduleTh}>Status</th><th style={styles.scheduleTh}>Schedule Name</th>
+                            <th style={styles.scheduleTh}>Target ASIN</th><th style={styles.scheduleTh}>Frequency</th><th style={styles.scheduleTh}>Actions</th>
+                        </tr></thead>
+                        <tbody>{schedules.map(schedule => (
+                            <tr key={schedule.id}>
+                                <td style={styles.scheduleTd}><label className="switch"><input type="checkbox" checked={schedule.is_active} onChange={() => handleScheduleStatusToggle(schedule)} /><span className="slider round"></span></label></td>
+                                <td style={styles.scheduleTd} title={schedule.name}>{schedule.name}</td>
+                                <td style={styles.scheduleTd}>{schedule.creation_parameters.asin}</td>
+                                <td style={styles.scheduleTd}>{formatFrequency(schedule)}</td>
+                                <td style={{...styles.scheduleTd, ...styles.actionCell}}><button style={styles.deleteButton} title="Delete Schedule" onClick={() => handleScheduleDelete(schedule.id)}>🗑️</button></td>
+                            </tr>
+                        ))}</tbody>
+                    </table>
                 </div>
-            </form>
-        </>
+            ) : <p style={{color: '#666'}}>You have no scheduled campaign creations.</p>}
+        </div>
     );
 
     const renderRuleAssociation = () => (
          <div style={styles.card}>
-            <h2 style={styles.cardTitle}>Associate Automation Rules (Optional)</h2>
+            <h2 style={styles.cardTitle}>Step 3: Associate Automation Rules (Optional)</h2>
             {Object.entries(categorizedRules).map(([type, rules]) => {
                 const selectedCount = rules.filter(r => selectedRuleIds.has(r.id)).length;
                 return (
@@ -306,8 +297,8 @@ export function CreateAdsView() {
         <div style={styles.container}>
             <h1 style={styles.title}>Create & Schedule Auto Campaigns</h1>
             <div style={styles.tabsContainer}>
-                <button style={activeTab === 'create' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('create')}>Create Auto Campaign Set</button>
-                <button style={activeTab === 'manage' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('manage')}>Manage Scheduled Creations</button>
+                <button style={activeTab === 'create' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('create')}>Create Campaign Set</button>
+                <button style={activeTab === 'manage' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('manage')}>Manage Schedules</button>
             </div>
             
             {statusMessage && <div style={{...styles.message, ...(statusMessage.type === 'success' ? styles.successMessage : styles.errorMessage)}}>{statusMessage.text}</div>}

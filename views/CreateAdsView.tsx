@@ -2,22 +2,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { AutomationRule } from '../types';
 
-interface CampaignCreationRule {
-    id: number;
-    name: string;
-    is_active: boolean;
-    frequency: {
-        unit: 'days' | 'weeks' | 'months';
-        value: number;
-    };
-    creation_parameters: {
-        asin: string;
-        budget: number;
-        defaultBid: number;
-    };
-    associated_rule_ids: number[];
-}
-
 const styles: { [key: string]: React.CSSProperties } = {
     container: { maxWidth: '900px', margin: '40px auto', padding: '0 20px' },
     title: { fontSize: '2rem', marginBottom: '30px', textAlign: 'center' },
@@ -50,13 +34,6 @@ const styles: { [key: string]: React.CSSProperties } = {
     scheduleToggle: { display: 'flex', alignItems: 'center', gap: '10px' },
     scheduleGrid: { display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '20px', alignItems: 'center' },
     frequencyControls: { display: 'flex', alignItems: 'center', gap: '10px' },
-    
-    // Scheduled Rules List Styles
-    listTable: { width: '100%', borderCollapse: 'collapse', marginTop: '10px' },
-    th: { textAlign: 'left', padding: '8px', borderBottom: '1px solid var(--border-color)' },
-    td: { padding: '8px', borderBottom: '1px solid var(--border-color)', verticalAlign: 'middle' },
-    actionCell: { display: 'flex', gap: '10px' },
-    deleteButton: { color: 'var(--danger-color)', background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem' }
 };
 
 export function CreateAdsView() {
@@ -70,8 +47,7 @@ export function CreateAdsView() {
     // Schedule state
     const [isScheduling, setIsScheduling] = useState(false);
     const [scheduleName, setScheduleName] = useState('');
-    const [frequency, setFrequency] = useState({ value: 7, unit: 'days' as 'days' | 'weeks' });
-    const [scheduledCreations, setScheduledCreations] = useState<CampaignCreationRule[]>([]);
+    const [frequency, setFrequency] = useState({ value: 7, unit: 'days' as 'days' | 'weeks', startTime: '01:00' });
 
     // UI State
     const [loading, setLoading] = useState(false);
@@ -80,35 +56,30 @@ export function CreateAdsView() {
 
     const profileId = useMemo(() => localStorage.getItem('selectedProfileId'), []);
     
-    const fetchAllData = useCallback(async () => {
+    const fetchRules = useCallback(async () => {
         if (!profileId) return;
         try {
-            // Fetch optimization rules from the correct endpoint, which is just /api/automation/rules
             const rulesRes = await fetch('/api/automation/rules');
             if (rulesRes.ok) {
                 const allRules: AutomationRule[] = await rulesRes.json();
-                // Filter rules by the current profileId on the client-side
                 setAllRules(allRules.filter(rule => rule.profile_id === profileId));
             }
-
-            // Fetch scheduled creation rules
-            const schedulesRes = await fetch(`/api/automation/campaign-creation-rules?profileId=${profileId}`);
-            if (schedulesRes.ok) setScheduledCreations(await schedulesRes.json());
-
         } catch (err) {
-            console.error("Failed to fetch data:", err);
-            setStatusMessage({ type: 'error', text: 'Failed to load initial data. Please refresh the page.' });
+            console.error("Failed to fetch automation rules:", err);
+            setStatusMessage({ type: 'error', text: 'Failed to load automation rules. Please refresh the page.' });
         }
     }, [profileId]);
 
-
     useEffect(() => {
-        fetchAllData();
-    }, [fetchAllData]);
+        fetchRules();
+    }, [fetchRules]);
 
     const categorizedRules = useMemo(() => {
         return allRules.reduce((acc, rule) => {
             const type = rule.rule_type;
+            if (type === 'PRICE_ADJUSTMENT') { // Exclude price adjustment rules
+                return acc;
+            }
             if (!acc[type]) acc[type] = [];
             acc[type].push(rule);
             return acc;
@@ -131,31 +102,6 @@ export function CreateAdsView() {
             else newSet.add(ruleId);
             return newSet;
         });
-    };
-    
-    const handleDeleteSchedule = async (id: number) => {
-        if (!window.confirm("Are you sure you want to delete this scheduled creation?")) return;
-        try {
-             const response = await fetch(`/api/automation/campaign-creation-rules/${id}`, { method: 'DELETE' });
-             if (!response.ok) throw new Error('Failed to delete.');
-             fetchAllData(); // Refresh list
-        } catch (err) {
-             setStatusMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete schedule.' });
-        }
-    };
-    
-    const handleToggleScheduleActive = async (schedule: CampaignCreationRule) => {
-        try {
-            const response = await fetch(`/api/automation/campaign-creation-rules/${schedule.id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ is_active: !schedule.is_active })
-            });
-            if (!response.ok) throw new Error('Failed to update status.');
-            fetchAllData();
-        } catch(err) {
-            setStatusMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to update schedule status.' });
-        }
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -204,8 +150,8 @@ export function CreateAdsView() {
             }
             
             if (isScheduling) {
-                setStatusMessage({ type: 'success', text: `Successfully created schedule "${result.name}".` });
-                fetchAllData(); // Refresh the list of schedules
+                setStatusMessage({ type: 'success', text: `Successfully created schedule "${result.name}". It will run next at the scheduled time.` });
+                fetchRules(); // This also implicitly refreshes schedules in the original design, but now just refreshes rules
             } else {
                  setStatusMessage({ type: 'success', text: `Successfully created campaign "${result.campaignName}" and associated ${result.rulesAssociated} rules.` });
             }
@@ -226,39 +172,6 @@ export function CreateAdsView() {
         <div style={styles.container}>
             <h1 style={styles.title}>Create & Schedule Auto Campaigns</h1>
             
-            {/* Scheduled Creations List */}
-            <div style={{...styles.card, marginBottom: '30px'}}>
-                 <h2 style={styles.cardTitle}>Scheduled Creations</h2>
-                 {scheduledCreations.length > 0 ? (
-                    <table style={styles.listTable}>
-                        <thead><tr>
-                            <th style={styles.th}>Status</th><th style={styles.th}>Name</th><th style={styles.th}>ASIN</th>
-                            <th style={styles.th}>Frequency</th><th style={styles.th}>Actions</th>
-                        </tr></thead>
-                        <tbody>
-                            {scheduledCreations.map(s => (
-                                <tr key={s.id}>
-                                    <td style={styles.td}>
-                                        <label style={styles.scheduleToggle}>
-                                            <input type="checkbox" checked={s.is_active} onChange={() => handleToggleScheduleActive(s)} />
-                                            {s.is_active ? 'Active' : 'Paused'}
-                                        </label>
-                                    </td>
-                                    <td style={styles.td}>{s.name}</td>
-                                    <td style={styles.td}>{s.creation_parameters.asin}</td>
-                                    <td style={styles.td}>Every {s.frequency.value} {s.frequency.unit}</td>
-                                    <td style={{...styles.td, ...styles.actionCell}}>
-                                        <button style={styles.deleteButton} onClick={() => handleDeleteSchedule(s.id)} title="Delete Schedule">&times;</button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                 ) : (
-                    <p style={{color: '#666'}}>No scheduled creations found. Create one below.</p>
-                 )}
-            </div>
-
             <form style={styles.form} onSubmit={handleSubmit}>
                 <div style={styles.card}>
                     <h2 style={styles.cardTitle}>Step 1: Campaign Details</h2>
@@ -321,6 +234,10 @@ export function CreateAdsView() {
                                         <option value="weeks">Weeks</option>
                                     </select>
                                 </div>
+                            </div>
+                            <div style={styles.formGroup}>
+                                <label style={styles.label}>Time (UTC-7)</label>
+                                <input type="time" style={styles.input} value={frequency.startTime} onChange={e => setFrequency(p => ({ ...p, startTime: e.target.value }))} required={isScheduling} />
                             </div>
                         </div>
                     )}

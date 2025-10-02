@@ -7,91 +7,118 @@ import pool from '../db.js';
 const router = express.Router();
 
 /**
- * Encapsulates the logic to create a full SP Auto campaign from an ASIN.
- * This function is exported so it can be used by both the API endpoint and the rules engine.
- * @param {string} profileId - The Amazon Ads profile ID.
- * @param {string} asin - The product ASIN.
- * @param {number} budget - The daily budget.
- * @param {number} defaultBid - The default ad group bid.
- * @param {number[]} associatedRuleIds - An array of automation rule IDs to associate.
- * @returns {Promise<object>} - An object with details of the created entities.
+ * Creates a structured set of 12 SP Auto campaigns for a single ASIN,
+ * each targeting a specific auto-targeting type and placement bidding strategy.
  */
-export async function createAutoCampaign(profileId, asin, budget, defaultBid, associatedRuleIds = []) {
+export async function createAutoCampaignSet(profileId, asin, budget, defaultBid, placementBids, associatedRuleIds = []) {
     let client;
+    const { top, rest, product } = placementBids;
+
+    const targetingTypes = [
+        { name: 'Close match', apiType: 'QUERY_HIGH_REL_MATCHES' },
+        { name: 'Loose match', apiType: 'QUERY_BROAD_REL_MATCHES' },
+        { name: 'Substitutes', apiType: 'ASIN_SUBSTITUTE_RELATED' },
+        { name: 'Complements', apiType: 'ASIN_ACCESSORY_RELATED' }
+    ];
+    const placements = [
+        { name: 'Top of search', apiType: 'PLACEMENT_TOP', bid: top },
+        { name: 'Rest of search', apiType: 'PLACEMENT_REST_OF_SEARCH', bid: rest },
+        { name: 'Product pages', apiType: 'PLACEMENT_PRODUCT_PAGE', bid: product }
+    ];
+
+    const createdCampaignsInfo = [];
+    let rulesAssociatedCount = 0;
+
     try {
-        console.log(`[Action:CreateAutoCampaign] Starting creation for ASIN ${asin}`);
-        // 1. Get SKU from ASIN
+        console.log(`[Action:CreateSet] Starting creation for ASIN ${asin}`);
         const sku = await getSkuByAsin(asin);
-        if (!sku) {
-            throw new Error(`Could not find a valid SKU for ASIN ${asin}. Add it to your Listings or ensure it's in Seller Central.`);
+        if (!sku) throw new Error(`Could not find a valid SKU for ASIN ${asin}. Add it to Listings or ensure it's in Seller Central.`);
+        console.log(`[Action:CreateSet] Found SKU: ${sku}`);
+        
+        client = await pool.connect();
+
+        for (const targeting of targetingTypes) {
+            for (const placement of placements) {
+                // 1. Construct Campaign Name
+                const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const campaignName = `[A] - ${asin} - [${targeting.name}] - [${placement.name}] - ${date}`;
+                console.log(`[Action:CreateSet] Creating campaign: ${campaignName}`);
+
+                // 2. Define Bidding Strategy
+                const dynamicBidding = {
+                    strategy: "LEGACY_FOR_SALES",
+                    placementBidding: [
+                        { placement: "PLACEMENT_TOP", percentage: placement.apiType === "PLACEMENT_TOP" ? placement.bid : 0 },
+                        { placement: "PLACEMENT_REST_OF_SEARCH", percentage: placement.apiType === "PLACEMENT_REST_OF_SEARCH" ? placement.bid : 0 },
+                        { placement: "PLACEMENT_PRODUCT_PAGE", percentage: placement.apiType === "PLACEMENT_PRODUCT_PAGE" ? placement.bid : 0 }
+                    ]
+                };
+
+                // 3. Create Campaign
+                const campaignPayload = { name: campaignName, targetingType: 'AUTO', state: 'ENABLED', budget: { budget: Number(budget), budgetType: 'DAILY' }, startDate: new Date().toISOString().slice(0, 10), dynamicBidding };
+                const campResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/campaigns', profileId, data: { campaigns: [campaignPayload] }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json' } });
+                const campSuccess = campResponse?.campaigns?.success?.[0];
+                if (!campSuccess?.campaignId) throw new Error(`Campaign creation failed for "${campaignName}": ${JSON.stringify(campResponse?.campaigns?.error?.[0])}`);
+                const newCampaignId = campSuccess.campaignId;
+
+                // 4. Create Ad Group
+                const adGroupPayload = { name: `Ad Group - ${asin}`, campaignId: newCampaignId, state: 'ENABLED', defaultBid: Number(defaultBid) };
+                const agResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/adGroups', profileId, data: { adGroups: [adGroupPayload] }, headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json' } });
+                const agSuccess = agResponse?.adGroups?.success?.[0];
+                if (!agSuccess?.adGroupId) throw new Error(`Ad Group creation failed for campaign "${campaignName}"`);
+                const newAdGroupId = agSuccess.adGroupId;
+
+                // 5. Create Product Ad
+                const adPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', sku };
+                await amazonAdsApiRequest({ method: 'post', url: '/sp/productAds', profileId, data: { productAds: [adPayload] }, headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json' } });
+
+                // 6. Adjust Auto-Targeting Clauses
+                const listTargetsResponse = await amazonAdsApiRequest({
+                    method: 'post', url: '/sp/targets/list', profileId,
+                    data: { adGroupIdFilter: { include: [newAdGroupId] } }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json' }
+                });
+                
+                const targetUpdates = listTargetsResponse.targetingClauses
+                    .filter(t => t.expression[0].type !== targeting.apiType)
+                    .map(t => ({ targetId: t.targetId, state: 'PAUSED' }));
+                
+                if (targetUpdates.length > 0) {
+                    await amazonAdsApiRequest({
+                        method: 'put', url: '/sp/targets', profileId,
+                        data: { targetingClauses: targetUpdates }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json' }
+                    });
+                }
+                
+                createdCampaignsInfo.push({ campaignId: newCampaignId, name: campaignName });
+            }
         }
-        console.log(`[Action:CreateAutoCampaign] Found SKU: ${sku}`);
-
-        // 2. Create Campaign
-        const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-        const campaignName = `[A] - ${asin} - ${date}`;
-        const campaignPayload = {
-            name: campaignName,
-            targetingType: 'AUTO',
-            state: 'ENABLED',
-            budget: { budget: Number(budget), budgetType: 'DAILY' },
-            startDate: new Date().toISOString().slice(0, 10)
-        };
-        const campResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/campaigns', profileId, data: { campaigns: [campaignPayload] }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json' } });
-        const campSuccess = campResponse?.campaigns?.success?.[0];
-        if (!campSuccess?.campaignId) {
-            const errorDetail = campResponse?.campaigns?.error?.[0]?.errors?.[0]?.errorValue?.message;
-            throw new Error(`Campaign creation failed: ${errorDetail || JSON.stringify(campResponse?.campaigns?.error?.[0])}`);
-        }
-        const newCampaignId = campSuccess.campaignId;
-        console.log(`[Action:CreateAutoCampaign] Created Campaign ID: ${newCampaignId}`);
-
-        // 3. Create Ad Group
-        const adGroupPayload = { name: `Ad Group - ${asin}`, campaignId: newCampaignId, state: 'ENABLED', defaultBid: Number(defaultBid) };
-        const agResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/adGroups', profileId, data: { adGroups: [adGroupPayload] }, headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json' } });
-        const agSuccess = agResponse?.adGroups?.success?.[0];
-        if (!agSuccess?.adGroupId) throw new Error(`Ad Group creation failed: ${JSON.stringify(agResponse?.adGroups?.error?.[0])}`);
-        const newAdGroupId = agSuccess.adGroupId;
-        console.log(`[Action:CreateAutoCampaign] Created Ad Group ID: ${newAdGroupId}`);
-
-        // 4. Create Product Ad
-        const adPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', sku };
-        const adResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/productAds', profileId, data: { productAds: [adPayload] }, headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json' } });
-        const adSuccess = adResponse?.productAds?.success?.[0];
-        if (!adSuccess?.adId) throw new Error(`Product Ad creation failed: ${JSON.stringify(adResponse?.productAds?.error?.[0])}`);
-        console.log(`[Action:CreateAutoCampaign] Created Product Ad ID: ${adSuccess.adId}`);
-
-        // 5. Associate Rules
-        let rulesAssociated = 0;
+        
+        // 7. Associate Rules to ALL created campaigns
         if (associatedRuleIds && associatedRuleIds.length > 0) {
-            console.log(`[Action:CreateAutoCampaign] Associating ${associatedRuleIds.length} rules...`);
-            client = await pool.connect();
+            console.log(`[Action:CreateSet] Associating ${associatedRuleIds.length} rules to ${createdCampaignsInfo.length} new campaigns...`);
             await client.query('BEGIN');
             for (const ruleId of associatedRuleIds) {
                 const { rows } = await client.query('SELECT scope FROM automation_rules WHERE id = $1', [ruleId]);
                 if (rows.length > 0) {
                     const scope = rows[0].scope || {};
                     const campaignIds = new Set(scope.campaignIds?.map(String) || []);
-                    campaignIds.add(String(newCampaignId));
+                    createdCampaignsInfo.forEach(c => campaignIds.add(String(c.campaignId)));
                     const newScope = { ...scope, campaignIds: Array.from(campaignIds) };
                     await client.query('UPDATE automation_rules SET scope = $1 WHERE id = $2', [newScope, ruleId]);
-                    rulesAssociated++;
+                    rulesAssociatedCount++;
                 }
             }
             await client.query('COMMIT');
-            console.log(`[Action:CreateAutoCampaign] Associated ${rulesAssociated} rules.`);
+            console.log(`[Action:CreateSet] Rules association step completed.`);
         }
 
         return {
-            campaignId: newCampaignId,
-            campaignName: campaignName,
-            adGroupId: newAdGroupId,
-            adId: adSuccess.adId,
-            rulesAssociated
+            createdCampaigns: createdCampaignsInfo,
+            rulesAssociated: (associatedRuleIds || []).length
         };
     } catch (error) {
         if (client) await client.query('ROLLBACK');
-        console.error('[Action:CreateAutoCampaign] Error during campaign creation:', error);
+        console.error('[Action:CreateSet] Error during campaign set creation:', error);
         throw error;
     } finally {
         if (client) client.release();
@@ -187,25 +214,9 @@ const fetchCampaignsForTypeGet = async (profileId, url, headers, params) => {
  */
 const getBudgetAmount = (campaign) => {
     if (!campaign) return 0;
-
-    // Case 1: Sponsored Display (budget is a top-level number)
-    // e.g., { "campaignId": ..., "budget": 50.00 }
-    if (typeof campaign.budget === 'number') {
-        return campaign.budget;
-    }
-
-    // Case 2: Sponsored Products / Brands (budget is an object containing a budget property)
-    // e.g., { "campaignId": ..., "budget": { "budget": 50.00, "budgetType": "DAILY" } }
-    if (campaign.budget && typeof campaign.budget.budget === 'number') {
-        return campaign.budget.budget;
-    }
-    
-    // Case 3: Sponsored Products v3 (budget is an object containing an amount property)
-    // e.g., { "campaignId": ..., "budget": { "amount": 50.00, "budgetType": "DAILY" } }
-    if (campaign.budget && typeof campaign.budget.amount === 'number') {
-        return campaign.budget.amount;
-    }
-
+    if (typeof campaign.budget === 'number') return campaign.budget;
+    if (campaign.budget && typeof campaign.budget.budget === 'number') return campaign.budget.budget;
+    if (campaign.budget && typeof campaign.budget.amount === 'number') return campaign.budget.amount;
     return 0;
 };
 
@@ -224,65 +235,30 @@ router.post('/campaigns/list', async (req, res) => {
         const baseStateFilter = stateFilter || ["ENABLED", "PAUSED", "ARCHIVED"];
 
         // --- Sponsored Products (POST) ---
-        const spBody = {
-            maxResults: 500,
-            stateFilter: { include: baseStateFilter },
-        };
-        if (campaignIdFilter && Array.isArray(campaignIdFilter) && campaignIdFilter.length > 0) {
-            spBody.campaignIdFilter = { include: campaignIdFilter.map(id => id.toString()) };
-        }
-        const spPromise = fetchCampaignsForTypePost(profileId, '/sp/campaigns/list', 
-            { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' }, 
-            spBody
-        );
+        const spBody = { maxResults: 500, stateFilter: { include: baseStateFilter } };
+        if (campaignIdFilter?.length > 0) spBody.campaignIdFilter = { include: campaignIdFilter.map(String) };
+        const spPromise = fetchCampaignsForTypePost(profileId, '/sp/campaigns/list', { 'Content-Type': 'application/vnd.spCampaign.v3+json' }, spBody);
 
         // --- Sponsored Brands (POST v4) ---
-        let sbPromise;
-        const sbCampaignIdFilter = campaignIdFilter ? campaignIdFilter.map(id => id.toString()) : [];
-        const sbHeaders = { 'Content-Type': 'application/vnd.sbcampaigns.v4+json', 'Accept': 'application/vnd.sbcampaigns.v4+json' };
-        
-        const sbStateFilterObject = { include: baseStateFilter };
-
-        if (sbCampaignIdFilter.length > 100) {
-            const chunks = [];
-            for (let i = 0; i < sbCampaignIdFilter.length; i += 100) {
-                chunks.push(sbCampaignIdFilter.slice(i, i + 100));
-            }
-            
-            const chunkPromises = chunks.map(chunk => {
-                const sbChunkBody = { pageSize: 100, stateFilter: sbStateFilterObject, campaignIdFilter: { include: chunk } };
-                return fetchCampaignsForTypePost(profileId, '/sb/v4/campaigns/list', sbHeaders, sbChunkBody);
-            });
-            
-            sbPromise = Promise.all(chunkPromises).then(results => results.flat())
-                .catch(err => { console.error("SB Campaign chunked fetch failed:", err.details || err); return []; });
-        } else {
-            const sbBody = { pageSize: 100, stateFilter: sbStateFilterObject };
-            if (sbCampaignIdFilter.length > 0) sbBody.campaignIdFilter = { include: sbCampaignIdFilter };
-            sbPromise = fetchCampaignsForTypePost(profileId, '/sb/v4/campaigns/list', sbHeaders, sbBody)
-                .catch(err => { console.error("SB Campaign fetch failed:", err.details || err); return []; });
-        }
+        const sbBody = { pageSize: 100, stateFilter: { include: baseStateFilter } };
+        if (campaignIdFilter?.length > 0) sbBody.campaignIdFilter = { include: campaignIdFilter.map(String) };
+        const sbPromise = fetchCampaignsForTypePost(profileId, '/sb/v4/campaigns/list', { 'Content-Type': 'application/vnd.sbcampaigns.v4+json' }, sbBody)
+            .catch(err => { console.error("SB Campaign fetch failed:", err.details || err); return []; });
 
         // --- Sponsored Display (GET) ---
-        const getStateFilterForGet = baseStateFilter.map(s => s.toLowerCase()).join(',');
-        const getCampaignIdFilter = (campaignIdFilter && campaignIdFilter.length > 0) ? campaignIdFilter.join(',') : undefined;
-        const sdParams = { stateFilter: getStateFilterForGet, campaignIdFilter: getCampaignIdFilter, count: 100 };
-        const sdPromise = fetchCampaignsForTypeGet(profileId, '/sd/campaigns', { 'Accept': 'application/json' }, sdParams)
+        const sdParams = { stateFilter: baseStateFilter.map(s => s.toLowerCase()).join(','), count: 100 };
+        if (campaignIdFilter?.length > 0) sdParams.campaignIdFilter = campaignIdFilter.join(',');
+        const sdPromise = fetchCampaignsForTypeGet(profileId, '/sd/campaigns', {}, sdParams)
             .catch(err => { console.error("SD Campaign fetch failed:", err.details || err); return []; });
 
-        const [spCampaigns, sbCampaigns, sdCampaigns] = await Promise.all([spPromise, sbCampaigns, sdCampaigns]);
+        const [spCampaigns, sbCampaigns, sdCampaigns] = await Promise.all([spPromise, sbCampaigns, sdPromise]);
 
-        // --- Transform and Merge Results (Portfolio logic removed) ---
-        const transformCampaign = (campaign, type) => {
-            return {
-                campaignId: campaign.campaignId, name: campaign.name, campaignType: type,
-                targetingType: campaign.targetingType || campaign.tactic || 'UNKNOWN',
-                state: (campaign.state || 'archived').toLowerCase(),
-                dailyBudget: getBudgetAmount(campaign), // Budget is now sourced directly
-                startDate: campaign.startDate, endDate: campaign.endDate, bidding: campaign.bidding,
-                portfolioId: campaign.portfolioId,
-            };
-        };
+        const transformCampaign = (c, type) => ({
+            campaignId: c.campaignId, name: c.name, campaignType: type,
+            targetingType: c.targetingType || c.tactic || 'UNKNOWN', state: (c.state || 'archived').toLowerCase(),
+            dailyBudget: getBudgetAmount(c), startDate: c.startDate, endDate: c.endDate, bidding: c.bidding,
+            portfolioId: c.portfolioId,
+        });
 
         const allCampaigns = [
             ...spCampaigns.map(c => transformCampaign(c, 'sponsoredProducts')),
@@ -295,6 +271,7 @@ router.post('/campaigns/list', async (req, res) => {
         res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred' });
     }
 });
+
 
 /**
  * PUT /api/amazon/campaigns
@@ -309,21 +286,41 @@ router.put('/campaigns', async (req, res) => {
         const transformedUpdates = updates.map(update => {
             const newUpdate = { campaignId: update.campaignId };
             if (update.state) newUpdate.state = update.state.toUpperCase();
-            if (update.budget && typeof update.budget.amount === 'number') {
-                newUpdate.budget = { budget: update.budget.amount, budgetType: 'DAILY' };
-            }
+            if (update.budget?.amount) newUpdate.budget = { budget: update.budget.amount, budgetType: 'DAILY' };
             return newUpdate;
         });
         const data = await amazonAdsApiRequest({
             method: 'put', url: '/sp/campaigns', profileId,
-            data: { campaigns: transformedUpdates },
-            headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
+            data: { campaigns: transformedUpdates }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json' },
         });
         res.json(data);
     } catch (error) {
         res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred' });
     }
 });
+
+
+/**
+ * POST /api/amazon/create-auto-campaign (Endpoint for both single and set creation)
+ */
+router.post('/create-auto-campaign', async (req, res) => {
+    const { profileId, asin, budget, defaultBid, placementBids, ruleIds } = req.body;
+    if (!profileId || !asin || !budget || !defaultBid || !placementBids) {
+        return res.status(400).json({ message: 'profileId, asin, budget, defaultBid, and placementBids are required.' });
+    }
+
+    try {
+        const result = await createAutoCampaignSet(profileId, asin, budget, defaultBid, placementBids, ruleIds);
+        res.status(201).json({ 
+            message: `Successfully created ${result.createdCampaigns.length} campaigns.`, 
+            ...result,
+        });
+    } catch (error) {
+        console.error('[Create Campaign Set API] Error:', error);
+        res.status(500).json({ message: error.message || 'An unknown server error occurred during campaign set creation.' });
+    }
+});
+
 
 /**
  * POST /api/amazon/campaigns/:campaignId/adgroups
@@ -333,47 +330,19 @@ router.post('/campaigns/:campaignId/adgroups', async (req, res) => {
     const { campaignId } = req.params;
     const { profileId } = req.body;
     if (!profileId) return res.status(400).json({ message: 'profileId is required.' });
-    
-    const campaignIdNum = Number(campaignId);
-    if (Number.isNaN(campaignIdNum)) {
-        return res.status(400).json({ message: 'Invalid campaignId.' });
-    }
-
     try {
-        const requestBody = {
-            campaignIdFilter: { include: [campaignId] },
-            stateFilter: { include: ["ENABLED", "PAUSED", "ARCHIVED"] },
-            maxResults: 500,
-        };
-
-        let allAdGroups = [];
-        let nextToken = null;
-
-        do {
-            if (nextToken) {
-                requestBody.nextToken = nextToken;
-            }
-            const data = await amazonAdsApiRequest({
-                method: 'post', url: '/sp/adGroups/list', profileId,
-                data: requestBody,
-                headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' },
-            });
-            
-            if (data.adGroups && Array.isArray(data.adGroups)) {
-                allAdGroups = allAdGroups.concat(data.adGroups);
-            }
-            nextToken = data.nextToken;
-        } while (nextToken);
-        
-        const adGroups = allAdGroups.map(ag => ({
-            adGroupId: ag.adGroupId, name: ag.name, campaignId: ag.campaignId,
-            defaultBid: ag.defaultBid, state: (ag.state || 'archived').toLowerCase(),
-        }));
+        const data = await amazonAdsApiRequest({
+            method: 'post', url: '/sp/adGroups/list', profileId,
+            data: { campaignIdFilter: { include: [campaignId] }, stateFilter: { include: ["ENABLED", "PAUSED", "ARCHIVED"] }, maxResults: 500 },
+            headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json' },
+        });
+        const adGroups = (data.adGroups || []).map(ag => ({ adGroupId: ag.adGroupId, name: ag.name, campaignId: ag.campaignId, defaultBid: ag.defaultBid, state: (ag.state || 'archived').toLowerCase() }));
         res.json({ adGroups });
     } catch (error) {
-        res.status(error.status || 500).json(error.details || { message: `Failed to fetch ad groups for campaign ${campaignId}` });
+        res.status(error.status || 500).json(error.details || { message: `Failed to fetch ad groups` });
     }
 });
+
 
 /**
  * POST /api/amazon/adgroups/:adGroupId/keywords
@@ -383,49 +352,19 @@ router.post('/adgroups/:adGroupId/keywords', async (req, res) => {
     const { adGroupId } = req.params;
     const { profileId } = req.body;
     if (!profileId) return res.status(400).json({ message: 'profileId is required.' });
-    
-    const adGroupIdNum = Number(adGroupId);
-    if (Number.isNaN(adGroupIdNum)) {
-        return res.status(400).json({ message: 'Invalid adGroupId.' });
-    }
-
     try {
-        const requestBody = {
-            adGroupIdFilter: { include: [adGroupId] },
-            stateFilter: { include: ["ENABLED", "PAUSED", "ARCHIVED"] },
-            maxResults: 1000,
-        };
-
-        let allKeywords = [];
-        let nextToken = null;
-
-        do {
-            if (nextToken) {
-                requestBody.nextToken = nextToken;
-            }
-            const data = await amazonAdsApiRequest({
-                method: 'post', url: '/sp/keywords/list', profileId,
-                data: requestBody,
-                headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
-            });
-            
-            if (data.keywords && Array.isArray(data.keywords)) {
-                allKeywords = allKeywords.concat(data.keywords);
-            }
-            nextToken = data.nextToken;
-        } while (nextToken);
-        
-        const keywords = allKeywords.map(kw => ({
-            keywordId: kw.keywordId, adGroupId: kw.adGroupId, campaignId: kw.campaignId,
-            keywordText: kw.keywordText, matchType: (kw.matchType || 'unknown').toLowerCase(),
-            state: (kw.state || 'archived').toLowerCase(), bid: kw.bid,
-        }));
-        
-        res.json({ keywords, adGroupName: `Ad Group ${adGroupId}`, campaignId: keywords[0]?.campaignId });
+        const data = await amazonAdsApiRequest({
+            method: 'post', url: '/sp/keywords/list', profileId,
+            data: { adGroupIdFilter: { include: [adGroupId] }, stateFilter: { include: ["ENABLED", "PAUSED", "ARCHIVED"] }, maxResults: 1000 },
+            headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json' },
+        });
+        const keywords = (data.keywords || []).map(kw => ({ keywordId: kw.keywordId, adGroupId: kw.adGroupId, campaignId: kw.campaignId, keywordText: kw.keywordText, matchType: (kw.matchType || 'unknown').toLowerCase(), state: (kw.state || 'archived').toLowerCase(), bid: kw.bid }));
+        res.json({ keywords, campaignId: keywords[0]?.campaignId });
     } catch (error) {
-        res.status(error.status || 500).json(error.details || { message: `Failed to fetch keywords for ad group ${adGroupId}` });
+        res.status(error.status || 500).json(error.details || { message: `Failed to fetch keywords` });
     }
 });
+
 
 /**
  * PUT /api/amazon/keywords
@@ -437,17 +376,10 @@ router.put('/keywords', async (req, res) => {
         return res.status(400).json({ message: 'profileId and a non-empty updates array are required.' });
     }
     try {
-         const transformedUpdates = updates.map(update => {
-            const newUpdate = { keywordId: update.keywordId };
-            if (update.state) newUpdate.state = update.state.toUpperCase();
-            if (update.bid) newUpdate.bid = update.bid;
-            return newUpdate;
-        });
-        
+         const transformedUpdates = updates.map(u => ({ keywordId: u.keywordId, state: u.state?.toUpperCase(), bid: u.bid }));
         const data = await amazonAdsApiRequest({
             method: 'put', url: '/sp/keywords', profileId,
-            data: { keywords: transformedUpdates },
-            headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
+            data: { keywords: transformedUpdates }, headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json' },
         });
         res.json(data);
     } catch (error) {
@@ -466,11 +398,8 @@ router.post('/targets/list', async (req, res) => {
     }
     try {
         const data = await amazonAdsApiRequest({
-            method: 'post',
-            url: '/sp/targets/list',
-            profileId,
-            data: { targetIdFilter: { include: targetIdFilter } },
-            headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' }
+            method: 'post', url: '/sp/targets/list', profileId,
+            data: { targetIdFilter: { include: targetIdFilter } }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json' }
         });
         res.json(data);
     } catch (error) {
@@ -488,25 +417,16 @@ router.put('/targets', async (req, res) => {
         return res.status(400).json({ message: 'profileId and a non-empty updates array are required.' });
     }
     try {
-        const transformedUpdates = updates.map(u => ({
-            targetId: u.targetId,
-            state: u.state?.toUpperCase(),
-            bid: u.bid,
-        }));
-
+        const transformedUpdates = updates.map(u => ({ targetId: u.targetId, state: u.state?.toUpperCase(), bid: u.bid }));
         const data = await amazonAdsApiRequest({
-            method: 'put',
-            url: '/sp/targets',
-            profileId,
-            data: { targetingClauses: transformedUpdates },
-            headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' },
+            method: 'put', url: '/sp/targets', profileId,
+            data: { targetingClauses: transformedUpdates }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json' },
         });
         res.json(data);
     } catch (error) {
         res.status(error.status || 500).json(error.details || { message: 'Failed to update targets' });
     }
 });
-
 
 /**
  * POST /api/amazon/negativeKeywords
@@ -517,23 +437,13 @@ router.post('/negativeKeywords', async (req, res) => {
     if (!profileId || !Array.isArray(negativeKeywords) || negativeKeywords.length === 0) {
         return res.status(400).json({ message: 'profileId and a non-empty negativeKeywords array are required.' });
     }
-
     try {
-        // The Amazon API expects uppercase enum values for matchType, e.g., 'NEGATIVE_EXACT'.
-        const transformedKeywords = negativeKeywords.map(kw => ({
-            ...kw,
-            state: 'ENABLED',
-            matchType: kw.matchType
-        }));
-
+        const transformedKeywords = negativeKeywords.map(kw => ({ ...kw, state: 'ENABLED', matchType: kw.matchType }));
         const data = await amazonAdsApiRequest({
-            method: 'post',
-            url: '/sp/negativeKeywords',
-            profileId,
-            data: { negativeKeywords: transformedKeywords },
-            headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json', 'Accept': 'application/vnd.spNegativeKeyword.v3+json' },
+            method: 'post', url: '/sp/negativeKeywords', profileId,
+            data: { negativeKeywords: transformedKeywords }, headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json' },
         });
-        res.status(207).json(data); // 207 Multi-Status is common for bulk operations
+        res.status(207).json(data);
     } catch (error) {
         res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred while creating negative keywords' });
     }
@@ -548,19 +458,11 @@ router.post('/negativeTargets', async (req, res) => {
     if (!profileId || !Array.isArray(negativeTargets) || negativeTargets.length === 0) {
         return res.status(400).json({ message: 'profileId and a non-empty negativeTargets array are required.' });
     }
-
     try {
-        const transformedTargets = negativeTargets.map(target => ({
-            ...target,
-            state: 'ENABLED',
-        }));
-
+        const transformedTargets = negativeTargets.map(t => ({ ...t, state: 'ENABLED' }));
         const data = await amazonAdsApiRequest({
-            method: 'post',
-            url: '/sp/negativeTargets',
-            profileId,
-            data: { negativeTargetingClauses: transformedTargets },
-            headers: { 'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json', 'Accept': 'application/vnd.spNegativeTargetingClause.v3+json' },
+            method: 'post', url: '/sp/negativeTargets', profileId,
+            data: { negativeTargetingClauses: transformedTargets }, headers: { 'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json' },
         });
         res.status(207).json(data);
     } catch (error) {
@@ -568,130 +470,54 @@ router.post('/negativeTargets', async (req, res) => {
     }
 });
 
-
-// =================================================================
-// == NEW: Endpoints for Creating Entities (for Harvesting Rule)  ==
-// =================================================================
-
 // CREATE SP Campaigns
 router.post('/campaigns', async (req, res) => {
     const { profileId, campaigns } = req.body;
-    if (!profileId || !Array.isArray(campaigns) || campaigns.length === 0) {
-        return res.status(400).json({ message: 'profileId and a non-empty campaigns array are required.' });
-    }
+    if (!profileId || !Array.isArray(campaigns) || campaigns.length === 0) return res.status(400).json({ message: 'profileId and campaigns array required.' });
     try {
-        const data = await amazonAdsApiRequest({
-            method: 'post',
-            url: '/sp/campaigns',
-            profileId,
-            data: { campaigns },
-            headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' },
-        });
-        res.status(207).json(data); // 207 Multi-Status
-    } catch (error) {
-        res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred while creating campaigns' });
-    }
+        const data = await amazonAdsApiRequest({ method: 'post', url: '/sp/campaigns', profileId, data: { campaigns }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json' } });
+        res.status(207).json(data);
+    } catch (error) { res.status(error.status || 500).json(error.details || { message: 'Failed to create campaigns' }); }
 });
 
 // CREATE SP Ad Groups
 router.post('/adGroups', async (req, res) => {
     const { profileId, adGroups } = req.body;
-    if (!profileId || !Array.isArray(adGroups) || adGroups.length === 0) {
-        return res.status(400).json({ message: 'profileId and a non-empty adGroups array are required.' });
-    }
+    if (!profileId || !Array.isArray(adGroups) || adGroups.length === 0) return res.status(400).json({ message: 'profileId and adGroups array required.' });
     try {
-        const data = await amazonAdsApiRequest({
-            method: 'post',
-            url: '/sp/adGroups',
-            profileId,
-            data: { adGroups },
-            headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' },
-        });
+        const data = await amazonAdsApiRequest({ method: 'post', url: '/sp/adGroups', profileId, data: { adGroups }, headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json' } });
         res.status(207).json(data);
-    } catch (error) {
-        res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred while creating ad groups' });
-    }
+    } catch (error) { res.status(error.status || 500).json(error.details || { message: 'Failed to create ad groups' }); }
 });
 
 // CREATE SP Product Ads
 router.post('/productAds', async (req, res) => {
     const { profileId, productAds } = req.body;
-    if (!profileId || !Array.isArray(productAds) || productAds.length === 0) {
-        return res.status(400).json({ message: 'profileId and a non-empty productAds array are required.' });
-    }
+    if (!profileId || !Array.isArray(productAds) || productAds.length === 0) return res.status(400).json({ message: 'profileId and productAds array required.' });
     try {
-        const data = await amazonAdsApiRequest({
-            method: 'post',
-            url: '/sp/productAds',
-            profileId,
-            data: { productAds },
-            headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json', 'Accept': 'application/vnd.spProductAd.v3+json' },
-        });
+        const data = await amazonAdsApiRequest({ method: 'post', url: '/sp/productAds', profileId, data: { productAds }, headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json' } });
         res.status(207).json(data);
-    } catch (error) {
-        res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred while creating product ads' });
-    }
+    } catch (error) { res.status(error.status || 500).json(error.details || { message: 'Failed to create product ads' }); }
 });
-
 
 // CREATE SP Keywords
 router.post('/keywords', async (req, res) => {
     const { profileId, keywords } = req.body;
-    if (!profileId || !Array.isArray(keywords) || keywords.length === 0) {
-        return res.status(400).json({ message: 'profileId and a non-empty keywords array are required.' });
-    }
+    if (!profileId || !Array.isArray(keywords) || keywords.length === 0) return res.status(400).json({ message: 'profileId and keywords array required.' });
     try {
-        const data = await amazonAdsApiRequest({
-            method: 'post',
-            url: '/sp/keywords',
-            profileId,
-            data: { keywords },
-            headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
-        });
+        const data = await amazonAdsApiRequest({ method: 'post', url: '/sp/keywords', profileId, data: { keywords }, headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json' } });
         res.status(207).json(data);
-    } catch (error) {
-        res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred while creating keywords' });
-    }
+    } catch (error) { res.status(error.status || 500).json(error.details || { message: 'Failed to create keywords' }); }
 });
 
 // CREATE SP Targets
 router.post('/targets', async (req, res) => {
     const { profileId, targets } = req.body;
-    if (!profileId || !Array.isArray(targets) || targets.length === 0) {
-        return res.status(400).json({ message: 'profileId and a non-empty targets array are required.' });
-    }
+    if (!profileId || !Array.isArray(targets) || targets.length === 0) return res.status(400).json({ message: 'profileId and targets array required.' });
     try {
-        const data = await amazonAdsApiRequest({
-            method: 'post',
-            url: '/sp/targets',
-            profileId,
-            data: { targetingClauses: targets },
-            headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' },
-        });
+        const data = await amazonAdsApiRequest({ method: 'post', url: '/sp/targets', profileId, data: { targetingClauses: targets }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json' } });
         res.status(207).json(data);
-    } catch (error) {
-        res.status(error.status || 500).json(error.details || { message: 'An unknown error occurred while creating targets' });
-    }
+    } catch (error) { res.status(error.status || 500).json(error.details || { message: 'Failed to create targets' }); }
 });
-
-
-router.post('/create-auto-campaign', async (req, res) => {
-    const { profileId, asin, budget, defaultBid, ruleIds } = req.body;
-    if (!profileId || !asin || !budget || !defaultBid) {
-        return res.status(400).json({ message: 'profileId, asin, budget, and defaultBid are required.' });
-    }
-
-    try {
-        const result = await createAutoCampaign(profileId, asin, budget, defaultBid, ruleIds);
-        res.status(201).json({ 
-            message: 'Campaign created successfully.', 
-            ...result,
-        });
-    } catch (error) {
-        console.error('[Create Auto Campaign] Error:', error);
-        res.status(500).json({ message: error.message || 'An unknown server error occurred.' });
-    }
-});
-
 
 export default router;

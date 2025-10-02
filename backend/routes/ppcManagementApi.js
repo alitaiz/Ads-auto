@@ -241,12 +241,32 @@ router.post('/campaigns/list', async (req, res) => {
             .catch(err => { console.error("SP Campaign fetch failed:", err.details || err); return []; });
 
 
-        // --- Sponsored Brands (GET v3) ---
-        // Reverted to stable v3 GET endpoint to resolve authorization errors.
-        const sbParams = { stateFilter: baseStateFilter.join(','), count: 5000 };
-        if (campaignIdFilter?.length > 0) sbParams.campaignIdFilter = campaignIdFilter.join(',');
-        const sbPromise = fetchCampaignsForTypeGet(profileId, '/sb/campaigns', {}, sbParams)
-             .catch(err => { console.error("SB Campaign fetch failed:", err.details || err); return []; });
+        // --- Sponsored Brands (POST v4) ---
+        let sbPromise;
+        const sbCampaignIdFilter = campaignIdFilter ? campaignIdFilter.map(id => id.toString()) : [];
+        const sbHeaders = { 'Content-Type': 'application/vnd.sbcampaigns.v4+json', 'Accept': 'application/vnd.sbcampaigns.v4+json' };
+        
+        const sbStateFilterObject = { include: baseStateFilter };
+
+        if (sbCampaignIdFilter.length > 100) {
+            const chunks = [];
+            for (let i = 0; i < sbCampaignIdFilter.length; i += 100) {
+                chunks.push(sbCampaignIdFilter.slice(i, i + 100));
+            }
+            
+            const chunkPromises = chunks.map(chunk => {
+                const sbChunkBody = { pageSize: 100, stateFilter: sbStateFilterObject, campaignIdFilter: { include: chunk } };
+                return fetchCampaignsForTypePost(profileId, '/sb/v4/campaigns/list', sbHeaders, sbChunkBody);
+            });
+            
+            sbPromise = Promise.all(chunkPromises).then(results => results.flat())
+                .catch(err => { console.error("SB Campaign chunked fetch failed:", err.details || err); return []; });
+        } else {
+            const sbBody = { pageSize: 100, stateFilter: sbStateFilterObject };
+            if (sbCampaignIdFilter.length > 0) sbBody.campaignIdFilter = { include: sbCampaignIdFilter };
+            sbPromise = fetchCampaignsForTypePost(profileId, '/sb/v4/campaigns/list', sbHeaders, sbBody)
+                .catch(err => { console.error("SB Campaign fetch failed:", err.details || err); return []; });
+        }
 
         // --- Sponsored Display (GET) ---
         const sdParams = { stateFilter: baseStateFilter.map(s => s.toLowerCase()).join(','), count: 100 };

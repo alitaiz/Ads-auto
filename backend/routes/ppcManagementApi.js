@@ -241,11 +241,12 @@ router.post('/campaigns/list', async (req, res) => {
             .catch(err => { console.error("SP Campaign fetch failed:", err.details || err); return []; });
 
 
-        // --- Sponsored Brands (POST v4) ---
-        const sbBody = { pageSize: 100, stateFilter: { include: baseStateFilter } };
-        if (campaignIdFilter?.length > 0) sbBody.campaignIdFilter = { include: campaignIdFilter.map(String) };
-        const sbPromise = fetchCampaignsForTypePost(profileId, '/sb/campaigns/list', { 'Content-Type': 'application/vnd.sbcampaigns.v4+json', 'Accept': 'application/vnd.sbcampaigns.v4+json' }, sbBody)
-            .catch(err => { console.error("SB Campaign fetch failed:", err.details || err); return []; });
+        // --- Sponsored Brands (GET v3) ---
+        // Reverted to stable v3 GET endpoint to resolve authorization errors.
+        const sbParams = { stateFilter: baseStateFilter.join(','), count: 5000 };
+        if (campaignIdFilter?.length > 0) sbParams.campaignIdFilter = campaignIdFilter.join(',');
+        const sbPromise = fetchCampaignsForTypeGet(profileId, '/sb/campaigns', {}, sbParams)
+             .catch(err => { console.error("SB Campaign fetch failed:", err.details || err); return []; });
 
         // --- Sponsored Display (GET) ---
         const sdParams = { stateFilter: baseStateFilter.map(s => s.toLowerCase()).join(','), count: 100 };

@@ -18,7 +18,7 @@ import listingsRoutes from './routes/listings.js';
 import { startRulesEngine } from './services/rulesEngine.js';
 
 const app = express();
-const port = process.env.PORT || 4001;
+const port = process.env.PORT;
 
 // --- Middlewares ---
 // Enable Cross-Origin Resource Sharing for all routes

@@ -24,6 +24,39 @@ Is this search term relevant?`;
 // Simple in-memory cache for product details to reduce API calls within a single run
 const productDetailsCache = new Map();
 
+/**
+ * Calls the Gemini API with retry logic for transient errors.
+ * @param {string} prompt The prompt to send to the model.
+ * @param {number} maxRetries Maximum number of retry attempts.
+ * @param {number} initialDelay Delay in ms for the first retry.
+ * @returns {Promise<any>} The API response object.
+ */
+async function generateContentWithRetry(prompt, maxRetries = 3, initialDelay = 1000) {
+    let retries = 0;
+    let delay = initialDelay;
+    while (retries < maxRetries) {
+        try {
+            const response = await ai.models.generateContent({model: 'gemini-2.5-flash', contents: prompt});
+            return response;
+        } catch (error) {
+            // Check for specific transient errors like 503 Service Unavailable
+            if (error.status === 503 || (error.message && (error.message.includes('UNAVAILABLE') || error.message.includes('overloaded')))) {
+                retries++;
+                if (retries >= maxRetries) {
+                    console.error(`[AI Negation] Gemini API call failed after ${maxRetries} retries.`);
+                    throw error; // Max retries reached, re-throw the last error
+                }
+                console.warn(`[AI Negation] Gemini API overloaded. Retrying in ${delay}ms... (Attempt ${retries}/${maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2; // Exponential backoff
+            } else {
+                throw error; // Not a retryable error, throw immediately
+            }
+        }
+    }
+}
+
+
 export const evaluateAiSearchTermNegationRule = async (rule, _, throttledEntities) => {
     if (!ai) {
         console.error('[AI Negation] Gemini API key is not configured. Skipping rule.');
@@ -101,7 +134,7 @@ export const evaluateAiSearchTermNegationRule = async (rule, _, throttledEntitie
             if (allConditionsMet) {
                 try {
                     const prompt = generateRelevancePrompt(product, entity.customer_search_term);
-                    const response = await ai.models.generateContent({model: 'gemini-2.5-flash', contents: prompt});
+                    const response = await generateContentWithRetry(prompt);
                     const aiDecision = response.text.trim().toUpperCase();
 
                     if (aiDecision.includes('NO')) {
@@ -141,7 +174,10 @@ export const evaluateAiSearchTermNegationRule = async (rule, _, throttledEntitie
             await amazonAdsApiRequest({
                 method: 'post', url: '/sp/negativeKeywords', profileId: rule.profile_id,
                 data: { negativeKeywords: negativeKeywordsToCreate },
-                headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json' }
+                headers: { 
+                    'Content-Type': 'application/vnd.spNegativeKeyword.v3+json',
+                    'Accept': 'application/vnd.spNegativeKeyword.v3+json'
+                }
             });
         } catch (apiError) {
             console.error('[AI Negation] Failed to apply negative keywords via API.', apiError);

@@ -6,7 +6,7 @@ import { GoogleGenAI } from '@google/genai';
 import { amazonAdsApiRequest } from '../../../helpers/amazon-api.js';
 
 const asinRegex = /^b0[a-z0-9]{8}$/i;
-const CHUNK_SIZE = 5; // Process 8 search terms per batch
+const CHUNK_SIZE = 5; // Process 5 search terms per batch
 const DELAY_BETWEEN_CHUNKS = 5000; // Wait 5 seconds between batches
 
 const generateRelevancePrompt = (product, searchTerm) => {
@@ -21,6 +21,25 @@ Customer Search Term: "${searchTerm}"
 
 Is this search term relevant?`;
 };
+
+const generateAsinRelevancePrompt = (advertisedProduct, searchTermProduct) => {
+    const advertisedBullets = (advertisedProduct.bulletPoints || []).map(bp => `- ${bp}`).join('\n');
+    const searchTermBullets = (searchTermProduct.bulletPoints || []).map(bp => `- ${bp}`).join('\n');
+    return `You are an Amazon PPC expert. A customer searched for a specific product (Product A) but was shown an ad for another product (Product B). Your task is to determine if Product B is a RELEVANT ad to show. A product is relevant if it's a direct competitor, a clear substitute, or a direct accessory/complement. It is NOT relevant if it's in a completely different category or serves a different purpose. Answer ONLY with 'YES' or 'NO'.
+
+--- Product A (What the customer searched for) ---
+Title: "${searchTermProduct.title}"
+Bullets:
+${searchTermBullets}
+
+--- Product B (The product being advertised) ---
+Title: "${advertisedProduct.title}"
+Bullets:
+${advertisedBullets}
+
+Is Product B a relevant ad for someone searching for Product A?`;
+};
+
 
 // Simple in-memory cache for product details to reduce API calls within a single run
 const productDetailsCache = new Map();
@@ -100,6 +119,7 @@ export const evaluateAiSearchTermNegationRule = async (rule, _, throttledEntitie
 
     const actionsByCampaign = {};
     const negativeKeywordsToCreate = [];
+    const negativeTargetsToCreate = [];
     const actedOnEntities = new Set();
     const referenceDate = new Date(getLocalDateString('America/Los_Angeles'));
     referenceDate.setDate(referenceDate.getDate() - 3); // D-3 Data
@@ -135,9 +155,16 @@ export const evaluateAiSearchTermNegationRule = async (rule, _, throttledEntitie
     }
     
     // 2. Fetch unique product details needed for this run
-    const uniqueAsins = [...new Set(performanceData.map(p => p.asin).filter(Boolean))];
-    if (uniqueAsins.length > 0) {
-        const productDetails = await getProductTextAttributes(uniqueAsins);
+    const uniqueAsins = new Set();
+    performanceData.forEach(p => {
+        if (p.asin) uniqueAsins.add(p.asin);
+        if (asinRegex.test(p.customer_search_term)) {
+            uniqueAsins.add(p.customer_search_term);
+        }
+    });
+
+    if (uniqueAsins.size > 0) {
+        const productDetails = await getProductTextAttributes(Array.from(uniqueAsins));
         productDetails.forEach(p => productDetailsCache.set(p.asin, p));
     }
     
@@ -145,26 +172,55 @@ export const evaluateAiSearchTermNegationRule = async (rule, _, throttledEntitie
 
     // 3. Filter and prepare terms for evaluation
     for (const entity of performanceData) {
+        const isSearchTermAsin = asinRegex.test(entity.customer_search_term);
         const throttleKey = `${entity.customer_search_term}::${entity.asin}`;
-        if (throttledEntities.has(throttleKey) || !entity.asin || asinRegex.test(entity.customer_search_term)) {
+
+        // Skip if throttled or if we don't have an advertised ASIN
+        if (throttledEntities.has(throttleKey) || !entity.asin) {
             continue;
         }
+        
+        // Get advertised product details
+        const advertisedProduct = productDetailsCache.get(entity.asin);
+        if (!advertisedProduct || !advertisedProduct.title) continue;
 
-        const product = productDetailsCache.get(entity.asin);
-        if (!product || !product.title) continue;
-
+        // Check conditions for the rule
+        let allConditionsMet = false;
         for (const group of rule.config.conditionGroups) {
-            let allConditionsMet = true;
+            let conditionsInGroupMet = true;
             for (const condition of group.conditions) {
                 const metrics = calculateMetricsForWindow(entity.dailyData, condition.timeWindow, new Date(reportDateStr));
                 if (!checkCondition(metrics[condition.metric], condition.operator, condition.value)) {
-                    allConditionsMet = false;
+                    conditionsInGroupMet = false;
                     break;
                 }
             }
-            if (allConditionsMet) {
-                termsToEvaluate.push({ entity, product });
+            if (conditionsInGroupMet) {
+                allConditionsMet = true;
                 break; // First match wins
+            }
+        }
+        
+        if (allConditionsMet) {
+            if (isSearchTermAsin) {
+                // Handle ASIN vs ASIN comparison
+                const searchTermProduct = productDetailsCache.get(entity.customer_search_term);
+                if (searchTermProduct && searchTermProduct.title) {
+                    termsToEvaluate.push({
+                        type: 'ASIN_COMPARISON',
+                        entity,
+                        advertisedProduct,
+                        searchTermProduct
+                    });
+                }
+            } else {
+                // Handle text search term vs ASIN comparison
+                termsToEvaluate.push({
+                    type: 'TEXT_COMPARISON',
+                    entity,
+                    advertisedProduct,
+                    searchTerm: entity.customer_search_term
+                });
             }
         }
     }
@@ -177,59 +233,77 @@ export const evaluateAiSearchTermNegationRule = async (rule, _, throttledEntitie
         const currentApiKey = allKeys[keyIndex];
         keyIndex = (keyIndex + 1) % allKeys.length;
 
-        console.log(`[AI Negation] Processing chunk ${i / CHUNK_SIZE + 1} of ${Math.ceil(termsToEvaluate.length / CHUNK_SIZE)} using key ...${currentApiKey.slice(-4)}`);
+        console.log(`[AI Negation] Processing chunk ${Math.floor(i / CHUNK_SIZE) + 1} of ${Math.ceil(termsToEvaluate.length / CHUNK_SIZE)} using key ...${currentApiKey.slice(-4)}`);
 
-        const promises = chunk.map(async ({ entity, product }) => {
+        const promises = chunk.map(async (item) => {
             try {
-                const prompt = generateRelevancePrompt(product, entity.customer_search_term);
+                let prompt;
+                if (item.type === 'ASIN_COMPARISON') {
+                    prompt = generateAsinRelevancePrompt(item.advertisedProduct, item.searchTermProduct);
+                } else { // TEXT_COMPARISON
+                    prompt = generateRelevancePrompt(item.advertisedProduct, item.searchTerm);
+                }
+                
                 // Pass the selected key to the retry function
                 const response = await generateContentWithRetry(currentApiKey, prompt);
                 const aiDecision = response.text.trim().toUpperCase();
 
                 if (aiDecision.includes('NO')) {
-                    console.log(`[AI Negation] AI deemed "${entity.customer_search_term}" as NOT RELEVANT for ASIN ${entity.asin}.`);
-                    return { status: 'negate', entity };
+                    console.log(`[AI Negation] AI deemed "${item.entity.customer_search_term}" as NOT RELEVANT for ASIN ${item.entity.asin}.`);
+                    return { status: 'negate', entity: item.entity };
                 } else {
-                    console.log(`[AI Negation] AI deemed "${entity.customer_search_term}" as RELEVANT for ASIN ${entity.asin}. No action taken.`);
-                    return { status: 'keep', entity };
+                    console.log(`[AI Negation] AI deemed "${item.entity.customer_search_term}" as RELEVANT for ASIN ${item.entity.asin}. No action taken.`);
+                    return { status: 'keep', entity: item.entity };
                 }
             } catch (aiError) {
-                console.error(`[AI Negation] Gemini API call failed for term "${entity.customer_search_term}":`, aiError);
-                return { status: 'error', entity };
+                console.error(`[AI Negation] Gemini API call failed for term "${item.entity.customer_search_term}":`, aiError);
+                return { status: 'error', entity: item.entity };
             }
         });
-
+        
         const results = await Promise.all(promises);
-
+        
+        // 5. Aggregate actions
         for (const result of results) {
             if (result.status === 'negate') {
                 const { entity } = result;
+                const isAsin = asinRegex.test(entity.customer_search_term);
                 const throttleKey = `${entity.customer_search_term}::${entity.asin}`;
-                negativeKeywordsToCreate.push({
-                    campaignId: entity.campaign_id,
-                    adGroupId: entity.ad_group_id,
-                    keywordText: entity.customer_search_term,
-                    matchType: 'NEGATIVE_EXACT',
-                    state: 'ENABLED'
-                });
 
                 const campaignId = entity.campaign_id;
                 if (!actionsByCampaign[campaignId]) {
                     actionsByCampaign[campaignId] = { changes: [], newNegatives: [] };
                 }
-                actionsByCampaign[campaignId].newNegatives.push({ searchTerm: entity.customer_search_term, matchType: 'NEGATIVE_EXACT' });
+                actionsByCampaign[campaignId].newNegatives.push({ searchTerm: entity.customer_search_term, matchType: isAsin ? 'NEGATIVE_PRODUCT_TARGET' : 'NEGATIVE_EXACT' });
+                
+                // Add to correct list for bulk API call
+                if (isAsin) {
+                    negativeTargetsToCreate.push({
+                        campaignId: entity.campaign_id,
+                        adGroupId: entity.ad_group_id,
+                        expression: [{ type: 'ASIN_SAME_AS', value: entity.customer_search_term }]
+                    });
+                } else {
+                    negativeKeywordsToCreate.push({
+                        campaignId: entity.campaign_id,
+                        adGroupId: entity.ad_group_id,
+                        keywordText: entity.customer_search_term,
+                        matchType: 'NEGATIVE_EXACT',
+                        state: 'ENABLED'
+                    });
+                }
+                
                 actedOnEntities.add(throttleKey);
             }
         }
-
+        
         if (i + CHUNK_SIZE < termsToEvaluate.length) {
             console.log(`[AI Negation] Chunk processed. Waiting for ${DELAY_BETWEEN_CHUNKS / 1000}s before next chunk...`);
             await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_CHUNKS));
         }
     }
-
-
-    // 5. Create negative keywords in bulk
+    
+    // 6. Bulk create negative keywords and now also negative targets
     if (negativeKeywordsToCreate.length > 0) {
         try {
             await amazonAdsApiRequest({
@@ -244,11 +318,38 @@ export const evaluateAiSearchTermNegationRule = async (rule, _, throttledEntitie
             console.error('[AI Negation] Failed to apply negative keywords via API.', apiError);
         }
     }
+    
+    if (negativeTargetsToCreate.length > 0) {
+        try {
+            const apiPayload = negativeTargetsToCreate.map(target => ({ ...target, state: 'ENABLED' }));
+            await amazonAdsApiRequest({
+                method: 'post',
+                url: '/sp/negativeTargets',
+                profileId: rule.profile_id,
+                data: { negativeTargetingClauses: apiPayload },
+                headers: { 'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json', 'Accept': 'application/vnd.spNegativeTargetingClause.v3+json' }
+            });
+        } catch (apiError) {
+            console.error('[AI Negation] Failed to apply negative targets via API.', apiError);
+        }
+    }
 
     productDetailsCache.clear();
+    
+    const totalNegatedKeywords = negativeKeywordsToCreate.length;
+    const totalNegatedTargets = negativeTargetsToCreate.length;
+    let summary = 'AI analysis complete. ';
+    const summaryParts = [];
+    if (totalNegatedKeywords > 0) summaryParts.push(`Negated ${totalNegatedKeywords} irrelevant keyword(s)`);
+    if (totalNegatedTargets > 0) summaryParts.push(`negated ${totalNegatedTargets} irrelevant product(s) (ASINs)`);
+    if (summaryParts.length > 0) {
+        summary += summaryParts.join(' and ') + '.';
+    } else {
+        summary += 'No irrelevant search terms were found to negate.';
+    }
 
     return {
-        summary: `AI analysis complete. Negated ${negativeKeywordsToCreate.length} irrelevant search term(s).`,
+        summary,
         details: { actions_by_campaign: actionsByCampaign, dataDateRange: { report: {start: reportDateStr, end: reportDateStr }, stream: null } },
         actedOnEntities: Array.from(actedOnEntities)
     };

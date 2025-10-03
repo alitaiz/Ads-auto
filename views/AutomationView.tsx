@@ -18,24 +18,34 @@ const styles: { [key: string]: React.CSSProperties } = {
   primaryButton: { padding: '10px 20px', backgroundColor: 'var(--primary-color)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '1rem' },
 };
 
-// Default rule generation logic restored from the previous version
 const getDefaultRuleConfig = () => ({
-    conditionGroups: [],
     frequency: { unit: 'hours' as 'minutes' | 'hours' | 'days', value: 1 },
     cooldown: { unit: 'hours' as 'minutes' | 'hours' | 'days', value: 24 }
 });
 
 const getDefaultRule = (ruleType: AutomationRule['rule_type'], adType: 'SP' | 'SB' | 'SD' | undefined): Partial<AutomationRule> => {
-    // Note: The actual default group definitions are now within the RuleBuilderModal
-    // This function now only needs to set the top-level structure.
     let conditionGroups: any[] = [];
     let specificConfig: Partial<AutomationRule['config']> = {};
 
     switch (ruleType) {
         case 'SEARCH_TERM_AUTOMATION':
+            conditionGroups = [{
+                conditions: [
+                    { metric: 'spend', timeWindow: 30, operator: '>', value: 10 },
+                    { metric: 'orders', timeWindow: 30, operator: '=', value: 0 }
+                ],
+                action: { type: 'negateSearchTerm', matchType: 'NEGATIVE_EXACT' }
+            }];
             specificConfig = { frequency: { unit: 'days', value: 1 } };
             break;
         case 'AI_SEARCH_TERM_NEGATION':
+            conditionGroups = [{
+                conditions: [
+                    { metric: 'spend', timeWindow: 3, operator: '>', value: 0 },
+                    { metric: 'orders', timeWindow: 3, operator: '=', value: 0 }
+                ],
+                action: {} // No action needed here, it's implicit
+            }];
             specificConfig = {
                 frequency: { unit: 'days', value: 1, startTime: '02:30' },
                 cooldown: { unit: 'days', value: 90 },
@@ -43,9 +53,23 @@ const getDefaultRule = (ruleType: AutomationRule['rule_type'], adType: 'SP' | 'S
             };
             break;
         case 'SEARCH_TERM_HARVESTING':
+             conditionGroups = [{
+                conditions: [
+                    { metric: 'orders', timeWindow: 60, operator: '>', value: 2 },
+                    { metric: 'acos', timeWindow: 60, operator: '<', value: 0.30 }
+                ],
+                 action: { type: 'CREATE_NEW_CAMPAIGN', matchType: 'EXACT', newCampaignBudget: 10.00, bidOption: { type: 'CPC_MULTIPLIER', value: 1.15 }, autoNegate: true }
+            }];
              specificConfig = { frequency: { unit: 'days', value: 1 } };
              break;
         case 'BUDGET_ACCELERATION':
+            conditionGroups = [{
+                conditions: [
+                    { metric: 'roas', timeWindow: 'TODAY', operator: '>', value: 2.5 },
+                    { metric: 'budgetUtilization', timeWindow: 'TODAY', operator: '>', value: 75 }
+                ],
+                action: { type: 'increaseBudgetPercent', value: 50 }
+            }];
             specificConfig = {
                 frequency: { unit: 'minutes', value: 30 },
                 cooldown: { unit: 'hours', value: 0 }
@@ -60,6 +84,13 @@ const getDefaultRule = (ruleType: AutomationRule['rule_type'], adType: 'SP' | 'S
                 },
                 scope: {}, is_active: true,
             };
+        case 'BID_ADJUSTMENT':
+        default:
+             conditionGroups = [{
+                conditions: [{ metric: 'acos', timeWindow: 14, operator: '>', value: 0.40 }],
+                action: { type: 'decreaseBidPercent', value: 10 }
+            }];
+            break;
     }
 
     return {

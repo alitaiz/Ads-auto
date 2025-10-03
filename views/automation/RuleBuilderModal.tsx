@@ -33,22 +33,6 @@ const styles: { [key: string]: React.CSSProperties } = {
     thenHeader: { fontWeight: 'bold', fontSize: '1rem', marginBottom: '15px', color: '#333' },
 };
 
-const getDefaultCondition = (): AutomationRuleCondition => ({ metric: 'spend', timeWindow: 5, operator: '>', value: 0 });
-const getDefaultAction = (ruleType: AutomationRule['rule_type']): any => {
-    switch (ruleType) {
-        case 'BID_ADJUSTMENT': return { type: 'decreaseBidPercent', value: 10 };
-        case 'SEARCH_TERM_AUTOMATION': return { type: 'negateSearchTerm', matchType: 'NEGATIVE_EXACT' };
-        case 'BUDGET_ACCELERATION': return { type: 'increaseBudgetPercent', value: 50 };
-        case 'SEARCH_TERM_HARVESTING': return { type: 'CREATE_NEW_CAMPAIGN', matchType: 'EXACT', newCampaignBudget: 10.00, bidOption: { type: 'CPC_MULTIPLIER', value: 1.15 }, autoNegate: true };
-        case 'AI_SEARCH_TERM_NEGATION': return { type: 'negateSearchTerm', matchType: 'NEGATIVE_EXACT'};
-        default: return {};
-    }
-};
-const getDefaultConditionGroup = (ruleType: AutomationRule['rule_type']) => ({
-    conditions: [getDefaultCondition()],
-    action: getDefaultAction(ruleType)
-});
-
 interface RuleBuilderModalProps {
     rule: AutomationRule | Partial<AutomationRule> | null;
     modalTitle: string;
@@ -59,26 +43,9 @@ interface RuleBuilderModalProps {
 }
 
 export function RuleBuilderModal({ rule, modalTitle, onClose, onSave, bidAdjustmentRules = [], budgetAccelerationRules = [] }: RuleBuilderModalProps) {
-    const [formData, setFormData] = useState<Partial<AutomationRule>>(() => {
-         if (rule) {
-            const newRule = JSON.parse(JSON.stringify(rule));
-            // Ensure conditionGroups exists for new rules
-            if (!newRule.config.conditionGroups && newRule.rule_type !== 'PRICE_ADJUSTMENT' && newRule.rule_type !== 'AI_SEARCH_TERM_NEGATION') {
-                newRule.config.conditionGroups = [getDefaultConditionGroup(newRule.rule_type)];
-            } else if (newRule.rule_type === 'AI_SEARCH_TERM_NEGATION' && !newRule.config.conditionGroups) {
-                 newRule.config.conditionGroups = [{ conditions: [
-                    { metric: 'spend', timeWindow: 3, operator: '>', value: 0 },
-                    { metric: 'orders', timeWindow: 3, operator: '=', value: 0 }
-                 ], action: {} }];
-            }
-            return newRule;
-        }
-        return {};
-    });
+    const [formData, setFormData] = useState<Partial<AutomationRule>>(JSON.parse(JSON.stringify(rule)));
     
      useEffect(() => {
-        // This effect safely handles legacy 'adjustBidPercent' actions by converting them
-        // to the new directional format when a rule is loaded for editing.
         if (formData.config?.conditionGroups) {
             let needsUpdate = false;
             const newGroups = formData.config.conditionGroups.map((group: any) => {
@@ -136,7 +103,10 @@ export function RuleBuilderModal({ rule, modalTitle, onClose, onSave, bidAdjustm
     const addConditionToGroup = (groupIndex: number) => {
         setFormData(prev => {
             const newGroups = JSON.parse(JSON.stringify(prev!.config!.conditionGroups));
-            newGroups[groupIndex].conditions.push(getDefaultCondition());
+            // FIX: Explicitly type the new condition to satisfy TypeScript's strict type checking
+            // for the 'metric' property, which expects a specific string literal union.
+            const newCondition: AutomationRuleCondition = { metric: 'spend', timeWindow: 5, operator: '>', value: 0 };
+            newGroups[groupIndex].conditions.push(newCondition);
             return { ...prev, config: { ...prev!.config, conditionGroups: newGroups } };
         });
     };
@@ -155,7 +125,11 @@ export function RuleBuilderModal({ rule, modalTitle, onClose, onSave, bidAdjustm
     
     const addConditionGroup = () => {
         setFormData(prev => {
-            const newGroup = getDefaultConditionGroup(rule_type);
+            // FIX: Explicitly type the new group to satisfy TypeScript's strict type checking.
+            const newGroup: AutomationConditionGroup = {
+                conditions: [{ metric: 'spend', timeWindow: 5, operator: '>', value: 0 }],
+                action: prev!.config!.conditionGroups![0].action // Copy action from first group
+            };
             const newGroups = [...(prev!.config!.conditionGroups || []), newGroup];
             return { ...prev, config: { ...prev!.config, conditionGroups: newGroups } };
         });
@@ -266,18 +240,18 @@ export function RuleBuilderModal({ rule, modalTitle, onClose, onSave, bidAdjustm
                                                     <button type="button" onClick={() => removeCondition(groupIndex, condIndex)} style={styles.deleteButton}>&times;</button>
                                                 </div>
                                             ))}
-                                             <button type="button" onClick={() => addConditionToGroup(groupIndex)} style={{...styles.button, marginTop: '10px'}}>+ Add Condition (AND)</button>
+                                             <button type="button" onClick={() => addConditionToGroup(groupIndex)} style={{...styles.primaryButton, padding: '8px 12px', fontSize: '0.9rem', marginTop: '10px'}}>+ Add Condition (AND)</button>
                                              {rule_type !== 'AI_SEARCH_TERM_NEGATION' && (
                                                 <div style={styles.thenBlock}>
                                                     <h4 style={styles.thenHeader}>THEN</h4>
-                                                    {renderActionForm(group, groupIndex)}
+                                                    {renderActionForm(group, index)}
                                                 </div>
                                             )}
                                         </div>
                                        {groupIndex < (formData.config!.conditionGroups || []).length - 1 && <div style={{textAlign: 'center', margin: '15px 0', fontWeight: 'bold', color: '#555'}}>OR</div>}
                                    </React.Fragment>
                                 ))}
-                                {rule_type !== 'AI_SEARCH_TERM_NEGATION' && (<button type="button" onClick={addConditionGroup} style={{...styles.button, marginTop: '15px'}}>+ Add Condition Group (OR)</button>)}
+                                {rule_type !== 'AI_SEARCH_TERM_NEGATION' && (<button type="button" onClick={addConditionGroup} style={{...styles.primaryButton, padding: '10px 15px', marginTop: '15px'}}>+ Add Condition Group (OR)</button>)}
                                 {rule_type === 'AI_SEARCH_TERM_NEGATION' && renderActionForm({} as any, 0)}
                             </div>
                         </>

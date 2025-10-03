@@ -5,8 +5,9 @@ import { getProductTextAttributes } from '../../../helpers/spApiHelper.js';
 import { GoogleGenAI } from '@google/genai';
 import { amazonAdsApiRequest } from '../../../helpers/amazon-api.js';
 
-const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
 const asinRegex = /^b0[a-z0-9]{8}$/i;
+const CHUNK_SIZE = 8; // Process 8 search terms per batch
+const DELAY_BETWEEN_CHUNKS = 2000; // Wait 2 seconds between batches
 
 const generateRelevancePrompt = (product, searchTerm) => {
     const bullets = (product.bulletPoints || []).map(bp => `- ${bp}`).join('\n');
@@ -24,29 +25,54 @@ Is this search term relevant?`;
 // Simple in-memory cache for product details to reduce API calls within a single run
 const productDetailsCache = new Map();
 
+
 /**
- * Calls the Gemini API with retry logic for transient errors.
+ * Fetches all active, available API keys for a specific service.
+ * @param {string} service - The name of the service (e.g., 'gemini').
+ * @returns {Promise<string[]>} An array of API keys.
+ */
+async function getAllActiveKeys(service) {
+    const client = await pool.connect();
+    try {
+        const result = await client.query(
+            'SELECT api_key FROM api_keys WHERE service = $1 AND is_active = TRUE ORDER BY id',
+            [service]
+        );
+        return result.rows.map(r => r.api_key);
+    } finally {
+        client.release();
+    }
+}
+
+
+/**
+ * Calls the Gemini API with a specific key and includes retry logic for transient errors.
+ * @param {string} apiKey The API key to use for this specific call.
  * @param {string} prompt The prompt to send to the model.
  * @param {number} maxRetries Maximum number of retry attempts.
  * @param {number} initialDelay Delay in ms for the first retry.
  * @returns {Promise<any>} The API response object.
  */
-async function generateContentWithRetry(prompt, maxRetries = 3, initialDelay = 1000) {
+async function generateContentWithRetry(apiKey, prompt, maxRetries = 3, initialDelay = 1000) {
     let retries = 0;
     let delay = initialDelay;
+    
+    // Create a new AI instance for each call with the provided key
+    const ai = new GoogleGenAI({ apiKey });
+
     while (retries < maxRetries) {
         try {
-            const response = await ai.models.generateContent({model: 'gemini-2.5-flash', contents: prompt});
+            const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
             return response;
         } catch (error) {
-            // Check for specific transient errors like 503 Service Unavailable
-            if (error.status === 503 || (error.message && (error.message.includes('UNAVAILABLE') || error.message.includes('overloaded')))) {
+            // Check for specific transient errors like 503 Service Unavailable or 429 Rate Limit
+            if (error.status === 503 || error.status === 429 || (error.message && (error.message.includes('UNAVAILABLE') || error.message.includes('overloaded')))) {
                 retries++;
                 if (retries >= maxRetries) {
-                    console.error(`[AI Negation] Gemini API call failed after ${maxRetries} retries.`);
+                    console.error(`[AI Negation] Gemini API call failed for key ending in ...${apiKey.slice(-4)} after ${maxRetries} retries.`);
                     throw error; // Max retries reached, re-throw the last error
                 }
-                console.warn(`[AI Negation] Gemini API overloaded. Retrying in ${delay}ms... (Attempt ${retries}/${maxRetries})`);
+                console.warn(`[AI Negation] Gemini API overloaded for key ...${apiKey.slice(-4)}. Retrying in ${delay}ms... (Attempt ${retries}/${maxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 delay *= 2; // Exponential backoff
             } else {
@@ -58,15 +84,19 @@ async function generateContentWithRetry(prompt, maxRetries = 3, initialDelay = 1
 
 
 export const evaluateAiSearchTermNegationRule = async (rule, _, throttledEntities) => {
-    if (!ai) {
-        console.error('[AI Negation] Gemini API key is not configured. Skipping rule.');
-        return { summary: 'Rule skipped: Gemini API key not configured.', details: {}, actedOnEntities: [] };
-    }
-
     const campaignIds = rule.scope?.campaignIds || [];
     if (campaignIds.length === 0) {
         return { summary: 'Rule skipped: No campaigns in scope.', details: {}, actedOnEntities: [] };
     }
+    
+    // Fetch all available keys for rotation
+    const allKeys = await getAllActiveKeys('gemini');
+    if (allKeys.length === 0) {
+        return { summary: 'AI Negation rule failed: No active Gemini keys found in the database.', details: {}, actedOnEntities: [] };
+    }
+    console.log(`[AI Negation] Found ${allKeys.length} Gemini keys for rotation.`);
+    let keyIndex = 0;
+
 
     const actionsByCampaign = {};
     const negativeKeywordsToCreate = [];
@@ -110,8 +140,10 @@ export const evaluateAiSearchTermNegationRule = async (rule, _, throttledEntitie
         const productDetails = await getProductTextAttributes(uniqueAsins);
         productDetails.forEach(p => productDetailsCache.set(p.asin, p));
     }
+    
+    const termsToEvaluate = [];
 
-    // 3. Evaluate each search term
+    // 3. Filter and prepare terms for evaluation
     for (const entity of performanceData) {
         const throttleKey = `${entity.customer_search_term}::${entity.asin}`;
         if (throttledEntities.has(throttleKey) || !entity.asin || asinRegex.test(entity.customer_search_term)) {
@@ -130,45 +162,74 @@ export const evaluateAiSearchTermNegationRule = async (rule, _, throttledEntitie
                     break;
                 }
             }
-
             if (allConditionsMet) {
-                try {
-                    const prompt = generateRelevancePrompt(product, entity.customer_search_term);
-                    const response = await generateContentWithRetry(prompt);
-                    const aiDecision = response.text.trim().toUpperCase();
-
-                    if (aiDecision.includes('NO')) {
-                        console.log(`[AI Negation] AI deemed "${entity.customer_search_term}" as NOT RELEVANT for ASIN ${entity.asin}.`);
-                        
-                        negativeKeywordsToCreate.push({
-                            campaignId: entity.campaign_id,
-                            adGroupId: entity.ad_group_id,
-                            keywordText: entity.customer_search_term,
-                            matchType: 'NEGATIVE_EXACT',
-                            state: 'ENABLED'
-                        });
-
-                        const campaignId = entity.campaign_id;
-                        if (!actionsByCampaign[campaignId]) {
-                            actionsByCampaign[campaignId] = { changes: [], newNegatives: [] };
-                        }
-                        actionsByCampaign[campaignId].newNegatives.push({ searchTerm: entity.customer_search_term, matchType: 'NEGATIVE_EXACT' });
-
-                        actedOnEntities.add(throttleKey);
-                    } else {
-                         console.log(`[AI Negation] AI deemed "${entity.customer_search_term}" as RELEVANT for ASIN ${entity.asin}. No action taken.`);
-                    }
-
-                } catch (aiError) {
-                    console.error(`[AI Negation] Gemini API call failed for term "${entity.customer_search_term}":`, aiError);
-                }
-                
+                termsToEvaluate.push({ entity, product });
                 break; // First match wins
             }
         }
     }
 
-    // 4. Create negative keywords in bulk
+    // 4. Evaluate in chunks, rotating keys for each chunk
+    for (let i = 0; i < termsToEvaluate.length; i += CHUNK_SIZE) {
+        const chunk = termsToEvaluate.slice(i, i + CHUNK_SIZE);
+        
+        // Cycle through keys for each chunk
+        const currentApiKey = allKeys[keyIndex];
+        keyIndex = (keyIndex + 1) % allKeys.length;
+
+        console.log(`[AI Negation] Processing chunk ${i / CHUNK_SIZE + 1} of ${Math.ceil(termsToEvaluate.length / CHUNK_SIZE)} using key ...${currentApiKey.slice(-4)}`);
+
+        const promises = chunk.map(async ({ entity, product }) => {
+            try {
+                const prompt = generateRelevancePrompt(product, entity.customer_search_term);
+                // Pass the selected key to the retry function
+                const response = await generateContentWithRetry(currentApiKey, prompt);
+                const aiDecision = response.text.trim().toUpperCase();
+
+                if (aiDecision.includes('NO')) {
+                    console.log(`[AI Negation] AI deemed "${entity.customer_search_term}" as NOT RELEVANT for ASIN ${entity.asin}.`);
+                    return { status: 'negate', entity };
+                } else {
+                    console.log(`[AI Negation] AI deemed "${entity.customer_search_term}" as RELEVANT for ASIN ${entity.asin}. No action taken.`);
+                    return { status: 'keep', entity };
+                }
+            } catch (aiError) {
+                console.error(`[AI Negation] Gemini API call failed for term "${entity.customer_search_term}":`, aiError);
+                return { status: 'error', entity };
+            }
+        });
+
+        const results = await Promise.all(promises);
+
+        for (const result of results) {
+            if (result.status === 'negate') {
+                const { entity } = result;
+                const throttleKey = `${entity.customer_search_term}::${entity.asin}`;
+                negativeKeywordsToCreate.push({
+                    campaignId: entity.campaign_id,
+                    adGroupId: entity.ad_group_id,
+                    keywordText: entity.customer_search_term,
+                    matchType: 'NEGATIVE_EXACT',
+                    state: 'ENABLED'
+                });
+
+                const campaignId = entity.campaign_id;
+                if (!actionsByCampaign[campaignId]) {
+                    actionsByCampaign[campaignId] = { changes: [], newNegatives: [] };
+                }
+                actionsByCampaign[campaignId].newNegatives.push({ searchTerm: entity.customer_search_term, matchType: 'NEGATIVE_EXACT' });
+                actedOnEntities.add(throttleKey);
+            }
+        }
+
+        if (i + CHUNK_SIZE < termsToEvaluate.length) {
+            console.log(`[AI Negation] Chunk processed. Waiting for ${DELAY_BETWEEN_CHUNKS / 1000}s before next chunk...`);
+            await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_CHUNKS));
+        }
+    }
+
+
+    // 5. Create negative keywords in bulk
     if (negativeKeywordsToCreate.length > 0) {
         try {
             await amazonAdsApiRequest({

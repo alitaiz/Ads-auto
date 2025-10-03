@@ -6,11 +6,15 @@ import { defineConfig, loadEnv } from 'vite';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(({ mode }) => {
-    const env = loadEnv(mode, '.', '');
+    // We no longer need to load env here for the API key,
+    // but we'll keep the structure for potential future use.
+    // const env = loadEnv(mode, '.', ''); 
     return {
       define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+        // IMPORTANT: The GEMINI_API_KEY is no longer exposed to the frontend.
+        // All AI calls are proxied through the backend, which now handles key management.
+        // 'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY), // REMOVED
+        // 'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY) // REMOVED
       },
       resolve: {
         alias: {

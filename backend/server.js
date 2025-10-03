@@ -16,6 +16,7 @@ import queryPerformanceRoutes from './routes/queryPerformance.js';
 import productDetailsRoutes from './routes/productDetails.js';
 import listingsRoutes from './routes/listings.js';
 import { startRulesEngine } from './services/rulesEngine.js';
+import { syncGeminiKeys } from './helpers/keySync.js';
 
 const app = express();
 const port = process.env.PORT;
@@ -61,11 +62,21 @@ app.use((err, req, res, next) => {
 });
 
 // --- Start Server ---
-app.listen(port, () => {
-    console.log(`🚀 Backend server is listening at http://localhost:${port}`);
-    // A simple check on startup to warn if essential environment variables are missing
-    if (!process.env.DB_USER || !process.env.ADS_API_CLIENT_ID || !process.env.SP_API_CLIENT_ID) {
-        console.warn('⚠️ WARNING: Essential environment variables (e.g., DB_USER, ADS_API_CLIENT_ID, SP_API_CLIENT_ID) are not set. The application may not function correctly.');
+(async () => {
+    try {
+        // Synchronize API keys from .env to the database on startup.
+        await syncGeminiKeys();
+
+        app.listen(port, () => {
+            console.log(`🚀 Backend server is listening at http://localhost:${port}`);
+            // A simple check on startup to warn if essential environment variables are missing
+            if (!process.env.DB_USER || !process.env.ADS_API_CLIENT_ID || !process.env.SP_API_CLIENT_ID) {
+                console.warn('⚠️ WARNING: Essential environment variables (e.g., DB_USER, ADS_API_CLIENT_ID, SP_API_CLIENT_ID) are not set. The application may not function correctly.');
+            }
+            startRulesEngine();
+        });
+    } catch (err) {
+        console.error('Failed to initialize and start the server:', err);
+        process.exit(1);
     }
-    startRulesEngine();
-});
+})();

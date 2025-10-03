@@ -3,10 +3,11 @@ import express from 'express';
 import pool from '../db.js';
 import { GoogleGenAI } from '@google/genai';
 import { OpenAI } from 'openai';
+import { getApiKey } from '../helpers/keyManager.js';
 
 const router = express.Router();
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// The static 'ai' instance is removed. It will be created dynamically per request.
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 
 
 // --- Helper Functions for Server-Side Data Fetching ---
@@ -425,6 +426,10 @@ router.post('/ai/chat', async (req, res) => {
         if (!question) throw new Error('Question is required.');
         if (!profileId) throw new Error('Profile ID is required.');
 
+        // Get a key from the key manager for this request
+        const apiKey = await getApiKey('gemini');
+        const ai = new GoogleGenAI({ apiKey });
+
         const systemInstruction = context.systemInstruction || 'You are an expert Amazon PPC Analyst.';
         
         client = await pool.connect();
@@ -490,13 +495,11 @@ router.post('/ai/chat', async (req, res) => {
         console.error("Gemini chat error:", error);
         let userFriendlyMessage = "An unexpected error occurred with the AI service. Please try again.";
 
-        // Check for specific API errors from @google/genai
-        if (error.status === 503 || (error.message && (error.message.includes('UNAVAILABLE') || error.message.includes('overloaded')))) {
+        if (error.message?.includes('API key not found')) {
+            userFriendlyMessage = "The AI service API key is missing or invalid. Please check the database `api_keys` table configuration.";
+        } else if (error.status === 503 || (error.message && (error.message.includes('UNAVAILABLE') || error.message.includes('overloaded')))) {
             userFriendlyMessage = "The AI model is currently overloaded or unavailable. Please try again in a few moments.";
-        } else if (error.message && error.message.includes('API_KEY_INVALID')) {
-            userFriendlyMessage = "The AI service API key is invalid. Please check the server configuration.";
         } else if (error.name === 'AbortError') {
-            // Not an error, just user action. Silently end the response.
             console.log('Gemini stream aborted by client.');
             return res.end();
         }
@@ -515,6 +518,9 @@ router.post('/ai/chat-gpt', async (req, res) => {
     let client;
 
     try {
+        if (!openai) {
+            throw new Error("OpenAI client is not configured. Please check the server's OPENAI_API_KEY.");
+        }
         let { question, conversationId, context, profileId, provider } = req.body;
         if (!question) throw new Error('Question is required.');
         if (!profileId) throw new Error('Profile ID is required.');

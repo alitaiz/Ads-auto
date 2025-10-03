@@ -57,19 +57,19 @@ export const SearchTermHarvestingActionForm = ({ action, onActionChange, bidAdju
         
         {action.type === 'ADD_TO_EXISTING_CAMPAIGN' && <div style={{...styles.thenGrid, gridTemplateColumns: '1fr 1fr'}}>
             <div style={styles.formGroup}>
-                <label style={styles.label}>Target Campaign</label>
-                <input type="text" style={styles.conditionInput} value={action.targetCampaignId ?? ''} onChange={e => onActionChange('targetCampaignId', e.target.value)} placeholder="Enter exact campaign name" />
+                <label style={styles.label}>Target Campaign ID</label>
+                <input type="text" style={styles.conditionInput} value={action.targetCampaignId ?? ''} onChange={e => onActionChange('targetCampaignId', e.target.value)} placeholder="Enter Campaign ID" />
             </div>
             <div style={styles.formGroup}>
-                <label style={styles.label}>Target Ad Group</label>
-                <input type="text" style={styles.conditionInput} value={action.targetAdGroupId ?? ''} onChange={e => onActionChange('targetAdGroupId', e.target.value)} placeholder="Enter exact ad group name" />
+                <label style={styles.label}>Target Ad Group ID</label>
+                <input type="text" style={styles.conditionInput} value={action.targetAdGroupId ?? ''} onChange={e => onActionChange('targetAdGroupId', e.target.value)} placeholder="Enter Ad Group ID" />
             </div>
         </div>}
 
         <div style={{ paddingTop: '20px', borderTop: '1px dashed #ccc' }}>
             <div style={styles.formGroup}><label style={styles.label}>Bid Option</label><div style={styles.radioGroup}>
-                <label><input type="radio" value="CPC_MULTIPLIER" checked={action.bidOption?.type === 'CPC_MULTIPLIER'} onChange={e => onActionChange('bidOption.type', e.target.value)} /> Based on Search Term CPC</label>
-                <label><input type="radio" value="CUSTOM_BID" checked={action.bidOption?.type === 'CUSTOM_BID'} onChange={e => onActionChange('bidOption.type', e.target.value)} /> Set custom bid</label>
+                <label><input type="radio" name="bidOptionType" value="CPC_MULTIPLIER" checked={action.bidOption?.type === 'CPC_MULTIPLIER'} onChange={e => onActionChange('bidOption.type', e.target.value)} /> Based on Search Term CPC</label>
+                <label><input type="radio" name="bidOptionType" value="CUSTOM_BID" checked={action.bidOption?.type === 'CUSTOM_BID'} onChange={e => onActionChange('bidOption.type', e.target.value)} /> Set custom bid</label>
             </div></div>
              <div style={{...styles.formGroup, marginTop: '10px'}}>
                 {action.bidOption?.type === 'CPC_MULTIPLIER' ? (
@@ -136,4 +136,5 @@ export const SearchTermHarvestingActionForm = ({ action, onActionChange, bidAdju
             ℹ️ When 'Automatic Negation' is enabled, the harvested term is added as a Negative Exact in its original Ad Group to prevent spend overlap. This is highly recommended.
         </div>
     </div>
-);
+  );
+};

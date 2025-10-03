@@ -79,6 +79,68 @@ const detailStyles: { [key: string]: React.CSSProperties } = {
 };
 
 const ExecutionDetails = ({ details }: { details: any }) => {
+    // A log is for a Price Adjustment if it has a 'changes' or 'errors' array at the top level of 'details'
+    // where 'changes' items have an 'oldPrice' property.
+    const isPriceAdjustmentLog = Array.isArray(details?.changes) && (details.changes.length > 0 ? details.changes[0].hasOwnProperty('oldPrice') : true);
+
+    if (isPriceAdjustmentLog) {
+        const changes = details.changes || [];
+        const errors = details.errors || [];
+        
+        if (changes.length === 0 && errors.length === 0) {
+            return <div style={detailStyles.container}><p>No price changes were necessary for this run.</p></div>;
+        }
+
+        return (
+            <div style={detailStyles.container}>
+                {changes.length > 0 && (
+                    <>
+                        <h4 style={{ margin: '0 0 10px 0', fontSize: '1rem', color: '#333' }}>Successful Price Updates</h4>
+                        <table style={detailStyles.detailsTable}>
+                            <thead>
+                                <tr>
+                                    <th style={{...detailStyles.detailsTh, width: '40%'}}>SKU</th>
+                                    <th style={{...detailStyles.detailsTh, width: '30%'}}>Old Price</th>
+                                    <th style={{...detailStyles.detailsTh, width: '30%'}}>New Price</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {changes.map((change: any, index: number) => (
+                                    <tr key={`change-${index}`}>
+                                        <td style={detailStyles.detailsTd}>{change.sku}</td>
+                                        <td style={detailStyles.detailsTd}>{formatPrice(change.oldPrice)}</td>
+                                        <td style={detailStyles.detailsTd}>{formatPrice(change.newPrice)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </>
+                )}
+                {errors.length > 0 && (
+                    <>
+                        <h4 style={{ margin: '20px 0 10px 0', color: 'var(--danger-color)', fontSize: '1rem' }}>Failed Updates</h4>
+                        <table style={detailStyles.detailsTable}>
+                            <thead>
+                                <tr>
+                                    <th style={{...detailStyles.detailsTh, width: '40%'}}>SKU</th>
+                                    <th style={{...detailStyles.detailsTh, width: '60%'}}>Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {errors.map((error: any, index: number) => (
+                                    <tr key={`error-${index}`}>
+                                        <td style={detailStyles.detailsTd}>{error.sku}</td>
+                                        <td style={detailStyles.detailsTd}>{error.reason}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </>
+                )}
+            </div>
+        );
+    }
+    
     const { actions_by_campaign, ...otherDetails } = details || {};
 
     const formatMetricValue = (value: number, metric: string) => {

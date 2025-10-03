@@ -9,7 +9,8 @@ const styles: { [key: string]: React.CSSProperties } = {
 };
 
 interface AISearchTermNegationConfigProps {
-    config: AutomationRule['config'];
+    // FIX: Changed config type to Partial to allow for incomplete objects during rule creation.
+    config: Partial<AutomationRule['config']>;
     onConfigChange: (field: string, value: any) => void;
 }
 

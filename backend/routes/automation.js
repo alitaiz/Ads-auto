@@ -119,6 +119,46 @@ router.get('/automation/logs', async (req, res) => {
 
     const { rows } = await pool.query(queryText, params);
     
+    // --- Enrich logs with campaign names ---
+    const allCampaignIds = new Set();
+    rows.forEach(log => {
+        if (log.details && log.details.actions_by_campaign) {
+            Object.keys(log.details.actions_by_campaign).forEach(id => allCampaignIds.add(id));
+        }
+    });
+
+    if (allCampaignIds.size > 0) {
+        const campaignIdArray = Array.from(allCampaignIds);
+        try {
+            const namesResult = await pool.query(`
+                SELECT DISTINCT ON (campaign_id)
+                    campaign_id::text,
+                    campaign_name
+                FROM sponsored_products_search_term_report
+                WHERE campaign_id::text = ANY($1::text[]) AND campaign_name IS NOT NULL
+                ORDER BY campaign_id, report_date DESC;
+            `, [campaignIdArray]);
+            
+            const campaignNameMap = new Map();
+            namesResult.rows.forEach(row => {
+                campaignNameMap.set(row.campaign_id, row.campaign_name);
+            });
+
+            rows.forEach(log => {
+                if (log.details && log.details.actions_by_campaign) {
+                    for (const id in log.details.actions_by_campaign) {
+                        if (campaignNameMap.has(id)) {
+                            log.details.actions_by_campaign[id].campaignName = campaignNameMap.get(id);
+                        }
+                    }
+                }
+            });
+        } catch (nameError) {
+            console.error("Could not enrich logs with campaign names:", nameError);
+        }
+    }
+    // --- End Enrichment ---
+
     if (campaignId) {
         const campaignSpecificLogs = rows.map(log => {
             if (!log.details || !log.details.actions_by_campaign || !log.details.actions_by_campaign[campaignId]) {
@@ -133,7 +173,7 @@ router.get('/automation/logs', async (req, res) => {
                 
                 let summary;
                 if (log.status === 'NO_ACTION') {
-                    summary = log.summary; // Use the summary from the log entry itself
+                    summary = log.summary;
                 } else {
                     const summaryParts = [];
                     if (changeCount > 0) summaryParts.push(`Performed ${changeCount} bid adjustment(s)`);
@@ -141,17 +181,15 @@ router.get('/automation/logs', async (req, res) => {
                     summary = summaryParts.length > 0 ? summaryParts.join(' and ') + '.' : 'No changes were made for this campaign.';
                 }
 
-                // FIX: Construct a new details object that preserves the data_date_range
-                // while also providing the campaign-specific actions.
                 const newDetails = {
-                    ...campaignActions, // This has 'changes', 'newNegatives', etc.
-                    data_date_range: log.details.data_date_range // Add the date range back in
+                    ...campaignActions,
+                    data_date_range: log.details.data_date_range
                 };
 
                 return {
                     ...log,
                     summary,
-                    details: newDetails // Use the newly constructed, complete details object
+                    details: newDetails
                 };
             }
             return null;

@@ -69,11 +69,10 @@ const formatDataWindow = (log: any) => {
 
 const detailStyles: { [key: string]: React.CSSProperties } = {
     container: { whiteSpace: 'normal', wordBreak: 'break-word', backgroundColor: '#fff', padding: '15px', borderRadius: '4px', maxHeight: '400px', overflowY: 'auto', fontSize: '0.9rem', border: '1px solid #e9ecef' },
-    campaignBlock: { marginBottom: '15px', borderBottom: '1px dashed #ccc', paddingBottom: '10px' },
-    campaignTitle: { margin: '0 0 10px 0', fontWeight: 600, color: '#333' },
-    actionList: { listStyleType: 'none', margin: 0, padding: 0 },
-    actionItem: { marginBottom: '8px' },
-    metricList: { margin: '5px 0 5px 20px', paddingLeft: '15px', fontSize: '0.85rem', color: '#555', borderLeft: '2px solid #ddd', listStyleType: 'circle' },
+    detailsTable: { width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' },
+    detailsTh: { textAlign: 'left', padding: '8px 10px', borderBottom: '2px solid #dee2e6', fontWeight: 600, backgroundColor: '#f8f9fa' },
+    detailsTd: { textAlign: 'left', padding: '8px 10px', borderBottom: '1px solid #e9ecef', verticalAlign: 'top' },
+    metricList: { margin: 0, padding: 0, listStyleType: 'none' },
     metricListItem: { marginBottom: '3px' },
     code: { fontFamily: 'monospace', backgroundColor: '#e9ecef', padding: '2px 4px', borderRadius: '3px' },
     pre: { whiteSpace: 'pre-wrap', wordBreak: 'break-all', backgroundColor: '#e9ecef', padding: '15px', borderRadius: '4px', fontSize: '0.8rem' }
@@ -93,77 +92,80 @@ const ExecutionDetails = ({ details }: { details: any }) => {
     };
     const timeWindowText = (metric: any) => metric.timeWindow === 'TODAY' ? 'Today' : `${metric.timeWindow} days`;
 
-    const renderChange = (change: any) => {
-        let changeText = '';
-        if (typeof change.oldBid !== 'undefined' && typeof change.newBid !== 'undefined') {
-            changeText = `Target "${change.entityText}": bid changed from ${formatPrice(change.oldBid)} to ${formatPrice(change.newBid)}`;
-        } else if (typeof change.oldBudget !== 'undefined' && typeof change.newBudget !== 'undefined') {
-            changeText = `Budget changed from ${formatPrice(change.oldBudget)} to ${formatPrice(change.newBudget)}`;
-        } else {
-            return <code style={detailStyles.code}>{JSON.stringify(change)}</code>;
+    const allActions: any[] = [];
+    if (actions_by_campaign) {
+        for (const campaignId in actions_by_campaign) {
+            const campaignData = actions_by_campaign[campaignId];
+            (campaignData.changes || []).forEach((change: any) => {
+                allActions.push({
+                    type: change.oldBid !== undefined ? 'Bid Adjustment' : 'Budget Change',
+                    campaignName: campaignData.campaignName || campaignId,
+                    details: change.oldBid !== undefined
+                        ? <>Target "<strong style={detailStyles.code}>{change.entityText}</strong>": {formatPrice(change.oldBid)} → {formatPrice(change.newBid)}</>
+                        : <>Budget: {formatPrice(change.oldBudget)} → {formatPrice(change.newBudget)}</>,
+                    reason: change.triggeringMetrics
+                });
+            });
+            (campaignData.newNegatives || []).forEach((neg: any) => {
+                allActions.push({
+                    type: 'Negate Term',
+                    campaignName: campaignData.campaignName || campaignId,
+                    details: <>"<strong style={detailStyles.code}>{neg.searchTerm}</strong>" as <strong style={detailStyles.code}>{neg.matchType?.replace(/_/g, ' ')}</strong></>,
+                    reason: neg.triggeringMetrics
+                });
+            });
         }
+    }
 
-        return (
-            <>
-                {changeText}
-                {change.triggeringMetrics?.length > 0 && (
-                    <ul style={detailStyles.metricList}>
-                        {change.triggeringMetrics.map((metric: any, mIndex: number) => (
-                            <li key={mIndex} style={detailStyles.metricListItem}>
-                                {metric.metric} ({timeWindowText(metric)}) was <strong>{formatMetricValue(metric.value, metric.metric)}</strong> (Condition: {metric.condition})
-                            </li>
-                        ))}
-                    </ul>
-                )}
-            </>
-        );
-    };
-
-    const renderNegative = (neg: any) => (
-        <>
-            Negated <code style={detailStyles.code}>{neg.searchTerm}</code> as <code style={detailStyles.code}>{neg.matchType?.replace(/_/g, ' ')}</code>
-            {neg.triggeringMetrics?.length > 0 && (
-                <ul style={detailStyles.metricList}>
-                    {neg.triggeringMetrics.map((metric: any, mIndex: number) => (
-                        <li key={mIndex} style={detailStyles.metricListItem}>
-                            {metric.metric} ({metric.timeWindow} days) was <strong>{formatMetricValue(metric.value, metric.metric)}</strong> (Condition: {metric.condition})
-                        </li>
-                    ))}
-                </ul>
-            )}
-        </>
-    );
-
-    const renderCampaignActions = (campaignId: string, campaignData: any) => {
-        const { changes = [], newNegatives = [] } = campaignData;
-        if (changes.length === 0 && newNegatives.length === 0) return null;
-
-        return (
-            <div key={campaignId} style={detailStyles.campaignBlock}>
-                <h4 style={detailStyles.campaignTitle}>Campaign: {campaignData.campaignName || campaignId}</h4>
-                <ul style={detailStyles.actionList}>
-                    {changes.map((change: any, i: number) => <li key={`c-${i}`} style={detailStyles.actionItem}>{renderChange(change)}</li>)}
-                    {newNegatives.map((neg: any, i: number) => <li key={`n-${i}`} style={detailStyles.actionItem}>{renderNegative(neg)}</li>)}
-                </ul>
-            </div>
-        );
-    };
-    
-    const hasCampaignActions = actions_by_campaign && Object.values(actions_by_campaign).some((cd: any) => (cd.changes?.length > 0 || cd.newNegatives?.length > 0));
     const hasOtherDetails = Object.keys(otherDetails).length > 0 && !(Object.keys(otherDetails).length === 1 && otherDetails.data_date_range);
 
-    if (!hasCampaignActions && !hasOtherDetails) {
+    if (allActions.length === 0 && !hasOtherDetails) {
         return <div style={detailStyles.container}><p>No specific actions were recorded for this run.</p></div>;
     }
 
     return (
         <div style={detailStyles.container}>
-            {hasCampaignActions && Object.entries(actions_by_campaign).map(([id, data]) => renderCampaignActions(id, data as any))}
-            {hasOtherDetails && <pre style={detailStyles.pre}>{JSON.stringify(otherDetails, null, 2)}</pre>}
+            {allActions.length > 0 && (
+                <table style={detailStyles.detailsTable}>
+                    <thead>
+                        <tr>
+                            <th style={{...detailStyles.detailsTh, width: '25%'}}>Campaign</th>
+                            <th style={{...detailStyles.detailsTh, width: '15%'}}>Action</th>
+                            <th style={{...detailStyles.detailsTh, width: '30%'}}>Details</th>
+                            <th style={{...detailStyles.detailsTh, width: '30%'}}>Triggering Metrics</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {allActions.map((action, index) => (
+                            <tr key={index}>
+                                <td style={detailStyles.detailsTd}>{action.campaignName}</td>
+                                <td style={detailStyles.detailsTd}>{action.type}</td>
+                                <td style={detailStyles.detailsTd}>{action.details}</td>
+                                <td style={detailStyles.detailsTd}>
+                                    {action.reason?.length > 0 && (
+                                        <ul style={detailStyles.metricList}>
+                                            {action.reason.map((metric: any, mIndex: number) => (
+                                                <li key={mIndex} style={detailStyles.metricListItem}>
+                                                    {metric.metric} ({timeWindowText(metric)}) was <strong>{formatMetricValue(metric.value, metric.metric)}</strong> ({metric.condition})
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            )}
+            {hasOtherDetails && (
+                <div style={{marginTop: '15px'}}>
+                    <h4 style={{margin: '0 0 10px 0'}}>Additional Details</h4>
+                    <pre style={detailStyles.pre}>{JSON.stringify(otherDetails, null, 2)}</pre>
+                </div>
+            )}
         </div>
     );
 };
-
 
 interface LogsTabProps {
     logs: any[];

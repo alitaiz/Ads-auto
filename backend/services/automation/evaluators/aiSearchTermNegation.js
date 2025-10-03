@@ -6,8 +6,8 @@ import { GoogleGenAI } from '@google/genai';
 import { amazonAdsApiRequest } from '../../../helpers/amazon-api.js';
 
 const asinRegex = /^b0[a-z0-9]{8}$/i;
-const CHUNK_SIZE = 8; // Process 8 search terms per batch
-const DELAY_BETWEEN_CHUNKS = 2000; // Wait 2 seconds between batches
+const CHUNK_SIZE = 5; // Process 8 search terms per batch
+const DELAY_BETWEEN_CHUNKS = 5000; // Wait 5 seconds between batches
 
 const generateRelevancePrompt = (product, searchTerm) => {
     const bullets = (product.bulletPoints || []).map(bp => `- ${bp}`).join('\n');

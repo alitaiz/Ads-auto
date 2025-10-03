@@ -49,7 +49,7 @@ export function RuleBuilderModal({ rule, modalTitle, onClose, onSave, bidAdjustm
         if (formData.config?.conditionGroups) {
             let needsUpdate = false;
             const newGroups = formData.config.conditionGroups.map((group: any) => {
-                if (group.action.type === 'adjustBidPercent') {
+                if (group?.action?.type === 'adjustBidPercent') {
                     needsUpdate = true;
                     const value = group.action.value || 0;
                     const newAction: AutomationRuleAction = { ...group.action, type: value >= 0 ? 'increaseBidPercent' : 'decreaseBidPercent', value: Math.abs(value) };
@@ -59,7 +59,10 @@ export function RuleBuilderModal({ rule, modalTitle, onClose, onSave, bidAdjustm
             });
 
             if (needsUpdate) {
-                setFormData(prev => ({ ...prev, config: { ...prev!.config, conditionGroups: newGroups } }));
+                setFormData(prev => {
+                    if (!prev || !prev.config) return prev;
+                    return { ...prev, config: { ...prev.config, conditionGroups: newGroups } };
+                });
             }
         }
     }, [formData.config]);
@@ -69,69 +72,88 @@ export function RuleBuilderModal({ rule, modalTitle, onClose, onSave, bidAdjustm
     const { rule_type } = formData;
 
     const handleConfigChange = (field: string, value: any) => {
-        setFormData(prev => ({ ...prev, config: { ...(prev!.config || {}), [field]: value } as any }));
+        setFormData(prev => ({ ...prev, config: { ...(prev?.config || {}), [field]: value } as any }));
     };
 
     const handleConditionChange = (groupIndex: number, condIndex: number, field: keyof AutomationRuleCondition, value: any) => {
         setFormData(prev => {
-            const newGroups = JSON.parse(JSON.stringify(prev!.config!.conditionGroups));
-            if (field === 'value' && newGroups[groupIndex].conditions[condIndex].metric === 'acos') {
-                value = value / 100;
-            }
-            newGroups[groupIndex].conditions[condIndex][field] = value;
-            return { ...prev, config: { ...prev!.config, conditionGroups: newGroups } };
+            if (!prev?.config?.conditionGroups) return prev;
+            const newGroups = prev.config.conditionGroups.map((group, gIndex) => {
+                if (gIndex !== groupIndex) return group;
+                return {
+                    ...group,
+                    conditions: group.conditions.map((cond, cIndex) => {
+                        if (cIndex !== condIndex) return cond;
+                        let finalValue = value;
+                        // For ACOS, convert the percentage from the input to a decimal ratio for storage
+                        if (field === 'value' && cond.metric === 'acos') {
+                            finalValue = value / 100;
+                        }
+                        return { ...cond, [field]: finalValue };
+                    })
+                };
+            });
+            return { ...prev, config: { ...prev.config, conditionGroups: newGroups } };
         });
     };
     
     const handleActionChange = (groupIndex: number, field: string, value: any) => {
         setFormData(prev => {
-            const newGroups = JSON.parse(JSON.stringify(prev!.config!.conditionGroups));
-            const action = newGroups[groupIndex].action;
-
-            if (field.startsWith('bidOption.')) {
-                const subField = field.split('.')[1];
-                if (!action.bidOption) action.bidOption = {};
-                action.bidOption[subField] = value;
-            } else {
-                 action[field] = value;
-            }
-            
-            return { ...prev, config: { ...prev!.config, conditionGroups: newGroups }};
+            if (!prev?.config?.conditionGroups) return prev;
+            const newGroups = prev.config.conditionGroups.map((group, gIndex) => {
+                if (gIndex !== groupIndex) return group;
+                
+                const newAction = { ...group.action };
+                if (field.startsWith('bidOption.')) {
+                    const subField = field.split('.')[1];
+                    if (!newAction.bidOption) newAction.bidOption = { type: 'CPC_MULTIPLIER', value: 1.15 };
+                    (newAction.bidOption as any)[subField] = value;
+                } else {
+                    (newAction as any)[field] = value;
+                }
+                return { ...group, action: newAction };
+            });
+            return { ...prev, config: { ...prev.config, conditionGroups: newGroups } };
         });
     };
 
     const addConditionToGroup = (groupIndex: number) => {
         setFormData(prev => {
-            const newGroups = JSON.parse(JSON.stringify(prev!.config!.conditionGroups));
-            // FIX: Explicitly type the new condition to satisfy TypeScript's strict type checking
-            // for the 'metric' property, which expects a specific string literal union.
-            const newCondition: AutomationRuleCondition = { metric: 'spend', timeWindow: 5, operator: '>', value: 0 };
-            newGroups[groupIndex].conditions.push(newCondition);
-            return { ...prev, config: { ...prev!.config, conditionGroups: newGroups } };
+            if (!prev?.config?.conditionGroups) return prev;
+            const newGroups = prev.config.conditionGroups.map((group, gIndex) => {
+                if (gIndex !== groupIndex) return group;
+                const newCondition: AutomationRuleCondition = { metric: 'spend', timeWindow: 30, operator: '>', value: 10 };
+                return { ...group, conditions: [...group.conditions, newCondition] };
+            });
+            return { ...prev, config: { ...prev.config, conditionGroups: newGroups } };
         });
     };
 
     const removeCondition = (groupIndex: number, condIndex: number) => {
          setFormData(prev => {
-            const newGroups = JSON.parse(JSON.stringify(prev!.config!.conditionGroups));
-            if (newGroups[groupIndex].conditions.length > 1) {
-                newGroups[groupIndex].conditions.splice(condIndex, 1);
-            } else if (newGroups.length > 1) {
-                newGroups.splice(groupIndex, 1);
+            if (!prev?.config?.conditionGroups) return prev;
+            let newGroups = prev.config.conditionGroups.map((group, gIndex) => {
+                if (gIndex !== groupIndex) return group;
+                if (group.conditions.length <= 1) return group; // Don't remove the last condition in a group
+                return { ...group, conditions: group.conditions.filter((_, cIndex) => cIndex !== condIndex) };
+            });
+            // If we're removing the last condition and there are other groups, remove the whole group
+            if (prev.config.conditionGroups[groupIndex].conditions.length === 1 && prev.config.conditionGroups.length > 1) {
+                newGroups = newGroups.filter((_, gIndex) => gIndex !== groupIndex);
             }
-            return { ...prev, config: { ...prev!.config, conditionGroups: newGroups } };
+            return { ...prev, config: { ...prev.config, conditionGroups: newGroups } };
         });
     };
     
     const addConditionGroup = () => {
         setFormData(prev => {
-            // FIX: Explicitly type the new group to satisfy TypeScript's strict type checking.
+            if (!prev?.config?.conditionGroups?.[0]?.action) return prev;
+            const firstGroupAction = prev.config.conditionGroups[0].action;
             const newGroup: AutomationConditionGroup = {
-                conditions: [{ metric: 'spend', timeWindow: 5, operator: '>', value: 0 }],
-                action: prev!.config!.conditionGroups![0].action // Copy action from first group
+                conditions: [{ metric: 'spend', timeWindow: 30, operator: '>', value: 10 }],
+                action: JSON.parse(JSON.stringify(firstGroupAction)) // Deep copy the action from the first group
             };
-            const newGroups = [...(prev!.config!.conditionGroups || []), newGroup];
-            return { ...prev, config: { ...prev!.config, conditionGroups: newGroups } };
+            return { ...prev, config: { ...prev.config, conditionGroups: [...(prev.config.conditionGroups || []), newGroup] } };
         });
     };
 
@@ -147,15 +169,15 @@ export function RuleBuilderModal({ rule, modalTitle, onClose, onSave, bidAdjustm
     };
     
     const renderConditionInput = (groupIndex: number, cond: AutomationRuleCondition, condIndex: number) => {
-        if (cond.metric === 'acos') {
-            return (
-                <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <input type="number" step="0.01" style={styles.conditionInput} value={(cond.value || 0) * 100} onChange={e => handleConditionChange(groupIndex, condIndex, 'value', Number(e.target.value))} required />
-                    <span style={{ marginLeft: '5px' }}>%</span>
-                </div>
-            );
-        }
-        return <input type="number" step="0.01" style={styles.conditionInput} value={cond.value} onChange={e => handleConditionChange(groupIndex, condIndex, 'value', Number(e.target.value))} required />;
+        const isAcos = cond.metric === 'acos';
+        const isPercent = isAcos || cond.metric === 'budgetUtilization';
+        
+        return (
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+                <input type="number" step="0.01" style={styles.conditionInput} value={isAcos ? (cond.value || 0) * 100 : cond.value} onChange={e => handleConditionChange(groupIndex, condIndex, 'value', Number(e.target.value))} required />
+                {isPercent && <span style={{ marginLeft: '5px' }}>%</span>}
+            </div>
+        );
     };
 
     return (
@@ -244,7 +266,7 @@ export function RuleBuilderModal({ rule, modalTitle, onClose, onSave, bidAdjustm
                                              {rule_type !== 'AI_SEARCH_TERM_NEGATION' && (
                                                 <div style={styles.thenBlock}>
                                                     <h4 style={styles.thenHeader}>THEN</h4>
-                                                    {renderActionForm(group, index)}
+                                                    {renderActionForm(group, groupIndex)}
                                                 </div>
                                             )}
                                         </div>

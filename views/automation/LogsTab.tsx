@@ -78,10 +78,12 @@ const detailStyles: { [key: string]: React.CSSProperties } = {
     pre: { whiteSpace: 'pre-wrap', wordBreak: 'break-all', backgroundColor: '#e9ecef', padding: '15px', borderRadius: '4px', fontSize: '0.8rem' }
 };
 
-const ExecutionDetails = ({ details }: { details: any }) => {
+const ExecutionDetails = ({ log }: { log: any }) => {
+    const { details, summary } = log;
     // A log is for a Price Adjustment if it has a 'changes' or 'errors' array at the top level of 'details'
     // where 'changes' items have an 'oldPrice' property.
     const isPriceAdjustmentLog = Array.isArray(details?.changes) && (details.changes.length > 0 ? details.changes[0].hasOwnProperty('oldPrice') : true);
+    const isAiNegationLog = summary?.startsWith('AI analysis complete');
 
     if (isPriceAdjustmentLog) {
         const changes = details.changes || [];
@@ -180,8 +182,10 @@ const ExecutionDetails = ({ details }: { details: any }) => {
     }
 
     const hasOtherDetails = Object.keys(otherDetails).length > 0 && !(Object.keys(otherDetails).length === 1 && otherDetails.data_date_range);
+    
+    const showAdditionalDetails = hasOtherDetails && !isAiNegationLog;
 
-    if (allActions.length === 0 && !hasOtherDetails) {
+    if (allActions.length === 0 && !showAdditionalDetails) {
         return <div style={detailStyles.container}><p>No specific actions were recorded for this run.</p></div>;
     }
 
@@ -219,7 +223,7 @@ const ExecutionDetails = ({ details }: { details: any }) => {
                     </tbody>
                 </table>
             )}
-            {hasOtherDetails && (
+            {showAdditionalDetails && (
                 <div style={{marginTop: '15px'}}>
                     <h4 style={{margin: '0 0 10px 0'}}>Additional Details</h4>
                     <pre style={detailStyles.pre}>{JSON.stringify(otherDetails, null, 2)}</pre>
@@ -263,7 +267,7 @@ export const LogsTab = ({ logs, loading, expandedLogId, setExpandedLogId }: Logs
                                     <tr>
                                         <td colSpan={5} style={{ padding: '15px 25px', backgroundColor: '#f8f9fa' }}>
                                             <h4 style={{ margin: '0 0 10px 0' }}>Execution Details</h4>
-                                            <ExecutionDetails details={log.details} />
+                                            <ExecutionDetails log={log} />
                                         </td>
                                     </tr>
                                 )}

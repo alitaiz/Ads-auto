@@ -1,5 +1,6 @@
 // views/automation/LogsTab.tsx
 import React from 'react';
+import { formatPrice, formatNumber, formatPercent } from '../../utils';
 
 const styles: { [key: string]: React.CSSProperties } = {
   contentTitle: { fontSize: '1.5rem', margin: 0, marginBottom: '20px' },
@@ -66,6 +67,104 @@ const formatDataWindow = (log: any) => {
     return parts.length > 0 ? parts.join(', ') : 'N/A';
 };
 
+const detailStyles: { [key: string]: React.CSSProperties } = {
+    container: { whiteSpace: 'normal', wordBreak: 'break-word', backgroundColor: '#fff', padding: '15px', borderRadius: '4px', maxHeight: '400px', overflowY: 'auto', fontSize: '0.9rem', border: '1px solid #e9ecef' },
+    campaignBlock: { marginBottom: '15px', borderBottom: '1px dashed #ccc', paddingBottom: '10px' },
+    campaignTitle: { margin: '0 0 10px 0', fontWeight: 600, color: '#333' },
+    actionList: { listStyleType: 'none', margin: 0, padding: 0 },
+    actionItem: { marginBottom: '8px' },
+    metricList: { margin: '5px 0 5px 20px', paddingLeft: '15px', fontSize: '0.85rem', color: '#555', borderLeft: '2px solid #ddd', listStyleType: 'circle' },
+    metricListItem: { marginBottom: '3px' },
+    code: { fontFamily: 'monospace', backgroundColor: '#e9ecef', padding: '2px 4px', borderRadius: '3px' },
+    pre: { whiteSpace: 'pre-wrap', wordBreak: 'break-all', backgroundColor: '#e9ecef', padding: '15px', borderRadius: '4px', fontSize: '0.8rem' }
+};
+
+const ExecutionDetails = ({ details }: { details: any }) => {
+    const { actions_by_campaign, ...otherDetails } = details || {};
+
+    const formatMetricValue = (value: number, metric: string) => {
+        switch (metric) {
+            case 'acos': return formatPercent(value);
+            case 'budgetUtilization': return `${Number(value).toFixed(2)}%`;
+            case 'roas': return value.toFixed(2);
+            case 'spend': case 'sales': return formatPrice(value);
+            default: return formatNumber(value);
+        }
+    };
+    const timeWindowText = (metric: any) => metric.timeWindow === 'TODAY' ? 'Today' : `${metric.timeWindow} days`;
+
+    const renderChange = (change: any) => {
+        let changeText = '';
+        if (typeof change.oldBid !== 'undefined' && typeof change.newBid !== 'undefined') {
+            changeText = `Target "${change.entityText}": bid changed from ${formatPrice(change.oldBid)} to ${formatPrice(change.newBid)}`;
+        } else if (typeof change.oldBudget !== 'undefined' && typeof change.newBudget !== 'undefined') {
+            changeText = `Budget changed from ${formatPrice(change.oldBudget)} to ${formatPrice(change.newBudget)}`;
+        } else {
+            return <code style={detailStyles.code}>{JSON.stringify(change)}</code>;
+        }
+
+        return (
+            <>
+                {changeText}
+                {change.triggeringMetrics?.length > 0 && (
+                    <ul style={detailStyles.metricList}>
+                        {change.triggeringMetrics.map((metric: any, mIndex: number) => (
+                            <li key={mIndex} style={detailStyles.metricListItem}>
+                                {metric.metric} ({timeWindowText(metric)}) was <strong>{formatMetricValue(metric.value, metric.metric)}</strong> (Condition: {metric.condition})
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </>
+        );
+    };
+
+    const renderNegative = (neg: any) => (
+        <>
+            Negated <code style={detailStyles.code}>{neg.searchTerm}</code> as <code style={detailStyles.code}>{neg.matchType?.replace(/_/g, ' ')}</code>
+            {neg.triggeringMetrics?.length > 0 && (
+                <ul style={detailStyles.metricList}>
+                    {neg.triggeringMetrics.map((metric: any, mIndex: number) => (
+                        <li key={mIndex} style={detailStyles.metricListItem}>
+                            {metric.metric} ({metric.timeWindow} days) was <strong>{formatMetricValue(metric.value, metric.metric)}</strong> (Condition: {metric.condition})
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </>
+    );
+
+    const renderCampaignActions = (campaignId: string, campaignData: any) => {
+        const { changes = [], newNegatives = [] } = campaignData;
+        if (changes.length === 0 && newNegatives.length === 0) return null;
+
+        return (
+            <div key={campaignId} style={detailStyles.campaignBlock}>
+                <h4 style={detailStyles.campaignTitle}>Campaign: {campaignData.campaignName || campaignId}</h4>
+                <ul style={detailStyles.actionList}>
+                    {changes.map((change: any, i: number) => <li key={`c-${i}`} style={detailStyles.actionItem}>{renderChange(change)}</li>)}
+                    {newNegatives.map((neg: any, i: number) => <li key={`n-${i}`} style={detailStyles.actionItem}>{renderNegative(neg)}</li>)}
+                </ul>
+            </div>
+        );
+    };
+    
+    const hasCampaignActions = actions_by_campaign && Object.values(actions_by_campaign).some((cd: any) => (cd.changes?.length > 0 || cd.newNegatives?.length > 0));
+    const hasOtherDetails = Object.keys(otherDetails).length > 0 && !(Object.keys(otherDetails).length === 1 && otherDetails.data_date_range);
+
+    if (!hasCampaignActions && !hasOtherDetails) {
+        return <div style={detailStyles.container}><p>No specific actions were recorded for this run.</p></div>;
+    }
+
+    return (
+        <div style={detailStyles.container}>
+            {hasCampaignActions && Object.entries(actions_by_campaign).map(([id, data]) => renderCampaignActions(id, data as any))}
+            {hasOtherDetails && <pre style={detailStyles.pre}>{JSON.stringify(otherDetails, null, 2)}</pre>}
+        </div>
+    );
+};
+
+
 interface LogsTabProps {
     logs: any[];
     loading: boolean;
@@ -100,9 +199,7 @@ export const LogsTab = ({ logs, loading, expandedLogId, setExpandedLogId }: Logs
                                     <tr>
                                         <td colSpan={5} style={{ padding: '15px 25px', backgroundColor: '#f8f9fa' }}>
                                             <h4 style={{ margin: '0 0 10px 0' }}>Execution Details</h4>
-                                            <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', backgroundColor: '#e9ecef', padding: '15px', borderRadius: '4px', maxHeight: '300px', overflowY: 'auto', fontSize: '0.8rem' }}>
-                                                {JSON.stringify(log.details, null, 2)}
-                                            </pre>
+                                            <ExecutionDetails details={log.details} />
                                         </td>
                                     </tr>
                                 )}

@@ -10,8 +10,8 @@ const styles: { [key: string]: React.CSSProperties } = {
     overflowX: 'auto',
   },
   logTable: { width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' },
-  th: { textAlign: 'left', padding: '8px', borderBottom: '1px solid var(--border-color)' },
-  td: { padding: '8px', borderBottom: '1px solid var(--border-color)'},
+  th: { textAlign: 'left', padding: '12px 15px', borderBottom: '2px solid var(--border-color)', backgroundColor: '#f8f9fa', fontWeight: 600 },
+  td: { padding: '12px 15px', borderBottom: '1px solid var(--border-color)', verticalAlign: 'top' },
 };
 
 const getStatusStyle = (status: string): React.CSSProperties => {

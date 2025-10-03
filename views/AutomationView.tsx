@@ -18,6 +18,7 @@ const styles: { [key: string]: React.CSSProperties } = {
   primaryButton: { padding: '10px 20px', backgroundColor: 'var(--primary-color)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '1rem' },
 };
 
+// Default rule generation logic restored from the previous version
 const getDefaultRuleConfig = () => ({
     conditionGroups: [],
     frequency: { unit: 'hours' as 'minutes' | 'hours' | 'days', value: 1 },
@@ -88,7 +89,7 @@ export function AutomationView() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState({ rules: true, logs: true });
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingRule, setEditingRule] = useState<AutomationRule | null>(null);
+  const [editingRule, setEditingRule] = useState<AutomationRule | Partial<AutomationRule> | null>(null);
   const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
 
   const fetchRules = useCallback(async () => {
@@ -234,7 +235,7 @@ export function AutomationView() {
       {isModalOpen && activeTab && 'type' in activeTab && activeTab.type && (
           <RuleBuilderModal 
               rule={editingRule} 
-              modalTitle={editingRule && editingRule.id ? `Edit ${activeTab.label} Rule` : `Create New ${activeTab.label} Rule`}
+              modalTitle={editingRule && 'id' in editingRule ? `Edit ${activeTab.label} Rule` : `Create New ${activeTab.label} Rule`}
               onClose={() => setIsModalOpen(false)}
               onSave={handleSaveRule}
               bidAdjustmentRules={bidAdjustmentRules}

@@ -280,7 +280,7 @@ interface AutomationLog {
 interface CampaignTableProps {
     campaigns: CampaignWithMetrics[];
     onUpdateCampaign: (campaignId: number, update: { state?: CampaignState; budget?: { amount: number } }) => void;
-    onEditRules: (campaignId: number, ruleType: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION' | 'SEARCH_TERM_HARVESTING') => void;
+    onEditRules: (campaignId: number, ruleType: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION' | 'SEARCH_TERM_HARVESTING' | 'AI_SEARCH_TERM_NEGATION') => void;
     sortConfig: { key: SortableKeys; direction: 'ascending' | 'descending' } | null;
     onRequestSort: (key: SortableKeys) => void;
     expandedCampaignId: number | null;
@@ -309,6 +309,7 @@ export function CampaignTable({
 
     const bidAdjustmentRules = useMemo(() => automationRules.filter(r => r.rule_type === 'BID_ADJUSTMENT'), [automationRules]);
     const searchTermRules = useMemo(() => automationRules.filter(r => r.rule_type === 'SEARCH_TERM_AUTOMATION'), [automationRules]);
+    const aiSearchTermRules = useMemo(() => automationRules.filter(r => r.rule_type === 'AI_SEARCH_TERM_NEGATION'), [automationRules]);
     const searchTermHarvestingRules = useMemo(() => automationRules.filter(r => r.rule_type === 'SEARCH_TERM_HARVESTING'), [automationRules]);
     const budgetAccelerationRules = useMemo(() => automationRules.filter(r => r.rule_type === 'BUDGET_ACCELERATION'), [automationRules]);
 
@@ -325,12 +326,13 @@ export function CampaignTable({
         { id: 'roas', label: 'RoAS', isSortable: true },
         { id: 'bidAdjustmentRule', label: 'Bid Adjustment Rule', isSortable: false },
         { id: 'searchTermRule', label: 'Search Term Rule', isSortable: false },
+        { id: 'aiSearchTermRule', label: 'AI Search Term Rule', isSortable: false },
         { id: 'searchTermHarvestingRule', label: 'Search Term Harvesting', isSortable: false },
         { id: 'budgetAccelerationRule', label: 'Budget Acceleration Rule', isSortable: false },
     ], []);
 
     const initialWidths = useMemo(() => [
-        300, 100, 120, 120, 100, 100, 110, 100, 100, 100, 220, 220, 220, 220
+        300, 100, 120, 120, 100, 100, 110, 100, 100, 100, 220, 220, 220, 220, 220
     ], []);
 
     const { widths, getHeaderProps, resizingColumnIndex } = useResizableColumns(initialWidths);
@@ -596,6 +598,7 @@ export function CampaignTable({
                         campaigns.map(campaign => {
                             const currentBidRules = bidAdjustmentRules.filter(r => r.scope.campaignIds?.some(id => String(id) === String(campaign.campaignId)));
                             const currentSearchTermRules = searchTermRules.filter(r => r.scope.campaignIds?.some(id => String(id) === String(campaign.campaignId)));
+                            const currentAiSearchTermRules = aiSearchTermRules.filter(r => r.scope.campaignIds?.some(id => String(id) === String(campaign.campaignId)));
                             const currentHarvestingRules = searchTermHarvestingRules.filter(r => r.scope.campaignIds?.some(id => String(id) === String(campaign.campaignId)));
                             const currentBudgetRules = budgetAccelerationRules.filter(r => r.scope.campaignIds?.some(id => String(id) === String(campaign.campaignId)));
 
@@ -656,6 +659,20 @@ export function CampaignTable({
                                              <div style={styles.ruleTagContainer}>
                                                 {currentSearchTermRules.length > 0 ? (
                                                     currentSearchTermRules.map(rule => (
+                                                        <span key={rule.id} style={styles.ruleTag} title={rule.name}>{rule.name}</span>
+                                                    ))
+                                                ) : (
+                                                    <span style={styles.noRuleText}>-- No Rule --</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td style={styles.td}>
+                                         <div style={styles.ruleCellContainer}>
+                                            <button onClick={() => onEditRules(campaign.campaignId, 'AI_SEARCH_TERM_NEGATION')} title="Edit Rules" style={styles.editRuleButton}>✏️</button>
+                                             <div style={styles.ruleTagContainer}>
+                                                {currentAiSearchTermRules.length > 0 ? (
+                                                    currentAiSearchTermRules.map(rule => (
                                                         <span key={rule.id} style={styles.ruleTag} title={rule.name}>{rule.name}</span>
                                                     ))
                                                 ) : (

@@ -131,7 +131,7 @@ const formatDateForQuery = (d: Date) => {
     return `${year}-${month}-${day}`;
 };
 
-type EditableRuleType = 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION' | 'SEARCH_TERM_HARVESTING';
+type EditableRuleType = 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION' | 'SEARCH_TERM_HARVESTING' | 'AI_SEARCH_TERM_NEGATION';
 
 const RuleEditModal = ({ isOpen, onClose, campaign, allRules, onSave }: { isOpen: boolean, onClose: () => void, campaign: {id: number; name: string; type: EditableRuleType} | null, allRules: AutomationRule[], onSave: (campaignId: number, initialIds: Set<number>, newIds: Set<number>) => void }) => {
     if (!isOpen || !campaign) return null;
@@ -161,7 +161,8 @@ const RuleEditModal = ({ isOpen, onClose, campaign, allRules, onSave }: { isOpen
         'BID_ADJUSTMENT': 'Bid Adjustment',
         'SEARCH_TERM_AUTOMATION': 'Search Term',
         'BUDGET_ACCELERATION': 'Budget Acceleration',
-        'SEARCH_TERM_HARVESTING': 'Search Term Harvesting'
+        'SEARCH_TERM_HARVESTING': 'Search Term Harvesting',
+        'AI_SEARCH_TERM_NEGATION': 'AI Search Term Negation'
     }[campaign.type];
 
     return (
@@ -230,6 +231,7 @@ export function PPCManagementView() {
     const [bulkAction, setBulkAction] = useState<'none' | 'add' | 'remove'>('none');
     const [bulkSelectedBidRules, setBulkSelectedBidRules] = useState<string[]>([]);
     const [bulkSelectedSearchTermRules, setBulkSelectedSearchTermRules] = useState<string[]>([]);
+    const [bulkSelectedAiSearchTermRules, setBulkSelectedAiSearchTermRules] = useState<string[]>([]);
     const [bulkSelectedHarvestingRules, setBulkSelectedHarvestingRules] = useState<string[]>([]);
     const [bulkSelectedBudgetRules, setBulkSelectedBudgetRules] = useState<string[]>([]);
 
@@ -617,6 +619,7 @@ export function PPCManagementView() {
     
     const bidAdjustmentRules = useMemo(() => profileFilteredRules.filter(r => r.rule_type === 'BID_ADJUSTMENT'), [profileFilteredRules]);
     const searchTermRules = useMemo(() => profileFilteredRules.filter(r => r.rule_type === 'SEARCH_TERM_AUTOMATION'), [profileFilteredRules]);
+    const aiSearchTermRules = useMemo(() => profileFilteredRules.filter(r => r.rule_type === 'AI_SEARCH_TERM_NEGATION'), [profileFilteredRules]);
     const searchTermHarvestingRules = useMemo(() => profileFilteredRules.filter(r => r.rule_type === 'SEARCH_TERM_HARVESTING'), [profileFilteredRules]);
     const budgetAccelerationRules = useMemo(() => profileFilteredRules.filter(r => r.rule_type === 'BUDGET_ACCELERATION'), [profileFilteredRules]);
 
@@ -633,6 +636,7 @@ export function PPCManagementView() {
         const updates: Promise<any>[] = [];
         const allRelevantRules = editingCampaign?.type === 'BID_ADJUSTMENT' ? bidAdjustmentRules : 
                                  editingCampaign?.type === 'SEARCH_TERM_AUTOMATION' ? searchTermRules :
+                                 editingCampaign?.type === 'AI_SEARCH_TERM_NEGATION' ? aiSearchTermRules :
                                  editingCampaign?.type === 'BUDGET_ACCELERATION' ? budgetAccelerationRules :
                                  searchTermHarvestingRules;
 
@@ -670,7 +674,7 @@ export function PPCManagementView() {
     const handleBulkApplyRules = async () => {
         if (selectedCampaignIds.size === 0) return alert('Please select at least one campaign.');
         if (bulkAction === 'none') return alert('Please select a bulk action.');
-        const allSelectedRules = [...bulkSelectedBidRules, ...bulkSelectedSearchTermRules, ...bulkSelectedHarvestingRules, ...bulkSelectedBudgetRules];
+        const allSelectedRules = [...bulkSelectedBidRules, ...bulkSelectedSearchTermRules, ...bulkSelectedAiSearchTermRules, ...bulkSelectedHarvestingRules, ...bulkSelectedBudgetRules];
         if (allSelectedRules.length === 0) return alert('Please select at least one rule to apply.');
 
         setLoading(prev => ({ ...prev, rules: true }));
@@ -702,6 +706,7 @@ export function PPCManagementView() {
             setBulkAction('none');
             setBulkSelectedBidRules([]);
             setBulkSelectedSearchTermRules([]);
+            setBulkSelectedAiSearchTermRules([]);
             setBulkSelectedHarvestingRules([]);
             setBulkSelectedBudgetRules([]);
         } catch (err) {
@@ -778,6 +783,12 @@ export function PPCManagementView() {
                                     <label style={{fontWeight:500}}>Search Term Rules:</label>
                                     <select multiple value={bulkSelectedSearchTermRules} onChange={e => setBulkSelectedSearchTermRules(Array.from(e.target.selectedOptions, option => option.value))} style={styles.multiSelect} disabled={loading.rules}>
                                         {searchTermRules.map(rule => (<option key={rule.id} value={rule.id}>{rule.name}</option>))}
+                                    </select>
+                                </div>
+                                 <div style={styles.controlGroup}>
+                                    <label style={{fontWeight:500}}>AI Search Term Rules:</label>
+                                    <select multiple value={bulkSelectedAiSearchTermRules} onChange={e => setBulkSelectedAiSearchTermRules(Array.from(e.target.selectedOptions, option => option.value))} style={styles.multiSelect} disabled={loading.rules}>
+                                        {aiSearchTermRules.map(rule => (<option key={rule.id} value={rule.id}>{rule.name}</option>))}
                                     </select>
                                 </div>
                                  <div style={styles.controlGroup}>

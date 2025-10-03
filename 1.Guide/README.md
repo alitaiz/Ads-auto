@@ -41,8 +41,8 @@
     -   Kích hoạt HTTPS: `6.SECURITY_SSL_CERTBOT_GUIDE.md`
     -   Thêm lớp mật khẩu: `5.SECURITY_NGINX_BASIC_AUTH_GUIDE.md`
 
-5.  **(MỚI) Chiến lược Khởi chạy PPC cho Sản phẩm Mới**
-    -   Xem file: `PPC_LAUNCH_STRATEGY.md`
+5.  **(MỚI) Kế hoạch triển khai Phủ định Search Term bằng AI**
+    -   Xem file: `15.AI_SEARCH_TERM_NEGATION_IMPLEMENTATION_PLAN.md`
 
 ## Chạy trên Máy tính Cá nhân (Local Development)
 

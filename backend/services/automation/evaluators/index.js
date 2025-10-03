@@ -5,6 +5,7 @@ import { evaluateSbSdBidAdjustmentRule } from './sbSdBidAdjustment.js';
 import { evaluateSearchTermAutomationRule } from './searchTermAutomation.js';
 import { evaluateBudgetAccelerationRule } from './budgetAcceleration.js';
 import { evaluateSearchTermHarvestingRule } from './searchTermHarvesting.js';
+import { evaluateAiSearchTermNegationRule } from './aiSearchTermNegation.js';
 
 export {
   evaluatePriceAdjustmentRule,
@@ -13,4 +14,5 @@ export {
   evaluateSearchTermAutomationRule,
   evaluateBudgetAccelerationRule,
   evaluateSearchTermHarvestingRule,
+  evaluateAiSearchTermNegationRule,
 };

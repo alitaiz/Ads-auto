@@ -109,7 +109,7 @@ export interface AutomationConditionGroup {
 export interface AutomationRule {
     id: number;
     name: string;
-    rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION' | 'CAMPAIGN_SCHEDULING' | 'PRICE_ADJUSTMENT' | 'SEARCH_TERM_HARVESTING';
+    rule_type: 'BID_ADJUSTMENT' | 'SEARCH_TERM_AUTOMATION' | 'BUDGET_ACCELERATION' | 'CAMPAIGN_SCHEDULING' | 'PRICE_ADJUSTMENT' | 'SEARCH_TERM_HARVESTING' | 'AI_SEARCH_TERM_NEGATION';
     ad_type?: 'SP' | 'SB' | 'SD';
     config: {
         // A rule is composed of one or more condition groups.
@@ -139,6 +139,8 @@ export interface AutomationRule {
         priceStep?: number;
         priceLimit?: number;
         runAtTime?: string; // "HH:MM" format, optional
+        // For AI_SEARCH_TERM_NEGATION
+        negationScope?: 'AD_GROUP' | 'CAMPAIGN' | 'ACCOUNT_BY_ASIN';
     };
     scope: {
         campaignIds?: (number | string)[];

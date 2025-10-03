@@ -232,3 +232,45 @@ export async function updatePrice(sku, newPrice, sellerId) {
     console.log(`[SP-API] Successfully submitted price update for SKU ${sku}. Status: ${result.status}`);
     return result;
 }
+
+/**
+ * Fetches product title and bullet points for a list of ASINs.
+ * @param {string[]} asinList An array of ASIN strings.
+ * @returns {Promise<Array<{asin: string, title: string, bulletPoints: string[]}>>}
+ */
+export async function getProductTextAttributes(asinList) {
+    const marketplaceId = process.env.SP_API_MARKETPLACE_ID;
+    if (!marketplaceId) {
+        throw new Error('SP_API_MARKETPLACE_ID is not configured.');
+    }
+    const detailsMap = new Map();
+    asinList.forEach(asin => detailsMap.set(asin, { asin, title: '', bulletPoints: [] }));
+
+    try {
+        const catalogResponse = await spApiRequest({
+            method: 'get',
+            url: `/catalog/2022-04-01/items`,
+            params: {
+                marketplaceIds: marketplaceId,
+                identifiers: asinList.join(','),
+                identifiersType: 'ASIN',
+                includedData: 'attributes' // Only need attributes for text
+            }
+        });
+
+        if (catalogResponse?.items) {
+            for (const item of catalogResponse.items) {
+                const detail = detailsMap.get(item.asin);
+                if (detail) {
+                    detail.title = item.attributes?.item_name?.[0]?.value || 'Title Not Found';
+                    detail.bulletPoints = item.attributes?.bullet_point?.map(bp => bp.value) || [];
+                }
+            }
+        }
+        return Array.from(detailsMap.values());
+    } catch (error) {
+        console.error(`[SP-API Helper] Failed to get product attributes for ASINs: ${asinList.join(',')}`, error);
+        // Return what we have, even if it's just the ASINs with empty details
+        return Array.from(detailsMap.values());
+    }
+}

@@ -7,7 +7,8 @@ import {
     evaluateBudgetAccelerationRule, 
     evaluateSbSdBidAdjustmentRule, 
     evaluatePriceAdjustmentRule, 
-    evaluateSearchTermHarvestingRule 
+    evaluateSearchTermHarvestingRule,
+    evaluateAiSearchTermNegationRule
 } from './evaluators/index.js';
 import { isRuleDue, logAction, getLocalDateString } from './utils.js';
 import { amazonAdsApiRequest } from '../../helpers/amazon-api.js';
@@ -58,15 +59,19 @@ const processRule = async (rule) => {
             finalResult = await evaluatePriceAdjustmentRule(rule);
         } else {
             const campaignIds = rule.scope?.campaignIds || [];
-            if (campaignIds.length === 0) {
+            if (campaignIds.length === 0 && rule.rule_type !== 'AI_SEARCH_TERM_NEGATION') { // AI rule can run on all campaigns
                 console.log(`[RulesEngine] Skipping rule "${rule.name}" as it has an empty campaign scope.`);
                 await pool.query('UPDATE automation_rules SET last_run_at = NOW() WHERE id = $1', [rule.id]);
                 return;
             }
 
-            const performanceDataResult = await getPerformanceData(rule, campaignIds);
-            const performanceMap = performanceDataResult.performanceMap;
-            dataDateRange = performanceDataResult.dataDateRange;
+            // For AI negation, performance data is fetched inside the evaluator
+            let performanceMap = new Map();
+            if (rule.rule_type !== 'AI_SEARCH_TERM_NEGATION') {
+                 const performanceDataResult = await getPerformanceData(rule, campaignIds);
+                 performanceMap = performanceDataResult.performanceMap;
+                 dataDateRange = performanceDataResult.dataDateRange;
+            }
 
             const cooldownConfig = rule.config.cooldown || { value: 0 };
             let throttledEntities = new Set();
@@ -78,7 +83,7 @@ const processRule = async (rule) => {
                 throttledEntities = new Set(throttleCheckResult.rows.map(r => r.entity_id));
             }
 
-            if (performanceMap.size === 0) {
+            if (performanceMap.size === 0 && rule.rule_type !== 'AI_SEARCH_TERM_NEGATION') {
                 finalResult = { summary: 'No performance data found for the specified scope.', details: { actions_by_campaign: {} }, actedOnEntities: [] };
             } else if (rule.rule_type === 'BID_ADJUSTMENT') {
                 if (rule.ad_type === 'SB' || rule.ad_type === 'SD') {
@@ -92,6 +97,9 @@ const processRule = async (rule) => {
                 finalResult = await evaluateBudgetAccelerationRule(rule, performanceMap);
             } else if (rule.rule_type === 'SEARCH_TERM_HARVESTING') {
                 finalResult = await evaluateSearchTermHarvestingRule(rule, performanceMap, throttledEntities);
+            } else if (rule.rule_type === 'AI_SEARCH_TERM_NEGATION') {
+                finalResult = await evaluateAiSearchTermNegationRule(rule, null, throttledEntities); // `performanceData` is fetched internally
+                dataDateRange = finalResult.details.dataDateRange;
             } else {
                 finalResult = { summary: 'Rule type not recognized.', details: { actions_by_campaign: {} }, actedOnEntities: [] };
             }

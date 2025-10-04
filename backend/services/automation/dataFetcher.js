@@ -36,6 +36,25 @@ const paginatedPostRequest = async (profileId, url, body, headers, resultsKey) =
     return allResults;
 };
 
+/**
+ * Maps an auto-targeting expression from the API to a human-readable name.
+ * @param {object[]} expression - The expression array from a targeting clause object.
+ * @returns {string} The human-readable name for the target.
+ */
+const getAutoTargetName = (expression) => {
+    if (!expression || !expression[0] || !expression[0].type) {
+        return 'Unknown Target';
+    }
+    switch (expression[0].type) {
+        case 'QUERY_HIGH_REL_MATCHES': return 'Close match';
+        case 'QUERY_BROAD_REL_MATCHES': return 'Loose match';
+        case 'ASIN_SUBSTITUTE_RELATED': return 'Substitutes';
+        case 'ASIN_ACCESSORY_RELATED': return 'Complements';
+        // Fallback for manual product targets (e.g., ASIN_SAME_AS) which have a 'value'
+        default: return expression[0].value || 'Unknown Target';
+    }
+};
+
 
 /**
  * Fetches all active keywords and targets for a given list of campaign IDs.
@@ -112,7 +131,7 @@ const getAllEntitiesForCampaigns = async (profileId, campaignIds) => {
         allEntities.push({
             entityId: t.targetId.toString(),
             entityType: 'target',
-            entityText: t.expression?.[0]?.value || 'Unknown Target',
+            entityText: getAutoTargetName(t.expression),
             matchType: 'TARGETING_EXPRESSION',
             campaignId: adGroupToCampaignMap.get(t.adGroupId.toString()),
             adGroupId: t.adGroupId.toString(),
@@ -205,7 +224,10 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
                 SELECT 
                     report_date AS performance_date, 
                     keyword_id::text AS entity_id_text, 
-                    COALESCE(keyword_text, targeting) AS entity_text,
+                    CASE
+                        WHEN keyword_text = '*' THEN targeting
+                        ELSE COALESCE(keyword_text, targeting)
+                    END AS entity_text,
                     match_type, 
                     campaign_id::text AS campaign_id_text, 
                     campaign_name,
@@ -225,21 +247,28 @@ const getBidAdjustmentPerformanceData = async (rule, campaignIds, maxLookbackDay
         }
         if (missingDatesForStream.length > 0) {
             const streamQuery = `
-                SELECT ((event_data->>'time_window_start')::timestamptz AT TIME ZONE '${REPORTING_TIMEZONE}')::date AS performance_date,
-                       COALESCE(event_data->>'keyword_id', event_data->>'target_id') AS entity_id_text,
-                       COALESCE(event_data->>'keyword_text', event_data->>'targeting') AS entity_text,
-                       (event_data->>'match_type') AS match_type, (event_data->>'campaign_id') AS campaign_id_text,
-                       (event_data->>'ad_group_id') AS ad_group_id_text,
-                       SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'impressions')::bigint ELSE 0 END) AS impressions,
-                       SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END) AS spend,
-                       SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END) AS clicks,
-                       SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributed_sales_1d')::numeric ELSE 0 END) AS sales,
-                       SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributed_conversions_1d')::bigint ELSE 0 END) AS orders
+                SELECT
+                    ((event_data->>'time_window_start')::timestamptz AT TIME ZONE '${REPORTING_TIMEZONE}')::date AS performance_date,
+                    COALESCE(event_data->>'keyword_id', event_data->>'target_id', event_data->>'targetingId') AS entity_id_text,
+                    COALESCE(
+                        NULLIF(event_data->>'keyword_text', '*'),
+                        NULLIF(event_data->>'keywordText', '*'),
+                        event_data->>'targeting_text',
+                        event_data->>'targetingText'
+                    ) AS entity_text,
+                    COALESCE(event_data->>'match_type', event_data->>'matchType') AS match_type,
+                    COALESCE(event_data->>'campaign_id', event_data->>'campaignId') AS campaign_id_text,
+                    COALESCE(event_data->>'ad_group_id', event_data->>'adGroupId') AS ad_group_id_text,
+                    SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'impressions')::bigint ELSE 0 END) AS impressions,
+                    SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'cost')::numeric ELSE 0 END) AS spend,
+                    SUM(CASE WHEN event_type = 'sp-traffic' THEN (event_data->>'clicks')::bigint ELSE 0 END) AS clicks,
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributed_sales_1d')::numeric ELSE 0 END) AS sales,
+                    SUM(CASE WHEN event_type = 'sp-conversion' THEN (event_data->>'attributed_conversions_1d')::bigint ELSE 0 END) AS orders
                 FROM raw_stream_events
                 WHERE event_type IN ('sp-traffic', 'sp-conversion')
                   AND ((event_data->>'time_window_start')::timestamptz AT TIME ZONE '${REPORTING_TIMEZONE}')::date = ANY($1::date[])
-                  AND COALESCE(event_data->>'keyword_id', event_data->>'target_id') IS NOT NULL
-                  AND (event_data->>'campaign_id') = ANY($2::text[])
+                  AND COALESCE(event_data->>'keyword_id', event_data->>'target_id', event_data->>'targetingId') IS NOT NULL
+                  AND COALESCE(event_data->>'campaign_id', event_data->>'campaignId') = ANY($2::text[])
                 GROUP BY 1, 2, 3, 4, 5, 6;
             `;
             const streamResult = await pool.query(streamQuery, [missingDatesForStream, campaignIds.map(String)]);
@@ -498,3 +527,4 @@ export const getPerformanceData = async (rule, campaignIds) => {
     console.log(`[RulesEngine DBG] Aggregated daily data for ${result.performanceMap.size} unique entities for rule "${rule.name}".`);
     return result;
 };
+```

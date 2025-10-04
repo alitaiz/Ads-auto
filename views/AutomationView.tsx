@@ -41,8 +41,8 @@ const getDefaultRule = (ruleType: AutomationRule['rule_type'], adType: 'SP' | 'S
         case 'AI_SEARCH_TERM_NEGATION':
             conditionGroups = [{
                 conditions: [
-                    { metric: 'spend', timeWindow: 3, operator: '>', value: 0 },
-                    { metric: 'orders', timeWindow: 3, operator: '=', value: 0 }
+                    { metric: 'spend', timeWindow: 2, operator: '>', value: 0 },
+                    { metric: 'orders', timeWindow: 2, operator: '=', value: 0 }
                 ],
                 action: {} // No action needed here, it's implicit
             }];

@@ -255,8 +255,17 @@ export function RuleBuilderModal({ rule, modalTitle, onClose, onSave, bidAdjustm
                                                         {rule_type === 'BUDGET_ACCELERATION' ? (<> <option value="roas">ROAS</option> <option value="acos">ACoS</option> <option value="sales">Sales</option> <option value="orders">Orders</option> <option value="budgetUtilization">Budget Utilization %</option> </>) : (<> <option value="spend">Spend</option> <option value="sales">Sales</option> <option value="acos">ACOS</option> <option value="orders">Orders</option> <option value="clicks">Clicks</option> <option value="impressions">Impressions</option> </>)}
                                                     </select>
                                                     <span style={styles.conditionText}>in last</span>
-                                                    {rule_type === 'BUDGET_ACCELERATION' ? <input style={{...styles.conditionInput, width: '60px', textAlign: 'center'}} value="Today" disabled /> : <input type="number" min="1" max="90" style={{...styles.conditionInput, width: '60px'}} value={cond.timeWindow} onChange={e => handleConditionChange(groupIndex, condIndex, 'timeWindow', Number(e.target.value))} required />}
-                                                    <span style={styles.conditionText}>{rule_type !== 'BUDGET_ACCELERATION' && 'days'}</span>
+                                                    {rule_type === 'BUDGET_ACCELERATION' ? (
+                                                        <input style={{...styles.conditionInput, width: '60px', textAlign: 'center'}} value="Today" disabled />
+                                                    ) : rule_type === 'AI_SEARCH_TERM_NEGATION' ? (
+                                                        <input type="number" style={{...styles.conditionInput, width: '60px', backgroundColor: '#e9ecef', cursor: 'not-allowed'}} value={cond.timeWindow} disabled title="The lookback period for AI Negation is fixed to D-2 (data from 2 days ago)." />
+                                                    ) : (
+                                                        <input type="number" min="1" max="90" style={{...styles.conditionInput, width: '60px'}} value={cond.timeWindow} onChange={e => handleConditionChange(groupIndex, condIndex, 'timeWindow', Number(e.target.value))} required />
+                                                    )}
+                                                    <span style={styles.conditionText}>
+                                                        {rule_type !== 'BUDGET_ACCELERATION' && 'days'}
+                                                        {rule_type === 'AI_SEARCH_TERM_NEGATION' && ' (fixed at D-2)'}
+                                                    </span>
                                                     <select style={{...styles.conditionInput, width: '60px'}} value={cond.operator} onChange={e => handleConditionChange(groupIndex, condIndex, 'operator', e.target.value)}><option value=">">&gt;</option> <option value="<">&lt;</option> <option value="=">=</option></select>
                                                     {renderConditionInput(groupIndex, cond, condIndex)}
                                                     <button type="button" onClick={() => removeCondition(groupIndex, condIndex)} style={styles.deleteButton}>&times;</button>

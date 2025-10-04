@@ -122,10 +122,10 @@ export const evaluateAiSearchTermNegationRule = async (rule, _, throttledEntitie
     const negativeTargetsToCreate = [];
     const actedOnEntities = new Set();
     const referenceDate = new Date(getLocalDateString('America/Los_Angeles'));
-    referenceDate.setDate(referenceDate.getDate() - 3); // D-3 Data
+    referenceDate.setDate(referenceDate.getDate() - 2); // D-2 Data
     const reportDateStr = referenceDate.toISOString().split('T')[0];
 
-    // 1. Fetch D-3 Performance Data
+    // 1. Fetch D-2 Performance Data
     const { rows: performanceRows } = await pool.query(
         `SELECT
             report_date, customer_search_term, campaign_id, ad_group_id, asin,

@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS automation_rules (
 -- Table to log all actions taken by the automation engine
 CREATE TABLE IF NOT EXISTS automation_logs (
     id SERIAL PRIMARY KEY,
-    rule_id INTEGER REFERENCES automation_rules(id) ON DELETE SET NULL,
+    rule_id INTEGER, -- Removed the direct foreign key to allow multiple rule sources
+    rule_source VARCHAR(50) NOT NULL DEFAULT 'automation_rules', -- 'automation_rules' or 'campaign_creation_rules'
     run_at TIMESTAMPTZ DEFAULT NOW(),
     status VARCHAR(50) NOT NULL, -- 'SUCCESS', 'FAILURE', 'NO_ACTION'
     summary TEXT, -- e.g., "Adjusted 5 keyword bids." or "No actions needed."
@@ -59,6 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_automation_rules_ad_type ON automation_rules(ad_t
 CREATE INDEX IF NOT EXISTS idx_automation_rules_active ON automation_rules(is_active);
 CREATE INDEX IF NOT EXISTS idx_automation_logs_rule_id ON automation_logs(rule_id);
 CREATE INDEX IF NOT EXISTS idx_automation_logs_run_at ON automation_logs(run_at);
+CREATE INDEX IF NOT EXISTS idx_automation_logs_rule_source ON automation_logs(rule_id, rule_source);
 
 
 -- Function and Trigger to update the 'updated_at' column automatically

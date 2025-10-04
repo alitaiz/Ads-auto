@@ -96,7 +96,7 @@ router.get('/automation/logs', async (req, res) => {
   try {
     let queryText = `
         SELECT r.name as rule_name, l.* FROM automation_logs l
-        LEFT JOIN automation_rules r ON l.rule_id = r.id
+        LEFT JOIN automation_rules r ON l.rule_id = r.id AND l.rule_source = 'automation_rules'
     `;
     const conditions = [];
     const params = [];
@@ -219,6 +219,25 @@ router.get('/automation/campaign-creation-rules', async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch schedules' });
     }
 });
+
+// GET history for a specific campaign creation rule
+router.get('/automation/campaign-creation-rules/:id/history', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const { rows } = await pool.query(
+            `SELECT run_at, status, details 
+             FROM automation_logs 
+             WHERE rule_id = $1 AND rule_source = 'campaign_creation_rules' 
+             ORDER BY run_at DESC`,
+            [id]
+        );
+        res.json(rows);
+    } catch (err) {
+        console.error(`Failed to fetch history for campaign creation rule ${id}`, err);
+        res.status(500).json({ error: 'Failed to fetch history' });
+    }
+});
+
 
 // POST a new campaign creation rule
 router.post('/automation/campaign-creation-rules', async (req, res) => {

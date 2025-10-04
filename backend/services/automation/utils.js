@@ -13,16 +13,14 @@ export const logAction = async (rule, status, summary, details = {}) => {
     const replacer = (key, value) => (typeof value === 'bigint' ? value.toString() : value);
     const detailsJson = JSON.stringify(details, replacer);
 
-    // Determine the correct table based on the presence of rule_type.
-    // This allows logging for both standard automation and campaign creation rules.
-    const tableName = rule.rule_type ? 'automation_logs' : 'automation_logs';
-    const ruleIdColumn = rule.rule_type ? 'rule_id' : 'rule_id';
+    // Determine the source table based on the rule object structure
+    const rule_source = rule.rule_type ? 'automation_rules' : 'campaign_creation_rules';
 
     await pool.query(
-      `INSERT INTO ${tableName} (${ruleIdColumn}, status, summary, details) VALUES ($1, $2, $3, $4)`,
-      [rule.id, status, summary, detailsJson]
+      `INSERT INTO automation_logs (rule_id, rule_source, status, summary, details) VALUES ($1, $2, $3, $4, $5)`,
+      [rule.id, rule_source, status, summary, detailsJson]
     );
-    console.log(`[RulesEngine] Logged action for rule "${rule.name}": ${summary}`);
+    console.log(`[RulesEngine] Logged action for rule "${rule.name}" (Source: ${rule_source}): ${summary}`);
   } catch (e) {
     console.error(`[RulesEngine] FATAL: Could not write to automation_logs table for rule ${rule.id}.`, e);
   }

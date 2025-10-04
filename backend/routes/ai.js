@@ -561,7 +561,7 @@ router.post('/ai/chat-gpt', async (req, res) => {
         messages.push({ role: 'user', content: question });
         
         const stream = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: 'gpt-5',
             messages: messages,
             stream: true,
         });

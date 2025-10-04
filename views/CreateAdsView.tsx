@@ -109,6 +109,71 @@ export function CreateAdsView() {
     const [historyModal, setHistoryModal] = useState<{ isOpen: boolean; schedule: CampaignCreationRule | null; logs: any[]; loading: boolean }>({ isOpen: false, schedule: null, logs: [], loading: false });
 
     const profileId = useMemo(() => localStorage.getItem('selectedProfileId'), []);
+
+    // Effect to inject CSS for the toggle switch
+    useEffect(() => {
+        const styleId = 'create-ads-view-toggle-styles';
+        if (document.getElementById(styleId)) return; // Don't add styles if they already exist
+
+        const styleSheet = document.createElement("style");
+        styleSheet.id = styleId;
+        styleSheet.innerText = `
+          .switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 28px;
+          }
+          .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+          }
+          .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+          }
+          .slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+          }
+          input:checked + .slider {
+            background-color: var(--success-color, #28a745);
+          }
+          input:focus + .slider {
+            box-shadow: 0 0 1px var(--primary-color, #007185);
+          }
+          input:checked + .slider:before {
+            transform: translateX(22px);
+          }
+          .slider.round {
+            border-radius: 28px;
+          }
+          .slider.round:before {
+            border-radius: 50%;
+          }
+        `;
+        document.head.appendChild(styleSheet);
+
+        return () => {
+            const styleElement = document.getElementById(styleId);
+            if (styleElement) {
+                document.head.removeChild(styleElement);
+            }
+        };
+    }, []);
     
     const fetchSchedulesAndRules = useCallback(async () => {
         if (!profileId) {
@@ -245,7 +310,7 @@ export function CreateAdsView() {
         setFormData(prev => {
             const keys = path.split('.');
             let current = { ...prev };
-            let temp = current;
+            let temp = current as any;
             for (let i = 0; i < keys.length - 1; i++) {
                 temp = temp[keys[i]];
             }

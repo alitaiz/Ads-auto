@@ -153,10 +153,11 @@ export const checkAndRunDueRules = async () => {
     isProcessing = true; // Set the lock
 
     try {
-        // --- Process Standard Automation Rules ---
+        // --- Fetch all potentially due rules ---
         const { rows: activeRules } = await pool.query('SELECT * FROM automation_rules WHERE is_active = TRUE');
+        const { rows: activeCreationRules } = await pool.query('SELECT * FROM campaign_creation_rules WHERE is_active = TRUE');
         
-        const normalizedRules = activeRules.map(rule => {
+        const allDueStandardRules = activeRules.map(rule => {
             if (rule.rule_type === 'PRICE_ADJUSTMENT' && rule.config.runAtTime) {
                 const newRule = JSON.parse(JSON.stringify(rule));
                 if (!newRule.config.frequency) newRule.config.frequency = {};
@@ -166,30 +167,51 @@ export const checkAndRunDueRules = async () => {
                 return newRule;
             }
             return rule;
-        });
+        }).filter(isRuleDue);
 
-        const dueRules = normalizedRules.filter(isRuleDue);
+        const allDueCreationRules = activeCreationRules.filter(isRuleDue);
 
-        if (dueRules.length === 0) {
-            console.log('[RulesEngine] No standard automation rules are due to run.');
-        } else {
-            console.log(`[RulesEngine] Found ${dueRules.length} standard rule(s) to run: ${dueRules.map(r => r.name).join(', ')}`);
-            for (const rule of dueRules) {
-                await processRule(rule);
-            }
-        }
+        // --- Separate high-priority (Budget Acceleration) rules ---
+        const highPriorityRules = allDueStandardRules.filter(rule => rule.rule_type === 'BUDGET_ACCELERATION');
         
-        // --- Process Campaign Creation Rules ---
-        const { rows: activeCreationRules } = await pool.query('SELECT * FROM campaign_creation_rules WHERE is_active = TRUE');
-        const dueCreationRules = activeCreationRules.filter(isRuleDue);
+        // --- All other rules go into the normal sequential queue ---
+        const normalPriorityRules = allDueStandardRules.filter(rule => rule.rule_type !== 'BUDGET_ACCELERATION');
+        const normalPriorityCreationRules = allDueCreationRules;
 
-        if (dueCreationRules.length === 0) {
-            console.log('[RulesEngine] No campaign creation schedules are due to run.');
-        } else {
-            console.log(`[RulesEngine] Found ${dueCreationRules.length} campaign creation schedule(s) to run: ${dueCreationRules.map(r => r.name).join(', ')}`);
-            for (const rule of dueCreationRules) {
-                await processCampaignCreationRule(rule);
+        // --- 1. Process all high-priority rules immediately and concurrently ---
+        if (highPriorityRules.length > 0) {
+            console.log(`[RulesEngine] Found ${highPriorityRules.length} high-priority Budget rule(s) to run immediately.`);
+            const highPriorityPromises = highPriorityRules.map(rule => processRule(rule));
+            await Promise.all(highPriorityPromises);
+        }
+
+        // --- 2. Process ONE normal-priority rule from the sequential queue ---
+        const combinedNormalPriorityQueue = [
+            ...normalPriorityRules,
+            ...normalPriorityCreationRules
+        ];
+
+        if (combinedNormalPriorityQueue.length > 0) {
+            // Sort by last_run_at (nulls first) to run the "oldest" or never-run rule first.
+            combinedNormalPriorityQueue.sort((a, b) => {
+                const timeA = a.last_run_at ? new Date(a.last_run_at).getTime() : 0;
+                const timeB = b.last_run_at ? new Date(b.last_run_at).getTime() : 0;
+                return timeA - timeB;
+            });
+
+            // Select only the first rule from the sorted queue
+            const ruleToProcess = combinedNormalPriorityQueue[0];
+            
+            console.log(`[RulesEngine] ${combinedNormalPriorityQueue.length} normal-priority rule(s) are due. Selecting one to process: "${ruleToProcess.name}" (ID: ${ruleToProcess.id}).`);
+
+            // Check if it's a standard rule or a creation rule by checking for a unique property
+            if (ruleToProcess.rule_type) { // Standard automation rule
+                await processRule(ruleToProcess);
+            } else { // Campaign creation rule
+                await processCampaignCreationRule(ruleToProcess);
             }
+        } else {
+            console.log('[RulesEngine] No normal-priority rules are due to run.');
         }
 
     } catch (e) {

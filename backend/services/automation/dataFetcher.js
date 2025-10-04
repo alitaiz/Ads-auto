@@ -527,4 +527,3 @@ export const getPerformanceData = async (rule, campaignIds) => {
     console.log(`[RulesEngine DBG] Aggregated daily data for ${result.performanceMap.size} unique entities for rule "${rule.name}".`);
     return result;
 };
-```

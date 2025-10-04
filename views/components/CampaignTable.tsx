@@ -256,7 +256,7 @@ interface LogChange {
 interface LogNegative {
     searchTerm: string;
     matchType: string;
-    triggeringMetrics: TriggeringMetric[];
+    triggeringMetrics?: TriggeringMetric[];
 }
 interface DataDateRange {
     report?: { start: string; end: string };
@@ -414,12 +414,12 @@ export function CampaignTable({
             return <span>{log.summary}</span>;
         }
         
+        const timeWindowText = (metric: TriggeringMetric) => 
+            metric.timeWindow === 'TODAY' ? 'Today' : `${metric.timeWindow} days`;
+
         return (
             <ul style={styles.detailsList}>
                 {changes.map((change, index) => {
-                    const timeWindowText = (metric: TriggeringMetric) => 
-                        metric.timeWindow === 'TODAY' ? 'Today' : `${metric.timeWindow} days`;
-
                     // BUDGET ACCELERATION LOG
                     if (typeof change.oldBudget !== 'undefined' && typeof change.newBudget !== 'undefined') {
                         return (
@@ -459,13 +459,15 @@ export function CampaignTable({
                 {newNegatives.map((neg, index) => (
                     <li key={`n-${index}`}>
                          Negated "{neg.searchTerm}" as {neg.matchType?.replace(/_/g, ' ')}
-                         <ul style={styles.metricList}>
-                            {neg.triggeringMetrics.map((metric, mIndex) => (
-                                <li key={mIndex} style={styles.metricListItem}>
-                                    {metric.metric} ({metric.timeWindow} days) was <strong>{formatMetricValue(metric.value, metric.metric)}</strong> (Condition: {metric.condition})
-                                </li>
-                            ))}
-                        </ul>
+                         {neg.triggeringMetrics && neg.triggeringMetrics.length > 0 && (
+                             <ul style={styles.metricList}>
+                                {neg.triggeringMetrics.map((metric, mIndex) => (
+                                    <li key={mIndex} style={styles.metricListItem}>
+                                        {metric.metric} ({timeWindowText(metric)}) was <strong>{formatMetricValue(metric.value, metric.metric)}</strong> (Condition: {metric.condition})
+                                    </li>
+                                ))}
+                            </ul>
+                         )}
                     </li>
                 ))}
             </ul>

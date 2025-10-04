@@ -98,6 +98,8 @@ export interface AutomationRuleAction {
     autoNegate?: boolean;
     applyBidRuleIds?: (number | string)[];
     applyBudgetRuleIds?: (number | string)[];
+    applySearchTermRuleIds?: (number | string)[];
+    applyAiRuleIds?: (number | string)[];
 }
 
 // The structure of a single IF/THEN block within a rule.

@@ -26,11 +26,20 @@ interface SearchTermHarvestingActionFormProps {
     onActionChange: (field: string, value: any) => void;
     bidAdjustmentRules: AutomationRule[];
     budgetAccelerationRules: AutomationRule[];
+    searchTermRules: AutomationRule[];
+    aiSearchTermRules: AutomationRule[];
 }
 
-export const SearchTermHarvestingActionForm = ({ action, onActionChange, bidAdjustmentRules, budgetAccelerationRules }: SearchTermHarvestingActionFormProps) => {
+export const SearchTermHarvestingActionForm = ({ 
+    action, 
+    onActionChange, 
+    bidAdjustmentRules, 
+    budgetAccelerationRules,
+    searchTermRules,
+    aiSearchTermRules
+}: SearchTermHarvestingActionFormProps) => {
     
-    const handleCheckboxChange = (ruleId: number | string, field: 'applyBidRuleIds' | 'applyBudgetRuleIds') => {
+    const handleCheckboxChange = (ruleId: number | string, field: 'applyBidRuleIds' | 'applyBudgetRuleIds' | 'applySearchTermRuleIds' | 'applyAiRuleIds') => {
         const currentIds = (action[field] || []).map(String);
         const ruleIdStr = String(ruleId);
         const newIds = new Set(currentIds);
@@ -117,6 +126,28 @@ export const SearchTermHarvestingActionForm = ({ action, onActionChange, bidAdju
                                     <label htmlFor={`budget-rule-${rule.id}`} style={styles.ruleCheckboxLabel}>{rule.name}</label>
                                 </div>))
                             ) : (<span style={{ color: '#888', fontSize: '0.9rem' }}>No budget acceleration rules available.</span>)}
+                        </div>
+                    </div>
+                    <div style={styles.formGroup}>
+                        <label style={styles.label}>SP Search Term Negation Rules</label>
+                        <div style={styles.ruleCheckboxList}>
+                            {searchTermRules.length > 0 ? ( searchTermRules.map(rule => (
+                                <div key={rule.id} style={styles.ruleCheckboxItem}>
+                                    <input type="checkbox" id={`st-rule-${rule.id}`} checked={(action.applySearchTermRuleIds || []).map(String).includes(String(rule.id))} onChange={() => handleCheckboxChange(rule.id, 'applySearchTermRuleIds')} />
+                                    <label htmlFor={`st-rule-${rule.id}`} style={styles.ruleCheckboxLabel}>{rule.name}</label>
+                                </div>))
+                            ) : (<span style={{ color: '#888', fontSize: '0.9rem' }}>No search term negation rules available.</span>)}
+                        </div>
+                    </div>
+                    <div style={styles.formGroup}>
+                        <label style={styles.label}>SP AI Search Term Negation Rules</label>
+                         <div style={styles.ruleCheckboxList}>
+                            {aiSearchTermRules.length > 0 ? ( aiSearchTermRules.map(rule => (
+                                <div key={rule.id} style={styles.ruleCheckboxItem}>
+                                    <input type="checkbox" id={`ai-rule-${rule.id}`} checked={(action.applyAiRuleIds || []).map(String).includes(String(rule.id))} onChange={() => handleCheckboxChange(rule.id, 'applyAiRuleIds')} />
+                                    <label htmlFor={`ai-rule-${rule.id}`} style={styles.ruleCheckboxLabel}>{rule.name}</label>
+                                </div>))
+                            ) : (<span style={{ color: '#888', fontSize: '0.9rem' }}>No AI negation rules available.</span>)}
                         </div>
                     </div>
                 </div>

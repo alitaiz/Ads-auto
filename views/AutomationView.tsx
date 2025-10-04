@@ -233,6 +233,8 @@ export function AutomationView() {
   const profileId = localStorage.getItem('selectedProfileId');
   const bidAdjustmentRules = useMemo(() => rules.filter(r => r.rule_type === 'BID_ADJUSTMENT' && r.ad_type === 'SP' && r.profile_id === profileId), [rules, profileId]);
   const budgetAccelerationRules = useMemo(() => rules.filter(r => r.rule_type === 'BUDGET_ACCELERATION' && r.ad_type === 'SP' && r.profile_id === profileId), [rules, profileId]);
+  const searchTermRules = useMemo(() => rules.filter(r => r.rule_type === 'SEARCH_TERM_AUTOMATION' && r.ad_type === 'SP' && r.profile_id === profileId), [rules, profileId]);
+  const aiSearchTermRules = useMemo(() => rules.filter(r => r.rule_type === 'AI_SEARCH_TERM_NEGATION' && r.ad_type === 'SP' && r.profile_id === profileId), [rules, profileId]);
 
   return (
     <div style={styles.container}>
@@ -271,6 +273,8 @@ export function AutomationView() {
               onSave={handleSaveRule}
               bidAdjustmentRules={bidAdjustmentRules}
               budgetAccelerationRules={budgetAccelerationRules}
+              searchTermRules={searchTermRules}
+              aiSearchTermRules={aiSearchTermRules}
           />
       )}
     </div>

@@ -40,9 +40,20 @@ interface RuleBuilderModalProps {
     onSave: (rule: AutomationRule) => void;
     bidAdjustmentRules?: AutomationRule[];
     budgetAccelerationRules?: AutomationRule[];
+    searchTermRules?: AutomationRule[];
+    aiSearchTermRules?: AutomationRule[];
 }
 
-export function RuleBuilderModal({ rule, modalTitle, onClose, onSave, bidAdjustmentRules = [], budgetAccelerationRules = [] }: RuleBuilderModalProps) {
+export function RuleBuilderModal({ 
+    rule, 
+    modalTitle, 
+    onClose, 
+    onSave, 
+    bidAdjustmentRules = [], 
+    budgetAccelerationRules = [],
+    searchTermRules = [],
+    aiSearchTermRules = []
+}: RuleBuilderModalProps) {
     const [formData, setFormData] = useState<Partial<AutomationRule>>(JSON.parse(JSON.stringify(rule)));
     
      useEffect(() => {
@@ -163,7 +174,14 @@ export function RuleBuilderModal({ rule, modalTitle, onClose, onSave, bidAdjustm
             case 'SEARCH_TERM_AUTOMATION': return <SearchTermNegationActionForm action={group.action} onActionChange={(f,v) => handleActionChange(index, f, v)} />;
             case 'AI_SEARCH_TERM_NEGATION': return <AISearchTermNegationConfig config={formData.config!} onConfigChange={(f, v) => handleConfigChange(f, v)} />;
             case 'BUDGET_ACCELERATION': return <BudgetAccelerationActionForm action={group.action} onActionChange={(f,v) => handleActionChange(index, f, v)} />;
-            case 'SEARCH_TERM_HARVESTING': return <SearchTermHarvestingActionForm action={group.action} onActionChange={(f,v) => handleActionChange(index, f, v)} bidAdjustmentRules={bidAdjustmentRules} budgetAccelerationRules={budgetAccelerationRules} />;
+            case 'SEARCH_TERM_HARVESTING': return <SearchTermHarvestingActionForm 
+                action={group.action} 
+                onActionChange={(f,v) => handleActionChange(index, f, v)} 
+                bidAdjustmentRules={bidAdjustmentRules} 
+                budgetAccelerationRules={budgetAccelerationRules} 
+                searchTermRules={searchTermRules}
+                aiSearchTermRules={aiSearchTermRules}
+            />;
             default: return <div>Action form for this rule type is not implemented.</div>;
         }
     };

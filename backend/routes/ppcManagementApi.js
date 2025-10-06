@@ -163,7 +163,7 @@ export async function createAutoCampaignSet(profileId, asin, budget, defaultBid,
 /**
  * Creates a structured set of SP Manual campaigns based on a list of search terms/ASINs.
  */
-export async function createManualCampaignSet(profileId, asin, searchTerms, maxKeywords, matchTypes, budget, defaultBid, placementBids, associatedRuleIds = []) {
+export async function createManualCampaignSet(profileId, asin, searchTerms, maxKeywords, matchTypes, budget, defaultBid, placementBids, associatedRuleIds = [], negativeSearchTerms = '', negativeMatchTypes = []) {
     let client;
     const { top, rest, product } = placementBids;
 
@@ -189,6 +189,8 @@ export async function createManualCampaignSet(profileId, asin, searchTerms, maxK
         if (termChunks.length === 0) {
             throw new Error('No search terms provided.');
         }
+        
+        const negativeTermList = negativeSearchTerms.split('\n').map(t => t.trim()).filter(Boolean);
 
         console.log(`[Action:CreateManualSet] Split ${termList.length} terms into ${termChunks.length} chunk(s) of max ${maxKeywords} each.`);
 
@@ -261,13 +263,50 @@ export async function createManualCampaignSet(profileId, asin, searchTerms, maxK
                     if (targetsPayload.length > 0) {
                          await amazonAdsApiRequest({ method: 'post', url: '/sp/targets', profileId, data: { targetingClauses: targetsPayload }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' } });
                     }
+                    
+                    // 7. Create Negative Keywords and/or Targets
+                    if (negativeTermList.length > 0) {
+                        const negativeKeywordsToCreate = [];
+                        const negativeTargetsToCreate = [];
+
+                        for (const term of negativeTermList) {
+                            if (asinRegex.test(term)) {
+                                negativeTargetsToCreate.push({
+                                    campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED',
+                                    expression: [{ type: 'ASIN_SAME_AS', value: term }]
+                                });
+                            } else {
+                                if (negativeMatchTypes.includes('exact')) {
+                                    negativeKeywordsToCreate.push({
+                                        campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED',
+                                        keywordText: term, matchType: 'NEGATIVE_EXACT'
+                                    });
+                                }
+                                if (negativeMatchTypes.includes('phrase')) {
+                                     negativeKeywordsToCreate.push({
+                                        campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED',
+                                        keywordText: term, matchType: 'NEGATIVE_PHRASE'
+                                    });
+                                }
+                            }
+                        }
+                        
+                        if (negativeKeywordsToCreate.length > 0) {
+                            console.log(`[Action:CreateManualSet] Adding ${negativeKeywordsToCreate.length} negative keywords to Ad Group ${newAdGroupId}`);
+                            await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeKeywords', profileId, data: { negativeKeywords: negativeKeywordsToCreate }, headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json', 'Accept': 'application/vnd.spNegativeKeyword.v3+json' } });
+                        }
+                        if (negativeTargetsToCreate.length > 0) {
+                             console.log(`[Action:CreateManualSet] Adding ${negativeTargetsToCreate.length} negative product targets to Ad Group ${newAdGroupId}`);
+                             await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeTargets', profileId, data: { negativeTargetingClauses: negativeTargetsToCreate }, headers: { 'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json', 'Accept': 'application/vnd.spNegativeTargetingClause.v3+json' } });
+                        }
+                    }
 
                     createdCampaignsInfo.push({ campaignId: newCampaignId, name: campaignName });
                 }
             }
         }
         
-        // 7. Associate Rules
+        // 8. Associate Rules
         const rulesAssociatedCount = await associateRulesToCampaigns(client, associatedRuleIds, createdCampaignsInfo);
 
         return {
@@ -505,13 +544,13 @@ router.post('/create-auto-campaign', async (req, res) => {
  * POST /api/amazon/create-manual-campaigns (New endpoint for manual campaign sets)
  */
 router.post('/create-manual-campaigns', async (req, res) => {
-    const { profileId, asin, searchTerms, maxKeywords, matchTypes, budget, defaultBid, placementBids, ruleIds } = req.body;
+    const { profileId, asin, searchTerms, maxKeywords, matchTypes, budget, defaultBid, placementBids, ruleIds, negativeSearchTerms, negativeMatchTypes } = req.body;
     if (!profileId || !asin || !searchTerms || !maxKeywords || !Array.isArray(matchTypes) || matchTypes.length === 0 || !budget || !defaultBid || !placementBids) {
         return res.status(400).json({ message: 'Missing required fields for manual campaign creation.' });
     }
 
     try {
-        const result = await createManualCampaignSet(profileId, asin, searchTerms, maxKeywords, matchTypes, budget, defaultBid, placementBids, ruleIds);
+        const result = await createManualCampaignSet(profileId, asin, searchTerms, maxKeywords, matchTypes, budget, defaultBid, placementBids, ruleIds, negativeSearchTerms, negativeMatchTypes);
         res.status(201).json({
             message: `Successfully created ${result.createdCampaigns.length} manual campaigns.`,
             ...result,

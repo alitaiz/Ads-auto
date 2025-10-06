@@ -103,6 +103,8 @@ const initialManualFormState = {
     searchTerms: '',
     maxKeywords: 5,
     matchTypes: { broad: true, phrase: false, exact: false },
+    negativeSearchTerms: '',
+    negativeMatchTypes: { exact: true, phrase: false },
     placementBids: { top: 50, rest: 0, product: 0 },
     associatedRuleIds: [] as (number | string)[]
 };
@@ -297,12 +299,17 @@ export function CreateAdsView() {
                  const selectedMatchTypes = Object.entries(manualFormData.matchTypes)
                     .filter(([, isSelected]) => isSelected)
                     .map(([type]) => type);
-                if (selectedMatchTypes.length === 0) throw new Error("Please select at least one match type.");
+                if (selectedMatchTypes.length === 0) throw new Error("Please select at least one positive match type.");
                 
+                const selectedNegativeMatchTypes = Object.entries(manualFormData.negativeMatchTypes)
+                    .filter(([, isSelected]) => isSelected)
+                    .map(([type]) => type);
+
                 const immediatePayload = {
                     profileId,
                     ...manualFormData,
                     matchTypes: selectedMatchTypes,
+                    negativeMatchTypes: selectedNegativeMatchTypes,
                     ruleIds: manualFormData.associatedRuleIds
                 };
                 response = await fetch('/api/amazon/create-manual-campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(immediatePayload) });
@@ -374,7 +381,7 @@ export function CreateAdsView() {
 
     const renderRuleAssociation = () => (
          <div style={styles.card}>
-            <h2 style={styles.cardTitle}>Step 3: Associate Automation Rules (Optional)</h2>
+            <h2 style={styles.cardTitle}>Step {activeTab === 'manual' ? 5 : 4}: Associate Automation Rules (Optional)</h2>
             {Object.entries(categorizedRules).map(([type, rules]) => {
                 const ruleIds = activeTab === 'manual' ? manualFormData.associatedRuleIds : (autoFormData.associated_rule_ids || []);
                 const selectedCount = rules.filter(r => ruleIds.includes(r.id)).length;
@@ -459,9 +466,9 @@ export function CreateAdsView() {
                 </div>
             </div>
             <div style={styles.card}>
-                <h2 style={styles.cardTitle}>Step 2: Keywords & Targeting</h2>
+                <h2 style={styles.cardTitle}>Step 2: Positive Targeting</h2>
                  <div style={styles.formGroup}>
-                    <label style={styles.label} htmlFor="search-terms">Search Terms / Product ASINs (one per line)</label>
+                    <label style={styles.label} htmlFor="search-terms">Keywords / Product ASINs (one per line)</label>
                     <textarea id="search-terms" style={styles.manualTextarea} value={manualFormData.searchTerms} onChange={e => handleManualFormValueChange('searchTerms', e.target.value)} placeholder="blue widget&#10;B0ABC12345&#10;large red gadget..." required />
                 </div>
                  <div style={styles.formGrid}>
@@ -470,7 +477,7 @@ export function CreateAdsView() {
                         <input id="max-keywords" type="number" min="1" style={styles.input} value={manualFormData.maxKeywords} onChange={e => handleManualFormValueChange('maxKeywords', Number(e.target.value))} required />
                     </div>
                     <div style={styles.formGroup}>
-                        <label style={styles.label}>Search Term Match Types</label>
+                        <label style={styles.label}>Keyword Match Types</label>
                         <div style={styles.checkboxGroup}>
                             <label style={styles.checkboxLabel}><input type="checkbox" checked={manualFormData.matchTypes.broad} onChange={e => handleManualFormValueChange('matchTypes', {...manualFormData.matchTypes, broad: e.target.checked})} /> Broad</label>
                             <label style={styles.checkboxLabel}><input type="checkbox" checked={manualFormData.matchTypes.phrase} onChange={e => handleManualFormValueChange('matchTypes', {...manualFormData.matchTypes, phrase: e.target.checked})} /> Phrase</label>
@@ -479,8 +486,22 @@ export function CreateAdsView() {
                     </div>
                 </div>
             </div>
+             <div style={styles.card}>
+                <h2 style={styles.cardTitle}>Step 3: Negative Targeting (Optional)</h2>
+                 <div style={styles.formGroup}>
+                    <label style={styles.label} htmlFor="negative-search-terms">Negative Keywords / Product ASINs (one per line)</label>
+                    <textarea id="negative-search-terms" style={styles.manualTextarea} value={manualFormData.negativeSearchTerms} onChange={e => handleManualFormValueChange('negativeSearchTerms', e.target.value)} placeholder="cheap widget&#10;B0XYZ78901&#10;used gadget..." />
+                </div>
+                 <div style={styles.formGroup}>
+                    <label style={styles.label}>Negative Match Types</label>
+                    <div style={styles.checkboxGroup}>
+                        <label style={styles.checkboxLabel}><input type="checkbox" checked={manualFormData.negativeMatchTypes.exact} onChange={e => handleManualFormValueChange('negativeMatchTypes', {...manualFormData.negativeMatchTypes, exact: e.target.checked})} /> Negative Exact</label>
+                        <label style={styles.checkboxLabel}><input type="checkbox" checked={manualFormData.negativeMatchTypes.phrase} onChange={e => handleManualFormValueChange('negativeMatchTypes', {...manualFormData.negativeMatchTypes, phrase: e.target.checked})} /> Negative Phrase</label>
+                    </div>
+                </div>
+            </div>
             <div style={styles.card}>
-                <h2 style={styles.cardTitle}>Step 3: Bidding Strategy by Placement</h2>
+                <h2 style={styles.cardTitle}>Step 4: Bidding Strategy by Placement</h2>
                 <div style={styles.biddingGrid}>
                     <div style={styles.formGroup}><label style={styles.label} htmlFor="manual-placementTop">Top of search (%)</label><input id="manual-placementTop" type="number" min="0" max="900" style={styles.input} value={manualFormData.placementBids.top} onChange={e => handleManualFormValueChange('placementBids', {...manualFormData.placementBids, top: parseInt(e.target.value, 10) || 0})} /></div>
                     <div style={styles.formGroup}><label style={styles.label} htmlFor="manual-placementRest">Rest of search (%)</label><input id="manual-placementRest" type="number" min="0" max="900" style={styles.input} value={manualFormData.placementBids.rest} onChange={e => handleManualFormValueChange('placementBids', {...manualFormData.placementBids, rest: parseInt(e.target.value, 10) || 0})} /></div>

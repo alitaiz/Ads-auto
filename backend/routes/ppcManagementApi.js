@@ -196,14 +196,17 @@ export async function createManualCampaignSet(profileId, asin, searchTerms, maxK
             for (const placement of placements) {
                 for (const chunk of termChunks) {
                     // 1. Construct Campaign Name
-                    const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                    const today = new Date();
+                    const dateForName = today.toISOString().slice(0, 10).replace(/-/g, '');
+                    const dateForPayload = today.toISOString().slice(0, 10);
+                    
                     let stt;
                     if (chunk.length === 1) {
                         stt = sanitizeForCampaignName(chunk[0]).substring(0, 20); // Truncate for safety
                     } else {
                         stt = Math.floor(1000 + Math.random() * 9000);
                     }
-                    const campaignName = `[M] - ${asin} - ${stt} - [${matchType}] - [${placement.name}] - ${date}`;
+                    const campaignName = `[M] - ${asin} - ${stt} - [${matchType}] - [${placement.name}] - ${dateForName}`;
 
                     // 2. Define Bidding Strategy
                     const dynamicBidding = {
@@ -216,7 +219,7 @@ export async function createManualCampaignSet(profileId, asin, searchTerms, maxK
                     };
                     
                     // 3. Create Campaign
-                    const campaignPayload = { name: campaignName, targetingType: 'MANUAL', state: 'ENABLED', budget: { budget: Number(budget), budgetType: 'DAILY' }, startDate: date, dynamicBidding };
+                    const campaignPayload = { name: campaignName, targetingType: 'MANUAL', state: 'ENABLED', budget: { budget: Number(budget), budgetType: 'DAILY' }, startDate: dateForPayload, dynamicBidding };
                     const campResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/campaigns', profileId, data: { campaigns: [campaignPayload] }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' } });
                     const campSuccess = campResponse?.campaigns?.success?.[0];
                     if (!campSuccess?.campaignId) throw new Error(`Campaign creation failed for "${campaignName}": ${JSON.stringify(campResponse?.campaigns?.error?.[0])}`);

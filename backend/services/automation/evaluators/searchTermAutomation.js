@@ -22,10 +22,12 @@ export const evaluateSearchTermAutomationRule = async (rule, performanceData, th
                 const metricValue = metrics[condition.metric];
                 const conditionValue = condition.value;
 
+                const metricValueForLog = metricValue === Infinity ? 'Infinity' : metricValue;
+
                 evaluatedMetrics.push({
                     metric: condition.metric,
                     timeWindow: condition.timeWindow,
-                    value: metricValue,
+                    value: metricValueForLog,
                     condition: `${condition.operator} ${condition.value}`
                 });
 

@@ -28,10 +28,12 @@ export const evaluateBudgetAccelerationRule = async (rule, performanceData) => {
 
                 const conditionValue = condition.value;
                 
+                const metricValueForLog = metricValue === Infinity ? 'Infinity' : metricValue;
+
                 evaluatedMetrics.push({
                     metric: condition.metric,
                     timeWindow: 'TODAY',
-                    value: metricValue,
+                    value: metricValueForLog,
                     condition: `${condition.operator} ${condition.value}`
                 });
                 

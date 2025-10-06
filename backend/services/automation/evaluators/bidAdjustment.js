@@ -2,6 +2,8 @@
 import { amazonAdsApiRequest } from '../../../helpers/amazon-api.js';
 import { getLocalDateString, calculateMetricsForWindow, checkCondition } from '../utils.js';
 
+const formatPriceForLog = (val) => `$${Number(val).toFixed(2)}`;
+
 export const evaluateBidAdjustmentRule = async (rule, performanceData, throttledEntities) => {
     const actionsByCampaign = {};
     const keywordsToUpdate = [];
@@ -154,10 +156,12 @@ export const evaluateBidAdjustmentRule = async (rule, performanceData, throttled
                 const metricValue = metrics[condition.metric];
                 const conditionValue = condition.value;
                 
+                const metricValueForLog = metricValue === Infinity ? 'Infinity' : metricValue;
+                
                 evaluatedMetrics.push({
                     metric: condition.metric,
                     timeWindow: condition.timeWindow,
-                    value: metricValue,
+                    value: metricValueForLog,
                     condition: `${condition.operator} ${condition.value}`
                 });
 
@@ -169,9 +173,8 @@ export const evaluateBidAdjustmentRule = async (rule, performanceData, throttled
 
             if (allConditionsMet) {
                 const { type, value, minBid, maxBid } = group.action;
-                let newBid; // This will hold the calculated new bid
+                let newBid;
 
-                // Use Math.abs(value) because the UI now enforces positive values and direction is in the type
                 const absValue = Math.abs(value || 0);
 
                 switch (type) {
@@ -187,38 +190,44 @@ export const evaluateBidAdjustmentRule = async (rule, performanceData, throttled
                     case 'decreaseBidAmount':
                         newBid = entity.currentBid - absValue;
                         break;
-                    // Backward compatibility for old rules still in the DB
                     case 'adjustBidPercent':
-                        newBid = entity.currentBid * (1 + (value / 100)); // Here we use the original signed value
+                        newBid = entity.currentBid * (1 + (value / 100));
                         break;
                     default:
-                        // If the action type is not for bid adjustment, skip to the next group.
                         continue;
                 }
 
-                // Check if newBid was successfully calculated before proceeding
                 if (typeof newBid === 'number') {
-                    // Apply rounding based on the intended direction of change
-                    if (type.startsWith('decrease') || (type === 'adjustBidPercent' && value < 0)) {
-                        newBid = Math.floor(newBid * 100) / 100; // Round down for decreases
+                    const originalIntent = newBid - entity.currentBid;
+                    
+                    if (originalIntent < 0) {
+                        newBid = Math.floor(newBid * 100) / 100;
                     } else {
-                        newBid = Math.ceil(newBid * 100) / 100; // Round up for increases
+                        newBid = Math.ceil(newBid * 100) / 100;
                     }
                     
-                    // Enforce Amazon's minimum bid of $0.02
                     newBid = Math.max(0.02, newBid);
 
-                    // Apply user-defined min/max bid constraints
-                    if (typeof minBid === 'number') {
-                        newBid = Math.max(minBid, newBid);
+                    let finalBid = newBid;
+                    let reason = '';
+
+                    if (typeof minBid === 'number' && finalBid < minBid) {
+                        finalBid = minBid;
+                        reason = ` (hit Min Bid of ${formatPriceForLog(minBid)})`;
                     }
-                    if (typeof maxBid === 'number') {
-                        newBid = Math.min(maxBid, newBid);
+                    if (typeof maxBid === 'number' && finalBid > maxBid) {
+                        finalBid = maxBid;
+                        reason = ` (hit Max Bid of ${formatPriceForLog(maxBid)})`;
                     }
                     
-                    newBid = parseFloat(newBid.toFixed(2));
+                    if (originalIntent < 0 && finalBid > entity.currentBid) {
+                        console.log(`[RulesEngine] Bid adjustment for entity ${entity.entityId} skipped. Original bid ${entity.currentBid} is below Min Bid ${minBid}, and the rule intended to decrease it.`);
+                        break;
+                    }
+
+                    finalBid = parseFloat(finalBid.toFixed(2));
                     
-                    if (newBid !== entity.currentBid) {
+                    if (finalBid !== entity.currentBid) {
                         const campaignId = entity.campaignId;
                         if (!actionsByCampaign[campaignId]) {
                             actionsByCampaign[campaignId] = { 
@@ -230,12 +239,12 @@ export const evaluateBidAdjustmentRule = async (rule, performanceData, throttled
                         
                         actionsByCampaign[campaignId].changes.push({
                            entityType: entity.entityType, entityId: entity.entityId, entityText: entity.entityText,
-                           oldBid: entity.currentBid, newBid: newBid, triggeringMetrics: evaluatedMetrics
+                           oldBid: entity.currentBid, newBid: finalBid, reason: reason.trim(), triggeringMetrics: evaluatedMetrics
                         });
 
                          const updatePayload = {
                              [entity.entityType === 'keyword' ? 'keywordId' : 'targetId']: entity.entityId,
-                             bid: newBid
+                             bid: finalBid
                          };
                          if (entity.entityType === 'keyword') {
                              keywordsToUpdate.push(updatePayload);
@@ -244,7 +253,6 @@ export const evaluateBidAdjustmentRule = async (rule, performanceData, throttled
                          }
                     }
                 }
-                // "First Match Wins" - break from the conditionGroups loop for this entity
                 break;
             }
         }

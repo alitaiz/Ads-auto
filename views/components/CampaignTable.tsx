@@ -242,7 +242,7 @@ const ResizableTh = ({ children, index, getHeaderProps, resizingColumnIndex }: {
 interface TriggeringMetric {
   metric: 'spend' | 'sales' | 'acos' | 'orders' | 'clicks' | 'impressions' | 'roas' | 'budgetUtilization';
   timeWindow: number | 'TODAY';
-  value: number;
+  value: number | string;
   condition: string;
 }
 interface LogChange {
@@ -251,6 +251,7 @@ interface LogChange {
   newBid?: number;
   oldBudget?: number;
   newBudget?: number;
+  reason?: string;
   triggeringMetrics: TriggeringMetric[];
 }
 interface LogNegative {
@@ -360,19 +361,27 @@ export function CampaignTable({
     
     const formatRoAS = (value?: number) => (value ? `${value.toFixed(2)}` : '0.00');
 
-    const formatMetricValue = (value: number, metric: TriggeringMetric['metric']) => {
+    const formatMetricValue = (value: number | string, metric: TriggeringMetric['metric']) => {
+        if (value === 'Infinity') {
+            return '∞';
+        }
+        const numValue = Number(value);
+        if (isNaN(numValue)) {
+            return String(value);
+        }
+
         switch (metric) {
             case 'acos':
-                return formatPercent(value); // Expects a ratio e.g. 0.35 -> 35.00%
+                return formatPercent(numValue); // Expects a ratio e.g. 0.35 -> 35.00%
             case 'budgetUtilization':
-                return `${Number(value).toFixed(2)}%`; // Expects a number e.g. 80 -> 80.00%
+                return `${numValue.toFixed(2)}%`; // Expects a number e.g. 80 -> 80.00%
             case 'roas':
-                return value.toFixed(2); // Expects a ratio e.g. 2.5 -> 2.50
+                return numValue.toFixed(2); // Expects a ratio e.g. 2.5 -> 2.50
             case 'spend':
             case 'sales':
-                return formatPrice(value);
+                return formatPrice(numValue);
             default:
-                return formatNumber(value);
+                return formatNumber(numValue);
         }
     };
 
@@ -439,9 +448,10 @@ export function CampaignTable({
                     }
                     // BID ADJUSTMENT LOG
                     if (typeof change.oldBid !== 'undefined' && typeof change.newBid !== 'undefined') {
+                        const reasonText = change.reason ? <span style={{color: '#856404', fontStyle: 'italic', marginLeft: '5px'}}>{change.reason}</span> : null;
                         return (
                              <li key={`c-${index}`}>
-                                Target "{change.entityText}": bid changed from {formatPrice(change.oldBid)} to {formatPrice(change.newBid)}
+                                Target "{change.entityText}": bid changed from {formatPrice(change.oldBid)} to {formatPrice(change.newBid)}{reasonText}
                                 {(change.triggeringMetrics && change.triggeringMetrics.length > 0) && (
                                     <ul style={styles.metricList}>
                                         {change.triggeringMetrics.map((metric, mIndex) => (

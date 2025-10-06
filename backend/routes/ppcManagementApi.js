@@ -182,130 +182,138 @@ export async function createManualCampaignSet(profileId, asin, searchTerms, maxK
         client = await pool.connect();
         
         const termList = searchTerms.split('\n').map(t => t.trim()).filter(Boolean);
-        const termChunks = [];
-        for (let i = 0; i < termList.length; i += maxKeywords) {
-            termChunks.push(termList.slice(i, i + maxKeywords));
+        const negativeTermList = negativeSearchTerms.split('\n').map(t => t.trim()).filter(Boolean);
+        
+        // --- SEPARATION LOGIC ---
+        const keywordList = termList.filter(term => !asinRegex.test(term));
+        const asinList = termList.filter(term => asinRegex.test(term));
+
+        const keywordChunks = [];
+        if (keywordList.length > 0) {
+            for (let i = 0; i < keywordList.length; i += maxKeywords) {
+                keywordChunks.push(keywordList.slice(i, i + maxKeywords));
+            }
         }
-        if (termChunks.length === 0) {
-            throw new Error('No search terms provided.');
+
+        const asinChunks = [];
+        if (asinList.length > 0) {
+            for (let i = 0; i < asinList.length; i += maxKeywords) {
+                asinChunks.push(asinList.slice(i, i + maxKeywords));
+            }
         }
         
-        const negativeTermList = negativeSearchTerms.split('\n').map(t => t.trim()).filter(Boolean);
+        console.log(`[Action:CreateManualSet] Separated terms: ${keywordList.length} keywords, ${asinList.length} ASINs.`);
 
-        console.log(`[Action:CreateManualSet] Split ${termList.length} terms into ${termChunks.length} chunk(s) of max ${maxKeywords} each.`);
+        // --- BLOCK 1: KEYWORD CAMPAIGNS ---
+        if (keywordChunks.length > 0 && matchTypes.length > 0) {
+            console.log(`[Action:CreateManualSet] Creating keyword campaigns...`);
+            for (const matchType of matchTypes) {
+                for (const placement of placements) {
+                    for (const chunk of keywordChunks) {
+                        const today = new Date();
+                        const dateForName = today.toISOString().slice(0, 10).replace(/-/g, '');
+                        const dateForPayload = today.toISOString().slice(0, 10);
+                        
+                        let stt = chunk.length === 1 ? sanitizeForCampaignName(chunk[0]).substring(0, 20) : Math.floor(1000 + Math.random() * 9000);
+                        const campaignName = `[M] - ${asin} - ${stt} - [${matchType}] - [${placement.name}] - ${dateForName}`;
 
-        for (const matchType of matchTypes) {
+                        const dynamicBidding = { strategy: "LEGACY_FOR_SALES", placementBidding: [ { placement: "PLACEMENT_TOP", percentage: placement.apiType === "PLACEMENT_TOP" ? placement.bid : 0 }, { placement: "PLACEMENT_REST_OF_SEARCH", percentage: placement.apiType === "PLACEMENT_REST_OF_SEARCH" ? placement.bid : 0 }, { placement: "PLACEMENT_PRODUCT_PAGE", percentage: placement.apiType === "PLACEMENT_PRODUCT_PAGE" ? placement.bid : 0 } ] };
+                        
+                        const campaignPayload = { name: campaignName, targetingType: 'MANUAL', state: 'ENABLED', budget: { budget: Number(budget), budgetType: 'DAILY' }, startDate: dateForPayload, dynamicBidding };
+                        const campResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/campaigns', profileId, data: { campaigns: [campaignPayload] }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' } });
+                        const newCampaignId = campResponse?.campaigns?.success?.[0]?.campaignId;
+                        if (!newCampaignId) throw new Error(`Campaign creation failed for "${campaignName}": ${JSON.stringify(campResponse?.campaigns?.error?.[0])}`);
+
+                        const adGroupPayload = { name: `Ad Group - ${stt}`, campaignId: newCampaignId, state: 'ENABLED', defaultBid: Number(defaultBid) };
+                        const agResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/adGroups', profileId, data: { adGroups: [adGroupPayload] }, headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' } });
+                        const newAdGroupId = agResponse?.adGroups?.success?.[0]?.adGroupId;
+                        if (!newAdGroupId) throw new Error(`Ad Group creation failed for campaign "${campaignName}"`);
+
+                        const adPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', sku };
+                        await amazonAdsApiRequest({ method: 'post', url: '/sp/productAds', profileId, data: { productAds: [adPayload] }, headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json', 'Accept': 'application/vnd.spProductAd.v3+json' } });
+
+                        const keywordsPayload = chunk.map(term => ({
+                            campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED',
+                            keywordText: term, matchType: matchType.toUpperCase(),
+                        }));
+                        await amazonAdsApiRequest({ method: 'post', url: '/sp/keywords', profileId, data: { keywords: keywordsPayload }, headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' } });
+                        
+                        // Add negatives
+                        if (negativeTermList.length > 0) {
+                            const negativeKeywordsToCreate = []; const negativeTargetsToCreate = [];
+                            for (const term of negativeTermList) {
+                                if (asinRegex.test(term)) { negativeTargetsToCreate.push({ campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', expression: [{ type: 'ASIN_SAME_AS', value: term }] });
+                                } else {
+                                    if (negativeMatchTypes.includes('exact')) negativeKeywordsToCreate.push({ campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', keywordText: term, matchType: 'NEGATIVE_EXACT' });
+                                    if (negativeMatchTypes.includes('phrase')) negativeKeywordsToCreate.push({ campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', keywordText: term, matchType: 'NEGATIVE_PHRASE' });
+                                }
+                            }
+                            if (negativeKeywordsToCreate.length > 0) await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeKeywords', profileId, data: { negativeKeywords: negativeKeywordsToCreate }, headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json', 'Accept': 'application/vnd.spNegativeKeyword.v3+json' } });
+                            if (negativeTargetsToCreate.length > 0) await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeTargets', profileId, data: { negativeTargetingClauses: negativeTargetsToCreate }, headers: { 'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json', 'Accept': 'application/vnd.spNegativeTargetingClause.v3+json' } });
+                        }
+
+                        createdCampaignsInfo.push({ campaignId: newCampaignId, name: campaignName });
+                    }
+                }
+            }
+        }
+
+        // --- BLOCK 2: ASIN (PRODUCT TARGET) CAMPAIGNS ---
+        if (asinChunks.length > 0) {
+            console.log(`[Action:CreateManualSet] Creating product targeting campaigns...`);
             for (const placement of placements) {
-                for (const chunk of termChunks) {
-                    // 1. Construct Campaign Name
+                for (const chunk of asinChunks) {
                     const today = new Date();
                     const dateForName = today.toISOString().slice(0, 10).replace(/-/g, '');
                     const dateForPayload = today.toISOString().slice(0, 10);
                     
-                    let stt;
-                    if (chunk.length === 1) {
-                        stt = sanitizeForCampaignName(chunk[0]).substring(0, 20); // Truncate for safety
-                    } else {
-                        stt = Math.floor(1000 + Math.random() * 9000);
-                    }
-                    const campaignName = `[M] - ${asin} - ${stt} - [${matchType}] - [${placement.name}] - ${dateForName}`;
+                    let stt = chunk.length === 1 ? sanitizeForCampaignName(chunk[0]).substring(0, 20) : Math.floor(1000 + Math.random() * 9000);
+                    const campaignName = `[M] - ${asin} - ${stt} - [PAT] - [${placement.name}] - ${dateForName}`;
 
-                    // 2. Define Bidding Strategy
-                    const dynamicBidding = {
-                        strategy: "LEGACY_FOR_SALES",
-                        placementBidding: [
-                            { placement: "PLACEMENT_TOP", percentage: placement.apiType === "PLACEMENT_TOP" ? placement.bid : 0 },
-                            { placement: "PLACEMENT_REST_OF_SEARCH", percentage: placement.apiType === "PLACEMENT_REST_OF_SEARCH" ? placement.bid : 0 },
-                            { placement: "PLACEMENT_PRODUCT_PAGE", percentage: placement.apiType === "PLACEMENT_PRODUCT_PAGE" ? placement.bid : 0 }
-                        ]
-                    };
-                    
-                    // 3. Create Campaign
+                    const dynamicBidding = { strategy: "LEGACY_FOR_SALES", placementBidding: [ { placement: "PLACEMENT_TOP", percentage: placement.apiType === "PLACEMENT_TOP" ? placement.bid : 0 }, { placement: "PLACEMENT_REST_OF_SEARCH", percentage: placement.apiType === "PLACEMENT_REST_OF_SEARCH" ? placement.bid : 0 }, { placement: "PLACEMENT_PRODUCT_PAGE", percentage: placement.apiType === "PLACEMENT_PRODUCT_PAGE" ? placement.bid : 0 } ] };
+
                     const campaignPayload = { name: campaignName, targetingType: 'MANUAL', state: 'ENABLED', budget: { budget: Number(budget), budgetType: 'DAILY' }, startDate: dateForPayload, dynamicBidding };
                     const campResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/campaigns', profileId, data: { campaigns: [campaignPayload] }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' } });
-                    const campSuccess = campResponse?.campaigns?.success?.[0];
-                    if (!campSuccess?.campaignId) throw new Error(`Campaign creation failed for "${campaignName}": ${JSON.stringify(campResponse?.campaigns?.error?.[0])}`);
-                    const newCampaignId = campSuccess.campaignId;
+                    const newCampaignId = campResponse?.campaigns?.success?.[0]?.campaignId;
+                    if (!newCampaignId) throw new Error(`Campaign creation failed for "${campaignName}": ${JSON.stringify(campResponse?.campaigns?.error?.[0])}`);
 
-                    // 4. Create Ad Group
                     const adGroupPayload = { name: `Ad Group - ${stt}`, campaignId: newCampaignId, state: 'ENABLED', defaultBid: Number(defaultBid) };
                     const agResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/adGroups', profileId, data: { adGroups: [adGroupPayload] }, headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' } });
-                    const agSuccess = agResponse?.adGroups?.success?.[0];
-                    if (!agSuccess?.adGroupId) throw new Error(`Ad Group creation failed for campaign "${campaignName}"`);
-                    const newAdGroupId = agSuccess.adGroupId;
+                    const newAdGroupId = agResponse?.adGroups?.success?.[0]?.adGroupId;
+                    if (!newAdGroupId) throw new Error(`Ad Group creation failed for campaign "${campaignName}"`);
 
-                    // 5. Create Product Ad
                     const adPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', sku };
                     await amazonAdsApiRequest({ method: 'post', url: '/sp/productAds', profileId, data: { productAds: [adPayload] }, headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json', 'Accept': 'application/vnd.spProductAd.v3+json' } });
 
-                    // 6. Create Keywords and/or Product Targets
-                    const keywordsPayload = [];
-                    const targetsPayload = [];
+                    const targetsPayload = chunk.map(term => ({
+                        campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED',
+                        expressionType: 'MANUAL', expression: [{ type: 'ASIN_SAME_AS', value: term }],
+                    }));
+                    await amazonAdsApiRequest({ method: 'post', url: '/sp/targets', profileId, data: { targetingClauses: targetsPayload }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' } });
 
-                    for (const term of chunk) {
-                        if (asinRegex.test(term)) {
-                            targetsPayload.push({
-                                campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED',
-                                expressionType: 'MANUAL', expression: [{ type: 'ASIN_SAME_AS', value: term }],
-                            });
-                        } else {
-                            keywordsPayload.push({
-                                campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED',
-                                keywordText: term, matchType: matchType.toUpperCase(),
-                            });
-                        }
-                    }
-
-                    if (keywordsPayload.length > 0) {
-                        await amazonAdsApiRequest({ method: 'post', url: '/sp/keywords', profileId, data: { keywords: keywordsPayload }, headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' } });
-                    }
-
-                    if (targetsPayload.length > 0) {
-                         await amazonAdsApiRequest({ method: 'post', url: '/sp/targets', profileId, data: { targetingClauses: targetsPayload }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' } });
-                    }
-                    
-                    // 7. Create Negative Keywords and/or Targets
+                    // Add negatives
                     if (negativeTermList.length > 0) {
-                        const negativeKeywordsToCreate = [];
-                        const negativeTargetsToCreate = [];
-
+                        const negativeKeywordsToCreate = []; const negativeTargetsToCreate = [];
                         for (const term of negativeTermList) {
-                            if (asinRegex.test(term)) {
-                                negativeTargetsToCreate.push({
-                                    campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED',
-                                    expression: [{ type: 'ASIN_SAME_AS', value: term }]
-                                });
+                            if (asinRegex.test(term)) { negativeTargetsToCreate.push({ campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', expression: [{ type: 'ASIN_SAME_AS', value: term }] });
                             } else {
-                                if (negativeMatchTypes.includes('exact')) {
-                                    negativeKeywordsToCreate.push({
-                                        campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED',
-                                        keywordText: term, matchType: 'NEGATIVE_EXACT'
-                                    });
-                                }
-                                if (negativeMatchTypes.includes('phrase')) {
-                                     negativeKeywordsToCreate.push({
-                                        campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED',
-                                        keywordText: term, matchType: 'NEGATIVE_PHRASE'
-                                    });
-                                }
+                                if (negativeMatchTypes.includes('exact')) negativeKeywordsToCreate.push({ campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', keywordText: term, matchType: 'NEGATIVE_EXACT' });
+                                if (negativeMatchTypes.includes('phrase')) negativeKeywordsToCreate.push({ campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', keywordText: term, matchType: 'NEGATIVE_PHRASE' });
                             }
                         }
-                        
-                        if (negativeKeywordsToCreate.length > 0) {
-                            console.log(`[Action:CreateManualSet] Adding ${negativeKeywordsToCreate.length} negative keywords to Ad Group ${newAdGroupId}`);
-                            await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeKeywords', profileId, data: { negativeKeywords: negativeKeywordsToCreate }, headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json', 'Accept': 'application/vnd.spNegativeKeyword.v3+json' } });
-                        }
-                        if (negativeTargetsToCreate.length > 0) {
-                             console.log(`[Action:CreateManualSet] Adding ${negativeTargetsToCreate.length} negative product targets to Ad Group ${newAdGroupId}`);
-                             await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeTargets', profileId, data: { negativeTargetingClauses: negativeTargetsToCreate }, headers: { 'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json', 'Accept': 'application/vnd.spNegativeTargetingClause.v3+json' } });
-                        }
+                        if (negativeKeywordsToCreate.length > 0) await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeKeywords', profileId, data: { negativeKeywords: negativeKeywordsToCreate }, headers: { 'Content-Type': 'application/vnd.spNegativeKeyword.v3+json', 'Accept': 'application/vnd.spNegativeKeyword.v3+json' } });
+                        if (negativeTargetsToCreate.length > 0) await amazonAdsApiRequest({ method: 'post', url: '/sp/negativeTargets', profileId, data: { negativeTargetingClauses: negativeTargetsToCreate }, headers: { 'Content-Type': 'application/vnd.spNegativeTargetingClause.v3+json', 'Accept': 'application/vnd.spNegativeTargetingClause.v3+json' } });
                     }
 
                     createdCampaignsInfo.push({ campaignId: newCampaignId, name: campaignName });
                 }
             }
         }
-        
+
+        if (createdCampaignsInfo.length === 0) {
+            throw new Error('No targets were provided or no match types were selected for the provided keywords.');
+        }
+
         // 8. Associate Rules
         const rulesAssociatedCount = await associateRulesToCampaigns(client, associatedRuleIds, createdCampaignsInfo);
 

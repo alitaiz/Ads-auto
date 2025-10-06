@@ -6,6 +6,59 @@ import pool from '../db.js';
 
 const router = express.Router();
 
+const asinRegex = /^b0[a-z0-9]{8}$/i;
+
+/**
+ * Sanitizes a string to be safe for use in an Amazon campaign or ad group name.
+ * Removes characters that are commonly disallowed by the API.
+ * @param {string} name The input string.
+ * @returns {string} The sanitized string.
+ */
+const sanitizeForCampaignName = (name) => {
+    if (!name) return '';
+    // Removes characters like < > \ / | ? * : " ^ and trims whitespace
+    return name.replace(/[<>\\/|?*:"^]/g, '').trim();
+};
+
+/**
+ * Associates a list of automation rules to a list of newly created campaigns.
+ * @param {object} client - The database client.
+ * @param {Array<number|string>} ruleIds - The IDs of the rules to associate.
+ * @param {Array<object>} campaignInfos - The info of the newly created campaigns.
+ * @returns {Promise<number>} - The number of rules successfully associated.
+ */
+async function associateRulesToCampaigns(client, ruleIds, campaignInfos) {
+    if (!ruleIds || ruleIds.length === 0 || !campaignInfos || campaignInfos.length === 0) {
+        return 0;
+    }
+    console.log(`[Rule Association] Associating ${ruleIds.length} rules to ${campaignInfos.length} new campaigns...`);
+    let rulesAssociatedCount = 0;
+    const newCampaignIds = campaignInfos.map(c => String(c.campaignId));
+    
+    // We don't begin a transaction here because if one rule fails, we don't want to roll back others.
+    for (const ruleId of ruleIds) {
+        try {
+            // Lock the row to prevent race conditions if two processes try to update the same rule scope.
+            const { rows } = await client.query('SELECT scope FROM automation_rules WHERE id = $1 FOR UPDATE', [ruleId]);
+            if (rows.length > 0) {
+                const scope = rows[0].scope || {};
+                const campaignIds = new Set(scope.campaignIds?.map(String) || []);
+                newCampaignIds.forEach(id => campaignIds.add(id));
+                const newScope = { ...scope, campaignIds: Array.from(campaignIds) };
+                await client.query('UPDATE automation_rules SET scope = $1 WHERE id = $2', [newScope, ruleId]);
+                rulesAssociatedCount++;
+                console.log(`[Rule Association] Associated campaign(s) with rule ID ${ruleId}`);
+            }
+        } catch (e) {
+             console.error(`[Rule Association] Failed to associate rule ID ${ruleId}:`, e);
+             // Continue to the next rule even if one fails
+        }
+    }
+    console.log(`[Rule Association] Step completed. Associated ${rulesAssociatedCount} rules.`);
+    return rulesAssociatedCount;
+}
+
+
 /**
  * Creates a structured set of 12 SP Auto campaigns for a single ASIN,
  * each targeting a specific auto-targeting type and placement bidding strategy.
@@ -27,8 +80,7 @@ export async function createAutoCampaignSet(profileId, asin, budget, defaultBid,
     ];
 
     const createdCampaignsInfo = [];
-    let rulesAssociatedCount = 0;
-
+    
     try {
         console.log(`[Action:CreateSet] Starting creation for ASIN ${asin}`);
         const sku = await getSkuByAsin(asin);
@@ -94,31 +146,133 @@ export async function createAutoCampaignSet(profileId, asin, budget, defaultBid,
         }
         
         // 7. Associate Rules to ALL created campaigns
-        if (associatedRuleIds && associatedRuleIds.length > 0) {
-            console.log(`[Action:CreateSet] Associating ${associatedRuleIds.length} rules to ${createdCampaignsInfo.length} new campaigns...`);
-            await client.query('BEGIN');
-            for (const ruleId of associatedRuleIds) {
-                const { rows } = await client.query('SELECT scope FROM automation_rules WHERE id = $1', [ruleId]);
-                if (rows.length > 0) {
-                    const scope = rows[0].scope || {};
-                    const campaignIds = new Set(scope.campaignIds?.map(String) || []);
-                    createdCampaignsInfo.forEach(c => campaignIds.add(String(c.campaignId)));
-                    const newScope = { ...scope, campaignIds: Array.from(campaignIds) };
-                    await client.query('UPDATE automation_rules SET scope = $1 WHERE id = $2', [newScope, ruleId]);
-                    rulesAssociatedCount++;
-                }
-            }
-            await client.query('COMMIT');
-            console.log(`[Action:CreateSet] Rules association step completed.`);
-        }
+        const rulesAssociatedCount = await associateRulesToCampaigns(client, associatedRuleIds, createdCampaignsInfo);
 
         return {
             createdCampaigns: createdCampaignsInfo,
-            rulesAssociated: (associatedRuleIds || []).length
+            rulesAssociated: rulesAssociatedCount
         };
     } catch (error) {
-        if (client) await client.query('ROLLBACK');
         console.error('[Action:CreateSet] Error during campaign set creation:', error);
+        throw error;
+    } finally {
+        if (client) client.release();
+    }
+}
+
+/**
+ * Creates a structured set of SP Manual campaigns based on a list of search terms/ASINs.
+ */
+export async function createManualCampaignSet(profileId, asin, searchTerms, maxKeywords, matchTypes, budget, defaultBid, placementBids, associatedRuleIds = []) {
+    let client;
+    const { top, rest, product } = placementBids;
+
+    const placements = [
+        { name: 'Top of search', apiType: 'PLACEMENT_TOP', bid: top },
+        { name: 'Rest of search', apiType: 'PLACEMENT_REST_OF_SEARCH', bid: rest },
+        { name: 'Product pages', apiType: 'PLACEMENT_PRODUCT_PAGE', bid: product }
+    ];
+
+    const createdCampaignsInfo = [];
+    
+    try {
+        console.log(`[Action:CreateManualSet] Starting manual creation for ASIN ${asin}`);
+        const sku = await getSkuByAsin(asin);
+        if (!sku) throw new Error(`Could not find a valid SKU for ASIN ${asin}.`);
+        client = await pool.connect();
+        
+        const termList = searchTerms.split('\n').map(t => t.trim()).filter(Boolean);
+        const termChunks = [];
+        for (let i = 0; i < termList.length; i += maxKeywords) {
+            termChunks.push(termList.slice(i, i + maxKeywords));
+        }
+        if (termChunks.length === 0) {
+            throw new Error('No search terms provided.');
+        }
+
+        console.log(`[Action:CreateManualSet] Split ${termList.length} terms into ${termChunks.length} chunk(s) of max ${maxKeywords} each.`);
+
+        for (const matchType of matchTypes) {
+            for (const placement of placements) {
+                for (const chunk of termChunks) {
+                    // 1. Construct Campaign Name
+                    const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                    let stt;
+                    if (chunk.length === 1) {
+                        stt = sanitizeForCampaignName(chunk[0]).substring(0, 20); // Truncate for safety
+                    } else {
+                        stt = Math.floor(1000 + Math.random() * 9000);
+                    }
+                    const campaignName = `[M] - ${asin} - ${stt} - [${matchType}] - [${placement.name}] - ${date}`;
+
+                    // 2. Define Bidding Strategy
+                    const dynamicBidding = {
+                        strategy: "LEGACY_FOR_SALES",
+                        placementBidding: [
+                            { placement: "PLACEMENT_TOP", percentage: placement.apiType === "PLACEMENT_TOP" ? placement.bid : 0 },
+                            { placement: "PLACEMENT_REST_OF_SEARCH", percentage: placement.apiType === "PLACEMENT_REST_OF_SEARCH" ? placement.bid : 0 },
+                            { placement: "PLACEMENT_PRODUCT_PAGE", percentage: placement.apiType === "PLACEMENT_PRODUCT_PAGE" ? placement.bid : 0 }
+                        ]
+                    };
+                    
+                    // 3. Create Campaign
+                    const campaignPayload = { name: campaignName, targetingType: 'MANUAL', state: 'ENABLED', budget: { budget: Number(budget), budgetType: 'DAILY' }, startDate: date, dynamicBidding };
+                    const campResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/campaigns', profileId, data: { campaigns: [campaignPayload] }, headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json', 'Accept': 'application/vnd.spCampaign.v3+json' } });
+                    const campSuccess = campResponse?.campaigns?.success?.[0];
+                    if (!campSuccess?.campaignId) throw new Error(`Campaign creation failed for "${campaignName}": ${JSON.stringify(campResponse?.campaigns?.error?.[0])}`);
+                    const newCampaignId = campSuccess.campaignId;
+
+                    // 4. Create Ad Group
+                    const adGroupPayload = { name: `Ad Group - ${stt}`, campaignId: newCampaignId, state: 'ENABLED', defaultBid: Number(defaultBid) };
+                    const agResponse = await amazonAdsApiRequest({ method: 'post', url: '/sp/adGroups', profileId, data: { adGroups: [adGroupPayload] }, headers: { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' } });
+                    const agSuccess = agResponse?.adGroups?.success?.[0];
+                    if (!agSuccess?.adGroupId) throw new Error(`Ad Group creation failed for campaign "${campaignName}"`);
+                    const newAdGroupId = agSuccess.adGroupId;
+
+                    // 5. Create Product Ad
+                    const adPayload = { campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED', sku };
+                    await amazonAdsApiRequest({ method: 'post', url: '/sp/productAds', profileId, data: { productAds: [adPayload] }, headers: { 'Content-Type': 'application/vnd.spProductAd.v3+json', 'Accept': 'application/vnd.spProductAd.v3+json' } });
+
+                    // 6. Create Keywords and/or Product Targets
+                    const keywordsPayload = [];
+                    const targetsPayload = [];
+
+                    for (const term of chunk) {
+                        if (asinRegex.test(term)) {
+                            targetsPayload.push({
+                                campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED',
+                                expressionType: 'MANUAL', expression: [{ type: 'ASIN_SAME_AS', value: term }],
+                            });
+                        } else {
+                            keywordsPayload.push({
+                                campaignId: newCampaignId, adGroupId: newAdGroupId, state: 'ENABLED',
+                                keywordText: term, matchType: matchType.toUpperCase(),
+                            });
+                        }
+                    }
+
+                    if (keywordsPayload.length > 0) {
+                        await amazonAdsApiRequest({ method: 'post', url: '/sp/keywords', profileId, data: { keywords: keywordsPayload }, headers: { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' } });
+                    }
+
+                    if (targetsPayload.length > 0) {
+                         await amazonAdsApiRequest({ method: 'post', url: '/sp/targets', profileId, data: { targetingClauses: targetsPayload }, headers: { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' } });
+                    }
+
+                    createdCampaignsInfo.push({ campaignId: newCampaignId, name: campaignName });
+                }
+            }
+        }
+        
+        // 7. Associate Rules
+        const rulesAssociatedCount = await associateRulesToCampaigns(client, associatedRuleIds, createdCampaignsInfo);
+
+        return {
+            createdCampaigns: createdCampaignsInfo,
+            rulesAssociated: rulesAssociatedCount
+        };
+    } catch (error) {
+        console.error('[Action:CreateManualSet] Error during manual campaign set creation:', error);
         throw error;
     } finally {
         if (client) client.release();
@@ -324,7 +478,7 @@ router.put('/campaigns', async (req, res) => {
 
 
 /**
- * POST /api/amazon/create-auto-campaign (Endpoint for both single and set creation)
+ * POST /api/amazon/create-auto-campaign (Endpoint for auto campaign set creation)
  */
 router.post('/create-auto-campaign', async (req, res) => {
     const { profileId, asin, budget, defaultBid, placementBids, ruleIds } = req.body;
@@ -341,6 +495,27 @@ router.post('/create-auto-campaign', async (req, res) => {
     } catch (error) {
         console.error('[Create Campaign Set API] Error:', error);
         res.status(500).json({ message: error.message || 'An unknown server error occurred during campaign set creation.' });
+    }
+});
+
+/**
+ * POST /api/amazon/create-manual-campaigns (New endpoint for manual campaign sets)
+ */
+router.post('/create-manual-campaigns', async (req, res) => {
+    const { profileId, asin, searchTerms, maxKeywords, matchTypes, budget, defaultBid, placementBids, ruleIds } = req.body;
+    if (!profileId || !asin || !searchTerms || !maxKeywords || !Array.isArray(matchTypes) || matchTypes.length === 0 || !budget || !defaultBid || !placementBids) {
+        return res.status(400).json({ message: 'Missing required fields for manual campaign creation.' });
+    }
+
+    try {
+        const result = await createManualCampaignSet(profileId, asin, searchTerms, maxKeywords, matchTypes, budget, defaultBid, placementBids, ruleIds);
+        res.status(201).json({
+            message: `Successfully created ${result.createdCampaigns.length} manual campaigns.`,
+            ...result,
+        });
+    } catch (error) {
+        console.error('[Create Manual Campaign Set API] Error:', error);
+        res.status(500).json({ message: error.message || 'An unknown server error occurred during manual campaign set creation.' });
     }
 });
 

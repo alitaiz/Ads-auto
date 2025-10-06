@@ -61,6 +61,10 @@ const styles: { [key: string]: React.CSSProperties } = {
     modalHeader: { fontSize: '1.5rem', margin: 0, paddingBottom: '10px', borderBottom: '1px solid var(--border-color)' },
     modalBody: { overflowY: 'auto' },
     modalFooter: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' },
+     // Manual Campaign Specific Styles
+    manualTextarea: { padding: '10px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '0.9rem', fontFamily: 'monospace', minHeight: '200px', resize: 'vertical' },
+    checkboxGroup: { display: 'flex', gap: '20px', alignItems: 'center' },
+    checkboxLabel: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' },
 };
 
 interface CampaignCreationRule {
@@ -77,7 +81,7 @@ interface CampaignCreationRule {
     associated_rule_ids: (number | string)[];
 }
 
-const initialFormState: Partial<CampaignCreationRule> & { name: string; is_active: boolean } = {
+const initialAutoFormState: Partial<CampaignCreationRule> & { name: string; is_active: boolean } = {
     id: undefined,
     name: '',
     is_active: true,
@@ -91,14 +95,29 @@ const initialFormState: Partial<CampaignCreationRule> & { name: string; is_activ
     associated_rule_ids: []
 };
 
+// New state for the manual campaign form
+const initialManualFormState = {
+    asin: '',
+    budget: 10,
+    defaultBid: 0.75,
+    searchTerms: '',
+    maxKeywords: 5,
+    matchTypes: { broad: true, phrase: false, exact: false },
+    placementBids: { top: 50, rest: 0, product: 0 },
+    associatedRuleIds: [] as (number | string)[]
+};
+
+type ActiveTab = 'manual' | 'autoSet' | 'manage';
+
 export function CreateAdsView() {
-    const [activeTab, setActiveTab] = useState<'create' | 'manage'>('create');
+    const [activeTab, setActiveTab] = useState<ActiveTab>('manual');
     const [loading, setLoading] = useState({ form: false, schedules: true });
     const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
     const [openRuleSections, setOpenRuleSections] = useState<Set<string>>(new Set(['BID_ADJUSTMENT']));
     
     // Unified form state
-    const [formData, setFormData] = useState(initialFormState);
+    const [autoFormData, setAutoFormData] = useState(initialAutoFormState);
+    const [manualFormData, setManualFormData] = useState(initialManualFormState);
     const [isScheduled, setIsScheduled] = useState(false);
     
     // Data state
@@ -210,12 +229,18 @@ export function CreateAdsView() {
     }, {} as Record<string, AutomationRule[]>), [allRules]);
 
     const toggleRuleSection = (section: string) => setOpenRuleSections(prev => { const s = new Set(prev); s.has(section) ? s.delete(section) : s.add(section); return s; });
-    const handleRuleSelection = (ruleId: number) => setFormData(prev => ({ ...prev, associated_rule_ids: (prev.associated_rule_ids || []).includes(ruleId) ? (prev.associated_rule_ids || []).filter(id => id !== ruleId) : [...(prev.associated_rule_ids || []), ruleId] }));
+    const handleRuleSelection = (ruleId: number) => {
+        if (activeTab === 'autoSet') {
+            setAutoFormData(prev => ({ ...prev, associated_rule_ids: (prev.associated_rule_ids || []).includes(ruleId) ? (prev.associated_rule_ids || []).filter(id => id !== ruleId) : [...(prev.associated_rule_ids || []), ruleId] }));
+        } else if (activeTab === 'manual') {
+            setManualFormData(prev => ({ ...prev, associatedRuleIds: prev.associatedRuleIds.includes(ruleId) ? prev.associatedRuleIds.filter(id => id !== ruleId) : [...prev.associatedRuleIds, ruleId] }));
+        }
+    };
     
     const handleEditSchedule = (schedule: CampaignCreationRule) => {
-        setFormData({ ...schedule });
+        setAutoFormData({ ...schedule });
         setIsScheduled(true);
-        setActiveTab('create');
+        setActiveTab('autoSet');
     };
 
     const handleScheduleStatusToggle = async (schedule: CampaignCreationRule) => {
@@ -268,20 +293,33 @@ export function CreateAdsView() {
 
         try {
             let response;
-            if (isScheduled) {
-                const { id, ...payload } = formData;
+            if (activeTab === 'manual') {
+                 const selectedMatchTypes = Object.entries(manualFormData.matchTypes)
+                    .filter(([, isSelected]) => isSelected)
+                    .map(([type]) => type);
+                if (selectedMatchTypes.length === 0) throw new Error("Please select at least one match type.");
+                
+                const immediatePayload = {
+                    profileId,
+                    ...manualFormData,
+                    matchTypes: selectedMatchTypes,
+                    ruleIds: manualFormData.associatedRuleIds
+                };
+                response = await fetch('/api/amazon/create-manual-campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(immediatePayload) });
+            } else if (isScheduled) {
+                const { id, ...payload } = autoFormData;
                 const url = id ? `/api/automation/campaign-creation-rules/${id}` : '/api/automation/campaign-creation-rules';
                 const method = id ? 'PUT' : 'POST';
                 const finalPayload = id ? payload : { ...payload, profile_id: profileId };
                 response = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(finalPayload) });
-            } else {
+            } else { // Immediate auto campaign set creation
                 const immediatePayload = {
                     profileId,
-                    asin: formData.creation_parameters.asin,
-                    budget: formData.creation_parameters.budget,
-                    defaultBid: formData.creation_parameters.defaultBid,
-                    placementBids: formData.creation_parameters.placementBids,
-                    ruleIds: formData.associated_rule_ids || []
+                    asin: autoFormData.creation_parameters.asin,
+                    budget: autoFormData.creation_parameters.budget,
+                    defaultBid: autoFormData.creation_parameters.defaultBid,
+                    placementBids: autoFormData.creation_parameters.placementBids,
+                    ruleIds: autoFormData.associated_rule_ids || []
                 };
                 response = await fetch('/api/amazon/create-auto-campaign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(immediatePayload) });
             }
@@ -289,13 +327,24 @@ export function CreateAdsView() {
             const result = await response.json();
             if (!response.ok) throw new Error(result.message || result.error || 'An unknown error occurred.');
             
-            setStatusMessage({ type: 'success', text: isScheduled ? (formData.id ? `Successfully updated schedule "${result.name}".` : `Successfully created schedule "${result.name}".`) : `Successfully created ${result.createdCampaigns.length} campaigns.` });
+            let successText = '';
+            if (activeTab === 'manual') {
+                successText = `Successfully created ${result.createdCampaigns.length} manual campaigns.`;
+            } else if (isScheduled) {
+                successText = autoFormData.id ? `Successfully updated schedule "${result.name}".` : `Successfully created schedule "${result.name}".`;
+            } else {
+                successText = `Successfully created ${result.createdCampaigns.length} campaigns.`;
+            }
+
+            setStatusMessage({ type: 'success', text: successText });
+            
             if (isScheduled) {
                  fetchSchedulesAndRules();
                  setActiveTab('manage');
             }
 
-            setFormData(initialFormState);
+            setAutoFormData(initialAutoFormState);
+            setManualFormData(initialManualFormState);
             setIsScheduled(false);
         } catch (err) {
             setStatusMessage({ type: 'error', text: err instanceof Error ? err.message : 'Operation failed.' });
@@ -306,8 +355,8 @@ export function CreateAdsView() {
     
     const formatFrequency = (rule: CampaignCreationRule) => `Every ${rule.frequency.value} ${rule.frequency.unit} at ${rule.frequency.startTime} (UTC-7)`;
 
-    const handleFormValueChange = (path: string, value: any) => {
-        setFormData(prev => {
+    const handleAutoFormValueChange = (path: string, value: any) => {
+        setAutoFormData(prev => {
             const keys = path.split('.');
             let current = { ...prev };
             let temp = current as any;
@@ -318,15 +367,46 @@ export function CreateAdsView() {
             return current;
         });
     };
+    
+    const handleManualFormValueChange = (field: string, value: any) => {
+        setManualFormData(prev => ({ ...prev, [field]: value }));
+    };
 
-    const renderCreateSetForm = () => (
+    const renderRuleAssociation = () => (
+         <div style={styles.card}>
+            <h2 style={styles.cardTitle}>Step 3: Associate Automation Rules (Optional)</h2>
+            {Object.entries(categorizedRules).map(([type, rules]) => {
+                const ruleIds = activeTab === 'manual' ? manualFormData.associatedRuleIds : (autoFormData.associated_rule_ids || []);
+                const selectedCount = rules.filter(r => ruleIds.includes(r.id)).length;
+                return (
+                <div key={type} style={styles.accordionSection}>
+                    <div style={styles.accordionHeader} onClick={() => toggleRuleSection(type)}>
+                        <h3 style={styles.accordionTitle}>{type.replace(/_/g, ' ')}</h3>
+                        <span style={styles.accordionSummary}>{selectedCount} / {rules.length} selected</span>
+                    </div>
+                    {openRuleSections.has(type) && (
+                        <div style={styles.accordionContent}><div style={styles.ruleList}>
+                            {rules.map(rule => (
+                                <div key={rule.id} style={styles.ruleCheckboxItem}>
+                                    <input type="checkbox" id={`rule-${rule.id}`} checked={ruleIds.includes(rule.id)} onChange={() => handleRuleSelection(rule.id)} />
+                                    <label htmlFor={`rule-${rule.id}`} style={styles.ruleCheckboxLabel} title={rule.name}>{rule.name}</label>
+                                </div>
+                            ))}
+                        </div></div>
+                    )}
+                </div>);
+            })}
+        </div>
+    );
+    
+    const renderCreateAutoSetForm = () => (
         <form style={styles.form} onSubmit={handleSubmit}>
             <div style={styles.card}>
                 <h2 style={styles.cardTitle}>Step 1: Campaign Details</h2>
                 <div style={styles.formGrid}>
-                    <div style={styles.formGroup}><label style={styles.label} htmlFor="asin">Product ASIN</label><input id="asin" style={styles.input} value={formData.creation_parameters.asin} onChange={e => handleFormValueChange('creation_parameters.asin', e.target.value.toUpperCase())} placeholder="B0..." required /></div><div />
-                    <div style={styles.formGroup}><label style={styles.label} htmlFor="budget">Daily Budget (per campaign)</label><input id="budget" type="number" step="0.01" min="1" style={styles.input} value={formData.creation_parameters.budget} onChange={e => handleFormValueChange('creation_parameters.budget', Number(e.target.value))} required /></div>
-                    <div style={styles.formGroup}><label style={styles.label} htmlFor="defaultBid">Default Ad Group Bid ($)</label><input id="defaultBid" type="number" step="0.01" min="0.02" style={styles.input} value={formData.creation_parameters.defaultBid} onChange={e => handleFormValueChange('creation_parameters.defaultBid', Number(e.target.value))} required /></div>
+                    <div style={styles.formGroup}><label style={styles.label} htmlFor="asin">Product ASIN</label><input id="asin" style={styles.input} value={autoFormData.creation_parameters.asin} onChange={e => handleAutoFormValueChange('creation_parameters.asin', e.target.value.toUpperCase())} placeholder="B0..." required /></div><div />
+                    <div style={styles.formGroup}><label style={styles.label} htmlFor="budget">Daily Budget (per campaign)</label><input id="budget" type="number" step="0.01" min="1" style={styles.input} value={autoFormData.creation_parameters.budget} onChange={e => handleAutoFormValueChange('creation_parameters.budget', Number(e.target.value))} required /></div>
+                    <div style={styles.formGroup}><label style={styles.label} htmlFor="defaultBid">Default Ad Group Bid ($)</label><input id="defaultBid" type="number" step="0.01" min="0.02" style={styles.input} value={autoFormData.creation_parameters.defaultBid} onChange={e => handleAutoFormValueChange('creation_parameters.defaultBid', Number(e.target.value))} required /></div>
                 </div>
             </div>
             <div style={styles.card}>
@@ -335,9 +415,9 @@ export function CreateAdsView() {
                     This setting controls the bid boost for each of the 12 campaigns. For example, the four campaigns targeting 'Top of search' will use the value you enter here for their 'Top of search' bid adjustment, while their other placement bids will be set to 0%. This isolates performance by placement.
                 </p>
                 <div style={styles.biddingGrid}>
-                    <div style={styles.formGroup}><label style={styles.label} htmlFor="placementTop">Top of search (%)</label><input id="placementTop" type="number" min="0" max="900" style={styles.input} value={formData.creation_parameters.placementBids.top} onChange={e => handleFormValueChange('creation_parameters.placementBids.top', parseInt(e.target.value, 10) || 0)} /></div>
-                    <div style={styles.formGroup}><label style={styles.label} htmlFor="placementRest">Rest of search (%)</label><input id="placementRest" type="number" min="0" max="900" style={styles.input} value={formData.creation_parameters.placementBids.rest} onChange={e => handleFormValueChange('creation_parameters.placementBids.rest', parseInt(e.target.value, 10) || 0)} /></div>
-                    <div style={styles.formGroup}><label style={styles.label} htmlFor="placementProduct">Product pages (%)</label><input id="placementProduct" type="number" min="0" max="900" style={styles.input} value={formData.creation_parameters.placementBids.product} onChange={e => handleFormValueChange('creation_parameters.placementBids.product', parseInt(e.target.value, 10) || 0)} /></div>
+                    <div style={styles.formGroup}><label style={styles.label} htmlFor="placementTop">Top of search (%)</label><input id="placementTop" type="number" min="0" max="900" style={styles.input} value={autoFormData.creation_parameters.placementBids.top} onChange={e => handleAutoFormValueChange('creation_parameters.placementBids.top', parseInt(e.target.value, 10) || 0)} /></div>
+                    <div style={styles.formGroup}><label style={styles.label} htmlFor="placementRest">Rest of search (%)</label><input id="placementRest" type="number" min="0" max="900" style={styles.input} value={autoFormData.creation_parameters.placementBids.rest} onChange={e => handleAutoFormValueChange('creation_parameters.placementBids.rest', parseInt(e.target.value, 10) || 0)} /></div>
+                    <div style={styles.formGroup}><label style={styles.label} htmlFor="placementProduct">Product pages (%)</label><input id="placementProduct" type="number" min="0" max="900" style={styles.input} value={autoFormData.creation_parameters.placementBids.product} onChange={e => handleAutoFormValueChange('creation_parameters.placementBids.product', parseInt(e.target.value, 10) || 0)} /></div>
                 </div>
             </div>
             {renderRuleAssociation()}
@@ -351,18 +431,66 @@ export function CreateAdsView() {
                     <div style={{display: 'flex', flexDirection: 'column', gap: '20px'}}>
                         <div style={styles.formGroup}>
                             <label style={styles.label} htmlFor="scheduleName">Schedule Name</label>
-                            <input id="scheduleName" style={styles.input} value={formData.name} onChange={e => handleFormValueChange('name', e.target.value)} placeholder="e.g., Weekly New Auto Set for..." required={isScheduled} />
+                            <input id="scheduleName" style={styles.input} value={autoFormData.name} onChange={e => handleAutoFormValueChange('name', e.target.value)} placeholder="e.g., Weekly New Auto Set for..." required={isScheduled} />
                         </div>
                         <div style={styles.scheduleGrid}>
-                            <div style={styles.formGroup}><label style={styles.label}>Frequency</label><div style={styles.frequencyControls}><span>Every</span><input type="number" min="1" style={{ ...styles.input, width: '70px' }} value={formData.frequency.value} onChange={e => handleFormValueChange('frequency.value', parseInt(e.target.value, 10) || 1)} /><select style={styles.input} value={formData.frequency.unit} onChange={e => handleFormValueChange('frequency.unit', e.target.value as any)}><option value="days">Days</option><option value="weeks">Weeks</option></select></div></div>
-                            <div style={styles.formGroup}><label style={styles.label}>Time (UTC-7)</label><input type="time" style={styles.input} value={formData.frequency.startTime} onChange={e => handleFormValueChange('frequency.startTime', e.target.value)} required={isScheduled} /></div>
+                            <div style={styles.formGroup}><label style={styles.label}>Frequency</label><div style={styles.frequencyControls}><span>Every</span><input type="number" min="1" style={{ ...styles.input, width: '70px' }} value={autoFormData.frequency.value} onChange={e => handleAutoFormValueChange('frequency.value', parseInt(e.target.value, 10) || 1)} /><select style={styles.input} value={autoFormData.frequency.unit} onChange={e => handleAutoFormValueChange('frequency.unit', e.target.value as any)}><option value="days">Days</option><option value="weeks">Weeks</option></select></div></div>
+                            <div style={styles.formGroup}><label style={styles.label}>Time (UTC-7)</label><input type="time" style={styles.input} value={autoFormData.frequency.startTime} onChange={e => handleAutoFormValueChange('frequency.startTime', e.target.value)} required={isScheduled} /></div>
                         </div>
                     </div>
                 )}
             </div>
             <div style={styles.buttonContainer}>
                 <button type="submit" style={loading.form ? { ...styles.button, ...styles.buttonDisabled } : styles.button} disabled={loading.form}>
-                    {loading.form ? 'Submitting...' : isScheduled ? (formData.id ? 'Update Schedule' : 'Create & Schedule') : 'Create Campaign Set'}
+                    {loading.form ? 'Submitting...' : isScheduled ? (autoFormData.id ? 'Update Schedule' : 'Create & Schedule') : 'Create Campaign Set'}
+                </button>
+            </div>
+        </form>
+    );
+
+    const renderCreateManualForm = () => (
+        <form style={styles.form} onSubmit={handleSubmit}>
+            <div style={styles.card}>
+                <h2 style={styles.cardTitle}>Step 1: Campaign Details</h2>
+                <div style={styles.formGrid}>
+                    <div style={styles.formGroup}><label style={styles.label} htmlFor="manual-asin">Product ASIN</label><input id="manual-asin" style={styles.input} value={manualFormData.asin} onChange={e => handleManualFormValueChange('asin', e.target.value.toUpperCase())} placeholder="B0..." required /></div><div />
+                    <div style={styles.formGroup}><label style={styles.label} htmlFor="manual-budget">Daily Budget (per campaign)</label><input id="manual-budget" type="number" step="0.01" min="1" style={styles.input} value={manualFormData.budget} onChange={e => handleManualFormValueChange('budget', Number(e.target.value))} required /></div>
+                    <div style={styles.formGroup}><label style={styles.label} htmlFor="manual-defaultBid">Default Ad Group Bid ($)</label><input id="manual-defaultBid" type="number" step="0.01" min="0.02" style={styles.input} value={manualFormData.defaultBid} onChange={e => handleManualFormValueChange('defaultBid', Number(e.target.value))} required /></div>
+                </div>
+            </div>
+            <div style={styles.card}>
+                <h2 style={styles.cardTitle}>Step 2: Keywords & Targeting</h2>
+                 <div style={styles.formGroup}>
+                    <label style={styles.label} htmlFor="search-terms">Search Terms / Product ASINs (one per line)</label>
+                    <textarea id="search-terms" style={styles.manualTextarea} value={manualFormData.searchTerms} onChange={e => handleManualFormValueChange('searchTerms', e.target.value)} placeholder="blue widget&#10;B0ABC12345&#10;large red gadget..." required />
+                </div>
+                 <div style={styles.formGrid}>
+                     <div style={styles.formGroup}>
+                        <label style={styles.label} htmlFor="max-keywords">Max Keywords/Targets per Campaign</label>
+                        <input id="max-keywords" type="number" min="1" style={styles.input} value={manualFormData.maxKeywords} onChange={e => handleManualFormValueChange('maxKeywords', Number(e.target.value))} required />
+                    </div>
+                    <div style={styles.formGroup}>
+                        <label style={styles.label}>Search Term Match Types</label>
+                        <div style={styles.checkboxGroup}>
+                            <label style={styles.checkboxLabel}><input type="checkbox" checked={manualFormData.matchTypes.broad} onChange={e => handleManualFormValueChange('matchTypes', {...manualFormData.matchTypes, broad: e.target.checked})} /> Broad</label>
+                            <label style={styles.checkboxLabel}><input type="checkbox" checked={manualFormData.matchTypes.phrase} onChange={e => handleManualFormValueChange('matchTypes', {...manualFormData.matchTypes, phrase: e.target.checked})} /> Phrase</label>
+                            <label style={styles.checkboxLabel}><input type="checkbox" checked={manualFormData.matchTypes.exact} onChange={e => handleManualFormValueChange('matchTypes', {...manualFormData.matchTypes, exact: e.target.checked})} /> Exact</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div style={styles.card}>
+                <h2 style={styles.cardTitle}>Step 3: Bidding Strategy by Placement</h2>
+                <div style={styles.biddingGrid}>
+                    <div style={styles.formGroup}><label style={styles.label} htmlFor="manual-placementTop">Top of search (%)</label><input id="manual-placementTop" type="number" min="0" max="900" style={styles.input} value={manualFormData.placementBids.top} onChange={e => handleManualFormValueChange('placementBids', {...manualFormData.placementBids, top: parseInt(e.target.value, 10) || 0})} /></div>
+                    <div style={styles.formGroup}><label style={styles.label} htmlFor="manual-placementRest">Rest of search (%)</label><input id="manual-placementRest" type="number" min="0" max="900" style={styles.input} value={manualFormData.placementBids.rest} onChange={e => handleManualFormValueChange('placementBids', {...manualFormData.placementBids, rest: parseInt(e.target.value, 10) || 0})} /></div>
+                    <div style={styles.formGroup}><label style={styles.label} htmlFor="manual-placementProduct">Product pages (%)</label><input id="manual-placementProduct" type="number" min="0" max="900" style={styles.input} value={manualFormData.placementBids.product} onChange={e => handleManualFormValueChange('placementBids', {...manualFormData.placementBids, product: parseInt(e.target.value, 10) || 0})} /></div>
+                </div>
+            </div>
+            {renderRuleAssociation()}
+            <div style={styles.buttonContainer}>
+                <button type="submit" style={loading.form ? { ...styles.button, ...styles.buttonDisabled } : styles.button} disabled={loading.form}>
+                    {loading.form ? 'Creating...' : 'Create Manual Campaigns'}
                 </button>
             </div>
         </form>
@@ -395,33 +523,7 @@ export function CreateAdsView() {
             ) : <p style={{color: '#666'}}>You have no scheduled campaign creations.</p>}
         </div>
     );
-
-    const renderRuleAssociation = () => (
-         <div style={styles.card}>
-            <h2 style={styles.cardTitle}>Step 3: Associate Automation Rules (Optional)</h2>
-            {Object.entries(categorizedRules).map(([type, rules]) => {
-                const selectedCount = rules.filter(r => (formData.associated_rule_ids || []).includes(r.id)).length;
-                return (
-                <div key={type} style={styles.accordionSection}>
-                    <div style={styles.accordionHeader} onClick={() => toggleRuleSection(type)}>
-                        <h3 style={styles.accordionTitle}>{type.replace(/_/g, ' ')}</h3>
-                        <span style={styles.accordionSummary}>{selectedCount} / {rules.length} selected</span>
-                    </div>
-                    {openRuleSections.has(type) && (
-                        <div style={styles.accordionContent}><div style={styles.ruleList}>
-                            {rules.map(rule => (
-                                <div key={rule.id} style={styles.ruleCheckboxItem}>
-                                    <input type="checkbox" id={`rule-${rule.id}`} checked={(formData.associated_rule_ids || []).includes(rule.id)} onChange={() => handleRuleSelection(rule.id)} />
-                                    <label htmlFor={`rule-${rule.id}`} style={styles.ruleCheckboxLabel} title={rule.name}>{rule.name}</label>
-                                </div>
-                            ))}
-                        </div></div>
-                    )}
-                </div>);
-            })}
-        </div>
-    );
-
+    
     const renderHistoryModal = () => {
         if (!historyModal.isOpen) return null;
         return (
@@ -460,15 +562,18 @@ export function CreateAdsView() {
 
     return (
         <div style={styles.container}>
-            <h1 style={styles.title}>Create & Schedule Auto Campaigns</h1>
+            <h1 style={styles.title}>Create & Schedule PPC Campaigns</h1>
             <div style={styles.tabsContainer}>
-                <button style={activeTab === 'create' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('create')}>{formData.id ? 'Edit Schedule' : 'Create Campaign Set'}</button>
+                 <button style={activeTab === 'manual' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('manual')}>Create Manual Campaign</button>
+                <button style={activeTab === 'autoSet' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('autoSet')}>{autoFormData.id ? 'Edit Schedule' : 'Create Campaign Set'}</button>
                 <button style={activeTab === 'manage' ? {...styles.tabButton, ...styles.tabButtonActive} : styles.tabButton} onClick={() => setActiveTab('manage')}>Manage Schedules</button>
             </div>
             
             {statusMessage && <div style={{...styles.message, ...(statusMessage.type === 'success' ? styles.successMessage : styles.errorMessage)}}>{statusMessage.text}</div>}
 
-            {activeTab === 'create' ? renderCreateSetForm() : renderManageSchedules()}
+            {activeTab === 'manual' && renderCreateManualForm()}
+            {activeTab === 'autoSet' && renderCreateAutoSetForm()}
+            {activeTab === 'manage' && renderManageSchedules()}
             
             {renderHistoryModal()}
         </div>

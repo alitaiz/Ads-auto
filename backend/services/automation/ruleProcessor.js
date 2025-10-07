@@ -2,11 +2,11 @@
 import pool from '../../db.js';
 import { getPerformanceData } from './dataFetcher.js';
 import { 
+    evaluatePriceAdjustmentRule, 
     evaluateBidAdjustmentRule, 
+    evaluateSbSdBidAdjustmentRule, 
     evaluateSearchTermAutomationRule, 
     evaluateBudgetAccelerationRule, 
-    evaluateSbSdBidAdjustmentRule, 
-    evaluatePriceAdjustmentRule, 
     evaluateSearchTermHarvestingRule,
     evaluateAiSearchTermNegationRule
 } from './evaluators/index.js';
@@ -65,10 +65,49 @@ const processRule = async (rule) => {
                 return;
             }
 
+            let activeCampaignIds = [...campaignIds];
+
+            // For bid adjustments, only run on campaigns that are currently ENABLED.
+            if (rule.rule_type === 'BID_ADJUSTMENT' && campaignIds.length > 0) {
+                console.log(`[RulesEngine] Filtering for active campaigns for Bid Adjustment rule "${rule.name}".`);
+                try {
+                    let allFetchedCampaigns = [];
+                    if (rule.ad_type === 'SP') {
+                        const spResponse = await amazonAdsApiRequest({
+                            method: 'post', url: '/sp/campaigns/list', profileId: rule.profile_id,
+                            data: { campaignIdFilter: { include: campaignIds.map(String) }, stateFilter: { include: ['ENABLED'] } },
+                            headers: { 'Content-Type': 'application/vnd.spCampaign.v3+json' }
+                        });
+                        allFetchedCampaigns.push(...(spResponse.campaigns || []));
+                    } else if (rule.ad_type === 'SB') {
+                        const sbResponse = await amazonAdsApiRequest({
+                            method: 'post', url: '/sb/v4/campaigns/list', profileId: rule.profile_id,
+                            data: { campaignIdFilter: { include: campaignIds.map(String) }, stateFilter: { include: ['ENABLED'] } },
+                             headers: { 'Content-Type': 'application/vnd.sbcampaigns.v4+json', 'Accept': 'application/vnd.sbcampaigns.v4+json' }
+                        });
+                         allFetchedCampaigns.push(...(sbResponse.campaigns || []));
+                    } else if (rule.ad_type === 'SD') {
+                         const sdResponse = await amazonAdsApiRequest({
+                            method: 'get', url: '/sd/campaigns', profileId: rule.profile_id,
+                            params: { campaignIdFilter: campaignIds.join(','), stateFilter: 'enabled' }
+                        });
+                        allFetchedCampaigns.push(...(sdResponse || []));
+                    }
+                    
+                    activeCampaignIds = allFetchedCampaigns.map(c => c.campaignId);
+                    console.log(`[RulesEngine] Found ${activeCampaignIds.length} active campaigns out of ${campaignIds.length} in scope.`);
+
+                } catch (e) {
+                    console.error(`[RulesEngine] Failed to filter active campaigns for rule "${rule.name}". Proceeding with all scoped campaigns. Error:`, e.details || e.message);
+                    // Fallback to using all campaignIds if the check fails, to not break existing functionality
+                    activeCampaignIds = [...campaignIds];
+                }
+            }
+
             // For AI negation, performance data is fetched inside the evaluator
             let performanceMap = new Map();
             if (rule.rule_type !== 'AI_SEARCH_TERM_NEGATION') {
-                 const performanceDataResult = await getPerformanceData(rule, campaignIds);
+                 const performanceDataResult = await getPerformanceData(rule, activeCampaignIds);
                  performanceMap = performanceDataResult.performanceMap;
                  dataDateRange = performanceDataResult.dataDateRange;
             }

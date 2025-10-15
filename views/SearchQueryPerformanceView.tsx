@@ -435,6 +435,9 @@ export function SearchQueryPerformanceView() {
                             {sortedData.map(item => (
                                 <tr key={item.searchQuery}>
                                     {visibleColumns.map(col => {
+                                        const value = getNestedValue(item, col.id);
+                                        const canBeClicked = !!col.metricFormat;
+                                        
                                         if (col.id === 'searchQuery') {
                                             return (
                                                 <td key={col.id} style={styles.td} title={item.searchQuery}>
@@ -443,6 +446,22 @@ export function SearchQueryPerformanceView() {
                                                 </td>
                                             );
                                         }
+
+                                        if (col.id === 'clicks.asinCount') {
+                                            const spClicks = item.spClicks;
+                                            return (
+                                                <td
+                                                    key={col.id}
+                                                    style={{ ...styles.td, ...(canBeClicked && styles.clickableCell) }}
+                                                    onClick={() => canBeClicked && handleCellClick(item.searchQuery, col)}
+                                                    title={String(value)}
+                                                >
+                                                    {col.formatter(value)}
+                                                    {spClicks && spClicks > 0 && <span style={{ color: '#28a745', marginLeft: '8px' }}>(SP: {spClicks})</span>}
+                                                </td>
+                                            )
+                                        }
+
                                         return renderClickableCell(item, col);
                                     })}
                                 </tr>

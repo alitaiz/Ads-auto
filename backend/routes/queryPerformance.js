@@ -32,13 +32,6 @@ const formatDateSafe = (d) => {
     return `${year}-${month}-${day}`;
 };
 
-/**
- * Normalizes a percentage value (e.g., 2.25 for 2.25%) into a decimal ratio (e.g., 0.0225).
- * Safely handles non-numeric values by passing them through.
- * @param {any} value - The value to normalize.
- * @returns {number | any} The normalized decimal, or the original value.
- */
-const normalizePercent = (value) => (typeof value === 'number' ? value / 100 : value);
 
 /**
  * Safely retrieves a nested property from an object.
@@ -91,15 +84,25 @@ router.get('/query-performance', async (req, res) => {
     console.log(`[Server] Querying performance data for ASIN: ${asin}, from ${startDate} to ${endDate}`);
 
     try {
+        // Fetch SP clicks aggregated for the whole period for each search query, now filtered by ASIN
+        const spClicksQuery = `
+            SELECT 
+                customer_search_term, 
+                SUM(clicks)::int as "spClicks"
+            FROM sponsored_products_search_term_report
+            WHERE report_date BETWEEN $1 AND $2 AND asin = $3
+            GROUP BY customer_search_term;
+        `;
+        const spClicksResult = await pool.query(spClicksQuery, [startDate, endDate, asin]);
+        const spClicksMap = new Map();
+        spClicksResult.rows.forEach(row => {
+            spClicksMap.set(row.customer_search_term, row.spClicks);
+        });
+
         const query = `
             SELECT 
-                qp.performance_data,
-                EXISTS (
-                    SELECT 1
-                    FROM sponsored_products_search_term_report sp
-                    WHERE sp.customer_search_term = qp.search_query
-                      AND sp.report_date BETWEEN qp.start_date AND qp.end_date
-                ) as "hasSPData"
+                qp.search_query,
+                qp.performance_data
             FROM query_performance_data qp
             WHERE qp.asin = $1 AND qp.start_date >= $2 AND qp.start_date <= $3;
         `;
@@ -125,19 +128,17 @@ router.get('/query-performance', async (req, res) => {
             const sq = raw.searchQueryData.searchQuery;
             if (!aggregationMap.has(sq)) {
                 aggregationMap.set(sq, {
-                    hasSPData: false,
                     searchQueryScore: raw.searchQueryData.searchQueryScore,
                     searchQueryVolume: 0,
                     impressionData: { totalQueryImpressionCount: 0, asinImpressionCount: 0 },
                     clickData: { totalClickCount: 0, asinClickCount: 0, totalSameDayShippingClickCount: 0, totalOneDayShippingClickCount: 0, totalTwoDayShippingClickCount: 0, totalMedianClickPrices: [], asinMedianClickPrices: [] },
                     cartAddData: { totalCartAddCount: 0, asinCartAddCount: 0, totalSameDayShippingCartAddCount: 0, totalOneDayShippingCartAddCount: 0, totalTwoDayShippingCartAddCount: 0, totalMedianCartAddPrices: [], asinMedianCartAddPrices: [] },
-                    purchaseData: { totalPurchaseCount: 0, asinPurchaseCount: 0, totalSameDayShippingPurchaseCount: 0, totalOneDayShippingPurchaseCount: 0, totalTwoDayShippingPurchaseCount: 0, totalMedianPurchasePrices: [], asinMedianPurchasePrices: [] },
+                    purchaseData: { totalPurchaseCount: 0, asinCount: 0, totalSameDayShippingPurchaseCount: 0, totalOneDayShippingPurchaseCount: 0, totalTwoDayShippingPurchaseCount: 0, totalMedianPurchasePrices: [], asinMedianPurchasePrices: [] },
                 });
             }
 
             const agg = aggregationMap.get(sq);
             
-            agg.hasSPData = agg.hasSPData || row.hasSPData;
             agg.searchQueryVolume += raw.searchQueryData.searchQueryVolume || 0;
             agg.impressionData.totalQueryImpressionCount += raw.impressionData?.totalQueryImpressionCount || 0;
             agg.impressionData.asinImpressionCount += raw.impressionData?.asinImpressionCount || 0;
@@ -159,7 +160,7 @@ router.get('/query-performance', async (req, res) => {
             agg.cartAddData.totalTwoDayShippingCartAddCount += raw.cartAddData?.totalTwoDayShippingCartAddCount || 0;
             
             agg.purchaseData.totalPurchaseCount += raw.purchaseData?.totalPurchaseCount || 0;
-            agg.purchaseData.asinPurchaseCount += raw.purchaseData?.asinPurchaseCount || 0;
+            agg.purchaseData.asinCount += raw.purchaseData?.asinCount || 0;
             if(raw.purchaseData?.totalMedianPurchasePrice?.amount) agg.purchaseData.totalMedianPurchasePrices.push(raw.purchaseData.totalMedianPurchasePrice.amount);
             if(raw.purchaseData?.asinMedianPurchasePrice?.amount) agg.purchaseData.asinMedianPurchasePrices.push(raw.purchaseData.asinMedianPurchasePrice.amount);
             agg.purchaseData.totalSameDayShippingPurchaseCount += raw.purchaseData?.totalSameDayShippingPurchaseCount || 0;
@@ -172,21 +173,25 @@ router.get('/query-performance', async (req, res) => {
 
         for (const [searchQuery, agg] of aggregationMap.entries()) {
              const currencyCode = 'USD'; // Assume USD for aggregated median price
+             const safeDivide = (num, den) => (den > 0 ? num / den : 0);
+             const spClicks = spClicksMap.get(searchQuery) || 0;
 
             transformedData.push({
                 searchQuery,
                 searchQueryScore: agg.searchQueryScore,
                 searchQueryVolume: agg.searchQueryVolume,
+                hasSPData: spClicks > 0,
+                spClicks: spClicks,
                 impressions: {
                     totalCount: agg.impressionData.totalQueryImpressionCount,
                     asinCount: agg.impressionData.asinImpressionCount,
-                    asinShare: agg.impressionData.totalQueryImpressionCount > 0 ? agg.impressionData.asinImpressionCount / agg.impressionData.totalQueryImpressionCount : 0,
+                    asinShare: safeDivide(agg.impressionData.asinImpressionCount, agg.impressionData.totalQueryImpressionCount),
                 },
                 clicks: {
                     totalCount: agg.clickData.totalClickCount,
-                    clickRate: agg.searchQueryVolume > 0 ? agg.clickData.totalClickCount / agg.searchQueryVolume : 0,
+                    clickRate: safeDivide(agg.clickData.totalClickCount, agg.impressionData.totalQueryImpressionCount),
                     asinCount: agg.clickData.asinClickCount,
-                    asinShare: agg.clickData.totalClickCount > 0 ? agg.clickData.asinClickCount / agg.clickData.totalClickCount : 0,
+                    asinShare: safeDivide(agg.clickData.asinClickCount, agg.clickData.totalClickCount),
                     totalMedianPrice: formatPrice(getMedian(agg.clickData.totalMedianClickPrices) != null ? { amount: getMedian(agg.clickData.totalMedianClickPrices), currencyCode } : null),
                     asinMedianPrice: formatPrice(getMedian(agg.clickData.asinMedianClickPrices) != null ? { amount: getMedian(agg.clickData.asinMedianClickPrices), currencyCode } : null),
                     sameDayShippingCount: agg.clickData.totalSameDayShippingClickCount,
@@ -195,9 +200,9 @@ router.get('/query-performance', async (req, res) => {
                 },
                 cartAdds: {
                     totalCount: agg.cartAddData.totalCartAddCount,
-                    cartAddRate: agg.searchQueryVolume > 0 ? agg.cartAddData.totalCartAddCount / agg.searchQueryVolume : 0,
+                    cartAddRate: safeDivide(agg.cartAddData.totalCartAddCount, agg.impressionData.totalQueryImpressionCount),
                     asinCount: agg.cartAddData.asinCartAddCount,
-                    asinShare: agg.cartAddData.totalCartAddCount > 0 ? agg.cartAddData.asinCartAddCount / agg.cartAddData.totalCartAddCount : 0,
+                    asinShare: safeDivide(agg.cartAddData.asinCartAddCount, agg.cartAddData.totalCartAddCount),
                     totalMedianPrice: formatPrice(getMedian(agg.cartAddData.totalMedianCartAddPrices) != null ? { amount: getMedian(agg.cartAddData.totalMedianCartAddPrices), currencyCode } : null),
                     asinMedianPrice: formatPrice(getMedian(agg.cartAddData.asinMedianCartAddPrices) != null ? { amount: getMedian(agg.cartAddData.asinMedianCartAddPrices), currencyCode } : null),
                     sameDayShippingCount: agg.cartAddData.totalSameDayShippingCartAddCount,
@@ -206,16 +211,15 @@ router.get('/query-performance', async (req, res) => {
                 },
                 purchases: {
                     totalCount: agg.purchaseData.totalPurchaseCount,
-                    purchaseRate: agg.searchQueryVolume > 0 ? agg.purchaseData.totalPurchaseCount / agg.searchQueryVolume : 0,
+                    purchaseRate: safeDivide(agg.purchaseData.totalPurchaseCount, agg.impressionData.totalQueryImpressionCount),
                     asinCount: agg.purchaseData.asinCount,
-                    asinShare: agg.purchaseData.totalPurchaseCount > 0 ? agg.purchaseData.asinCount / agg.purchaseData.totalPurchaseCount : 0,
+                    asinShare: safeDivide(agg.purchaseData.asinCount, agg.purchaseData.totalPurchaseCount),
                     totalMedianPrice: formatPrice(getMedian(agg.purchaseData.totalMedianPurchasePrices) != null ? { amount: getMedian(agg.purchaseData.totalMedianPurchasePrices), currencyCode } : null),
                     asinMedianPrice: formatPrice(getMedian(agg.purchaseData.asinMedianPurchasePrices) != null ? { amount: getMedian(agg.purchaseData.asinMedianPurchasePrices), currencyCode } : null),
                     sameDayShippingCount: agg.purchaseData.totalSameDayShippingPurchaseCount,
                     oneDayShippingCount: agg.purchaseData.totalOneDayShippingPurchaseCount,
                     twoDayShippingCount: agg.purchaseData.totalTwoDayShippingPurchaseCount,
-                },
-                hasSPData: agg.hasSPData
+                }
             });
         }
         
@@ -245,21 +249,22 @@ router.get('/query-performance-history', async (req, res) => {
                 WITH DateSeries AS (
                     SELECT generate_series($2::date, $3::date, '7 days'::interval)::date AS report_date
                 ),
-                AllDataForQuery AS (
-                    SELECT start_date, (performance_data->'searchQueryData'->>'searchQueryVolume')::numeric as value
+                WeeklyVolume AS (
+                    SELECT 
+                        start_date, 
+                        MAX((performance_data->'searchQueryData'->>'searchQueryVolume')::numeric) as value
                     FROM query_performance_data
                     WHERE search_query = $1
                       AND (performance_data->'searchQueryData'->>'searchQueryVolume') IS NOT NULL
                       AND start_date BETWEEN $2 AND $3
-                ),
-                DistinctWeeklyVolume AS (
-                    SELECT DISTINCT ON (start_date) start_date, value
-                    FROM AllDataForQuery
+                    GROUP BY start_date
                 )
-                SELECT ws.report_date, dwv.value
-                FROM DateSeries ws
-                LEFT JOIN DistinctWeeklyVolume dwv ON ws.report_date = dwv.start_date
-                ORDER BY ws.report_date ASC;
+                SELECT 
+                    ds.report_date, 
+                    wv.value
+                FROM DateSeries ds
+                LEFT JOIN WeeklyVolume wv ON ds.report_date = wv.start_date
+                ORDER BY ds.report_date ASC;
             `;
             performanceQueryParams = [searchQuery, startDate, endDate];
         } else {
@@ -291,22 +296,25 @@ router.get('/query-performance-history', async (req, res) => {
         const spMaxDate = new Date(`${endDate}T00:00:00.000Z`);
         spMaxDate.setDate(spMaxDate.getDate() + 6);
 
+        // CORRECTED QUERY: Added the missing "AND asin = $4" clause to ensure data is specific to the selected ASIN.
         const spDataQuery = `
             SELECT
                 date_trunc('week', report_date + interval '1 day')::date - interval '1 day' as week_start_date,
                 SUM(impressions)::int as sp_impressions,
                 SUM(clicks)::int as sp_clicks,
-                SUM(seven_day_total_orders)::int as sp_orders
+                SUM(purchases_7d)::int as sp_orders
             FROM sponsored_products_search_term_report
             WHERE customer_search_term = $1
               AND report_date BETWEEN $2 AND $3
+              AND asin = $4
             GROUP BY week_start_date
             ORDER BY week_start_date ASC;
         `;
         const spResult = await pool.query(spDataQuery, [
             searchQuery, 
             startDate, 
-            formatDateSafe(spMaxDate)
+            formatDateSafe(spMaxDate),
+            asin // Pass the ASIN as the fourth parameter
         ]);
 
         const spDataMap = new Map();
@@ -328,6 +336,12 @@ router.get('/query-performance-history', async (req, res) => {
             historyData = performanceResult.rows.map(row => {
                 if (!row.performance_data) return { report_date: row.report_date, value: null };
                 const raw = row.performance_data;
+                
+                const safeDivide = (numerator, denominator) => {
+                    const num = numerator || 0;
+                    const den = denominator || 0;
+                    return den > 0 ? num / den : 0;
+                };
 
                 const transformed = {
                     searchQuery: raw.searchQueryData?.searchQuery,
@@ -336,27 +350,27 @@ router.get('/query-performance-history', async (req, res) => {
                     impressions: {
                         totalCount: raw.impressionData?.totalQueryImpressionCount,
                         asinCount: raw.impressionData?.asinImpressionCount,
-                        asinShare: normalizePercent(raw.impressionData?.asinImpressionShare),
+                        asinShare: safeDivide(raw.impressionData?.asinImpressionCount, raw.impressionData?.totalQueryImpressionCount),
                     },
                     clicks: {
                         totalCount: raw.clickData?.totalClickCount,
-                        clickRate: normalizePercent(raw.clickData?.totalClickRate),
+                        clickRate: safeDivide(raw.clickData?.totalClickCount, raw.impressionData?.totalQueryImpressionCount),
                         asinCount: raw.clickData?.asinClickCount,
-                        asinShare: normalizePercent(raw.clickData?.asinClickShare),
+                        asinShare: safeDivide(raw.clickData?.asinClickCount, raw.clickData?.totalClickCount),
                         totalMedianPrice: raw.clickData?.totalMedianClickPrice?.amount,
                         asinMedianPrice: raw.clickData?.asinMedianClickPrice?.amount,
                     },
                     cartAdds: {
                         totalCount: raw.cartAddData?.totalCartAddCount,
-                        cartAddRate: normalizePercent(raw.cartAddData?.totalCartAddRate),
+                        cartAddRate: safeDivide(raw.cartAddData?.totalCartAddCount, raw.impressionData?.totalQueryImpressionCount),
                         asinCount: raw.cartAddData?.asinCartAddCount,
-                        asinShare: normalizePercent(raw.cartAddData?.asinCartAddShare),
+                        asinShare: safeDivide(raw.cartAddData?.asinCartAddCount, raw.cartAddData?.totalCartAddCount),
                     },
                     purchases: {
                         totalCount: raw.purchaseData?.totalPurchaseCount,
-                        purchaseRate: normalizePercent(raw.purchaseData?.totalPurchaseRate),
+                        purchaseRate: safeDivide(raw.purchaseData?.totalPurchaseCount, raw.impressionData?.totalQueryImpressionCount),
                         asinCount: raw.purchaseData?.asinCount,
-                        asinShare: normalizePercent(raw.purchaseData?.asinShare),
+                        asinShare: safeDivide(raw.purchaseData?.asinCount, raw.purchaseData?.totalPurchaseCount),
                     },
                 };
                 const value = getNested(transformed, metricId);

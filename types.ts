@@ -333,6 +333,7 @@ export interface QueryPerformanceData {
     cartAdds: { cartAddRate: number; totalCount: number; asinCount: number; asinShare: number; totalMedianPrice: string; asinMedianPrice: string; sameDayShippingCount: number; oneDayShippingCount: number; twoDayShippingCount: number; };
     purchases: { purchaseRate: number; totalCount: number; asinCount: number; asinShare: number; totalMedianPrice: string; asinMedianPrice: string; sameDayShippingCount: number; oneDayShippingCount: number; twoDayShippingCount: number; };
     hasSPData?: boolean;
+    spClicks?: number;
 }
 
 export interface PerformanceFilterOptions {

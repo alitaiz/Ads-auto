@@ -101,16 +101,15 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
         };
 
         const formatDate = (dateStr: string) => {
-             const d = new Date(dateStr);
-             // Use UTC methods to avoid timezone shifts
-             return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+             // Handle potential timezone issues by parsing as UTC
+             const d = new Date(dateStr.includes('T') ? dateStr : dateStr + 'T00:00:00Z');
+             return d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'UTC' });
         };
 
         const labels = historyData.map(d => formatDate(d.report_date));
         
-        // Use any[] to allow mixed chart types (line and bar)
         const datasets: any[] = [{
-            type: 'line',
+            type: 'line' as const,
             label: config.metricLabel,
             data: historyData.map(d => d.value),
             borderColor: 'var(--primary-color)',
@@ -120,22 +119,22 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
         }];
 
         const hasSpData = historyData.some(d => d.sp_clicks !== null && typeof d.sp_clicks === 'number');
+        const shouldShowSpClicksChart = hasSpData && config.metricId === 'clicks.asinCount';
 
-        if (hasSpData) {
+        if (shouldShowSpClicksChart) {
             datasets.push({
+                type: 'bar' as const,
                 label: 'SP Clicks',
                 data: historyData.map(d => d.sp_clicks),
-                borderColor: '#28a745',
-                backgroundColor: 'rgba(40, 167, 69, 0.5)',
-                type: 'bar',
-                // Both datasets will now use the default 'y' axis
+                backgroundColor: 'rgba(40, 167, 69, 0.6)',
+                yAxisID: 'y', // Plot on the primary y-axis
             });
         }
         
         setChartData({ labels, datasets });
 
     }, [historyData, config]);
-
+    
     const chartOptions: any = {
         responsive: true,
         maintainAspectRatio: false,
@@ -148,17 +147,25 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
                 type: 'linear' as const,
                 display: true,
                 position: 'left' as const,
-                title: { display: true, text: 'Value' },
+                title: { display: true, text: config.metricLabel },
+                beginAtZero: true,
+                grace: '5%',
                 ticks: {
                     callback: (value: any) => {
-                        if (config.metricFormat === 'percent') return `${(value * 100).toFixed(1)}%`;
+                        if (config.metricFormat === 'percent') return `${(Number(value) * 100).toFixed(1)}%`;
                         if (config.metricFormat === 'price') return `$${Number(value).toFixed(2)}`;
-                        return value;
+                        return Number(value).toLocaleString();
                     }
                 }
             },
-            // The second y-axis has been removed to fix the rendering crash.
-            // Both datasets will now render on the primary y-axis.
+            y1: {
+                type: 'linear' as const,
+                display: false, // Hide the secondary y-axis
+                position: 'right' as const,
+                grid: {
+                    drawOnChartArea: false,
+                },
+            }
         },
     };
 
@@ -169,7 +176,6 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
                 <div style={styles.modalBody}>
                     {loading && <div style={styles.message}>Loading history...</div>}
                     {error && <div style={styles.message}>{error}</div>}
-                    {/* FIX: The Chart component requires a 'type' prop. For mixed charts, 'bar' is used as the base type, and datasets override it. */}
                     {!loading && !error && chartData && <Chart type={'bar' as keyof ChartTypeRegistry} options={chartOptions} data={chartData} />}
                     {!loading && !error && !chartData && <div style={styles.message}>No historical data available.</div>}
                 </div>

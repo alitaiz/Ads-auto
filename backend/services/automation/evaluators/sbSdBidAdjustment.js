@@ -24,6 +24,10 @@ export const evaluateSbSdBidAdjustmentRule = async (rule, performanceData, throt
             });
             if (Array.isArray(response)) {
                 response.forEach(kw => {
+                    if (kw.state?.toLowerCase() !== 'enabled') {
+                        console.log(`[RulesEngine] Skipping paused/archived SB keyword ${kw.keywordId}`);
+                        return;
+                    }
                     const entity = performanceData.get(kw.keywordId.toString());
                     if (entity && typeof kw.bid === 'number') entity.currentBid = kw.bid;
                 });
@@ -36,6 +40,10 @@ export const evaluateSbSdBidAdjustmentRule = async (rule, performanceData, throt
             });
             if (Array.isArray(response)) {
                 response.forEach(t => {
+                    if (t.state?.toLowerCase() !== 'enabled') {
+                        console.log(`[RulesEngine] Skipping paused/archived SB target ${t.targetId}`);
+                        return;
+                    }
                     const entity = performanceData.get(t.targetId.toString());
                     if (entity && typeof t.bid === 'number') entity.currentBid = t.bid;
                 });
@@ -46,8 +54,14 @@ export const evaluateSbSdBidAdjustmentRule = async (rule, performanceData, throt
                 method: 'get', url: '/sd/targets', profileId: rule.profile_id,
                 params: { targetIdFilter: allTargetIds.join(',') },
             });
-            if (Array.isArray(response)) {
-                response.forEach(t => {
+
+            const targetsInResponse = response.targets || response;
+            if (Array.isArray(targetsInResponse)) {
+                targetsInResponse.forEach(t => {
+                    if (t.state?.toLowerCase() !== 'enabled') {
+                        console.log(`[RulesEngine] Skipping paused/archived SD target ${t.targetId}`);
+                        return;
+                    }
                     const entity = performanceData.get(t.targetId.toString());
                     if (entity && typeof t.bid === 'number') {
                         entity.currentBid = t.bid;

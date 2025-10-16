@@ -69,7 +69,7 @@ const getAllEntitiesForCampaigns = async (profileId, campaignIds) => {
     // 1. Fetch Ad Groups for all campaigns in parallel
     const adGroupPromises = campaignIds.map(campaignId =>
         paginatedPostRequest(profileId, '/sp/adGroups/list',
-            { campaignIdFilter: { include: [campaignId] }, stateFilter: { include: ["ENABLED", "PAUSED"] }, maxResults: 500 },
+            { campaignIdFilter: { include: [campaignId] }, stateFilter: { include: ["ENABLED"] }, maxResults: 500 },
             { 'Content-Type': 'application/vnd.spAdGroup.v3+json', 'Accept': 'application/vnd.spAdGroup.v3+json' },
             'adGroups'
         )
@@ -86,7 +86,7 @@ const getAllEntitiesForCampaigns = async (profileId, campaignIds) => {
     // 2. Fetch Keywords and Targets for all Ad Groups in parallel
     const keywordPromises = allAdGroupIds.map(adGroupId =>
         paginatedPostRequest(profileId, '/sp/keywords/list',
-            { adGroupIdFilter: { include: [adGroupId] }, stateFilter: { include: ["ENABLED", "PAUSED"] }, maxResults: 1000 },
+            { adGroupIdFilter: { include: [adGroupId] }, stateFilter: { include: ["ENABLED"] }, maxResults: 1000 },
             { 'Content-Type': 'application/vnd.spKeyword.v3+json', 'Accept': 'application/vnd.spKeyword.v3+json' },
             'keywords'
         )
@@ -94,7 +94,7 @@ const getAllEntitiesForCampaigns = async (profileId, campaignIds) => {
 
     const targetPromises = allAdGroupIds.map(adGroupId =>
         paginatedPostRequest(profileId, '/sp/targets/list',
-            { adGroupIdFilter: { include: [adGroupId] }, stateFilter: { include: ["ENABLED", "PAUSED"] }, maxResults: 1000 },
+            { adGroupIdFilter: { include: [adGroupId] }, stateFilter: { include: ["ENABLED"] }, maxResults: 1000 },
             { 'Content-Type': 'application/vnd.spTargetingClause.v3+json', 'Accept': 'application/vnd.spTargetingClause.v3+json' },
             'targetingClauses'
         )

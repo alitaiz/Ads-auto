@@ -1,0 +1,367 @@
+Tuyệt — mình sẽ đưa bạn quy trình “chunked mode” để agent tự động tạo Báo cáo đầu tuần từ PostgreSQL trên VPS Ubuntu. Agent không nhận 1 cục data, mà được “cho ăn” từng phần theo kịch bản có kiểm soát. Bạn chỉ cần cài lịch (cron) là chạy.
+
+1) Kiến trúc tổng quát (rất gọn)
+
+PostgreSQL (đã có): chứa bảng raw từ API Amazon.
+
+Lớp chuẩn hoá + view tuần (SQL/DBT): ép kiểu số & ngày, gom theo tuần.
+
+Orchestrator (Python CLI): chạy theo pipeline 5 bước; mỗi bước:
+
+Query 1 phần dữ liệu từ Postgres →
+
+Gửi cho AI Agent (prompt chuyên biệt cho bước) →
+
+Nhận kết quả & ghi lại vào bảng agent_outputs.
+
+Composer: ghép các phần đã phân tích thành bản báo cáo cuối (Markdown/HTML/PDF).
+
+Scheduler: cron chạy mỗi thứ Hai 08:30 Asia/Bangkok.
+
+2) Mô hình dữ liệu & chuẩn hoá (Postgres)
+
+Giả sử bạn đã có 4 bảng raw:
+
+raw_search_term_report (SR, theo ngày)
+
+raw_stream (Ads Stream, theo ngày × match-type)
+
+raw_sales_traffic (S&T, theo ngày)
+
+raw_sqp (Search Query Performance, theo tuần; trường week_start_date)
+
+(a) Ép kiểu & làm sạch (materialized views)
+
+-- 0) Lịch tuần (tuần bắt đầu Chủ nhật)
+create materialized view if not exists dim_calendar as
+select d::date as d,
+       date_trunc('week', d)::date as week_start     -- mặc định PG: tuần bắt đầu Chủ nhật (US)
+from generate_series('2025-01-01'::date, '2030-12-31'::date, interval '1 day') g(d);
+
+-- 1) Search Term Report (SR) – theo ngày
+create materialized view if not exists mv_sr_daily as
+select
+  asin,
+  (report_date::date) as d,
+  lower(trim(customer_search_term)) as search_term,
+  impressions::int,
+  clicks::int,
+  spend::numeric(10,2),
+  sales::numeric(10,2),
+  orders::int
+from raw_search_term_report;
+
+-- 2) Stream – theo ngày × match-type
+create materialized view if not exists mv_stream_daily as
+select
+  asin,
+  (event_date::date) as d,
+  lower(entity_text) as match_type,      -- "loose-match" | "close-match" | "complements"
+  impressions::int,
+  clicks::int,
+  spend::numeric(10,2),
+  orders_1d::int as orders,
+  sales_1d::numeric(10,2) as sales
+from raw_stream;
+
+-- 3) Sales & Traffic – theo ngày
+create materialized view if not exists mv_st_daily as
+select
+  asin,
+  (report_date::date) as d,
+  unitsOrdered::int as units,
+  orderedProductSales::numeric(10,2) as sales,
+  sessions::int,
+  pageViews::int,
+  buyBoxPercentage::numeric(6,4) as buybox
+from raw_sales_traffic;
+
+-- 4) SQP – theo tuần (đã có week_start_date)
+create materialized view if not exists mv_sqp_weekly as
+select
+  asin,
+  (week_start_date::date) as week_start,
+  lower(searchQuery) as search_query,
+  searchQueryScore::int,
+  searchQueryVolume::int,
+  (impressions->>'totalCount')::int as market_impr,
+  (impressions->>'asinCount')::int  as asin_impr,
+  (clicks->>'totalCount')::int      as market_clicks,
+  (clicks->>'asinCount')::int       as asin_clicks,
+  (purchases->>'totalCount')::int   as market_purch,
+  (purchases->>'asinCount')::int    as asin_purch,
+  nullif(regexp_replace((clicks->>'totalMedianPrice'), '[^\d\.]', '', 'g'),'')::numeric(10,2)  as market_median_price,
+  nullif(regexp_replace((clicks->>'asinMedianPrice'),  '[^\d\.]', '', 'g'),'')::numeric(10,2)  as asin_median_price
+from raw_sqp;
+
+
+(b) Gom theo tuần (views)
+
+-- SR tuần
+create view vw_sr_weekly as
+select s.asin, c.week_start, s.search_term,
+       sum(s.impressions) impr, sum(s.clicks) clk,
+       sum(s.spend) spend, sum(s.sales) sales, sum(s.orders) orders
+from mv_sr_daily s
+join dim_calendar c on c.d = s.d
+group by 1,2,3;
+
+-- Stream tuần theo match-type
+create view vw_stream_weekly as
+select st.asin, c.week_start, st.match_type,
+       sum(st.impressions) impr, sum(st.clicks) clk,
+       sum(st.spend) spend, sum(st.sales) sales, sum(st.orders) orders
+from mv_stream_daily st
+join dim_calendar c on c.d = st.d
+group by 1,2,3;
+
+-- Sales & Traffic tuần
+create view vw_st_weekly as
+select s.asin, c.week_start,
+       sum(s.units) units, sum(s.sales) sales,
+       sum(s.sessions) sessions, sum(s.pageViews) pageviews,
+       avg(s.buybox) buybox
+from mv_st_daily s
+join dim_calendar c on c.d = s.d
+group by 1,2;
+
+3) Bảng trạng thái & output cho Agent
+-- Agent log (lưu từng bước)
+create table if not exists agent_runs (
+  run_id uuid default gen_random_uuid() primary key,
+  asin text,
+  week_start date,
+  started_at timestamptz default now(),
+  finished_at timestamptz
+);
+
+create table if not exists agent_outputs (
+  run_id uuid,
+  step_no int,                -- 1..5
+  step_name text,             -- "KPI", "Ads", "Mapping", "P&L", "Actions"
+  input_excerpt jsonb,        -- phần data (tóm tắt) gửi vào LLM
+  analysis_md text,           -- phân tích dạng Markdown
+  PRIMARY KEY (run_id, step_no)
+);
+
+4) Pipeline 5 bước (chunked mode)
+
+Bạn chạy một script Python; script thực hiện 5 lệnh gọi AI riêng biệt. Mỗi bước chỉ feed 1 phần dữ liệu cần thiết + ngữ cảnh ngắn.
+
+Bước 1 – KPI (Sales & Traffic)
+
+SQL input (ví dụ cho tuần bắt đầu 2025-09-28 và ASIN B0CHNYFDLM):
+
+select * from vw_st_weekly where asin = 'B0CHNYFDLM' and week_start = '2025-09-28';
+select d, units, sales, sessions, pageviews from mv_st_daily
+ where asin='B0CHNYFDLM' and d between '2025-09-28' and '2025-10-04' order by d;
+
+
+Prompt ngắn cho agent (chỉ gửi số liệu ở trên):
+
+“Bạn là analyst Amazon. Tóm tắt KPI tuần (doanh thu, units, sessions, buybox), nêu ngày đỉnh, và 2–3 nhận xét về xu hướng.”
+
+Bước 2 – Ads theo match-type (Stream)
+
+SQL:
+
+select * from vw_stream_weekly
+ where asin='B0CHNYFDLM' and week_start='2025-09-28' order by match_type;
+
+
+Prompt:
+
+“Phân tích hiệu quả Ads theo match-type (impr/clk/spend/sales/orders, CPC, CVR, ACOS, ROAS). Chỉ rõ match-type cần tăng/giảm ngân sách và lý do.”
+
+Bước 3 – Mapping SQP ↔ SR (Truy vấn ↔ từ khoá đã mua)
+
+SQL (top cơ hội từ SQP + SR winners):
+
+-- Top query thị trường có volume & giá median ≥ price, nhưng asin_clicks thấp:
+select search_query, searchQueryScore, searchQueryVolume,
+       market_impr, market_clicks, market_median_price,
+       asin_impr, asin_clicks, asin_purch
+from mv_sqp_weekly
+where asin='B0CHNYFDLM' and week_start='2025-09-28'
+  and market_median_price is not null
+order by searchQueryVolume desc
+limit 30;
+
+-- Từ khoá đã có đơn trong SR tuần:
+select search_term, clk, orders, sales, spend
+from vw_sr_weekly
+where asin='B0CHNYFDLM' and week_start='2025-09-28' and orders > 0
+order by orders desc, sales desc;
+
+
+Prompt:
+
+“Ghép các query SQP với search terms đã có đơn (SR) theo intent gần nhất. Đề xuất 10 Exact/Phrase ưu tiên + 10 Negative. Lý do: dựa vào volume, median price, và lịch sử orders ở SR.”
+
+Bước 4 – P&L + ngưỡng kiểm soát
+
+Input cố định: Price, COGS, Fees (bạn có: $13.99, $1.5, $5.5).
+
+SQL lấy Sales & Spend tuần:
+
+select sales from vw_st_weekly where asin='B0CHNYFDLM' and week_start='2025-09-28';
+select coalesce(sum(spend),0) as ad_spend
+from vw_stream_weekly where asin='B0CHNYFDLM' and week_start='2025-09-28';
+
+
+Prompt:
+
+“Tính biên đơn vị, break-even ACOS, TACOS, lợi nhuận ước tính tuần. Đề xuất biên độ CPC & ACOS mục tiêu cho tuần tới.”
+
+Bước 5 – Action plan + Composer
+
+Input: ghép analysis_md của 4 bước trước (lấy từ agent_outputs) + bảng tóm tắt top 10 đề xuất (B3).
+
+Prompt:
+
+“Kết tinh thành 1 báo cáo hoàn chỉnh (Executive summary → KPI → Ads → Mapping → P&L → Actionable plan). Ngắn gọn, bullet rõ, có KPI mục tiêu tuần tới.”
+
+Tất cả output của mỗi bước được ghi lại (Markdown) để audit & tái sử dụng.
+
+5) Orchestrator (Python outline)
+# file: weekly_report.py
+import os, psycopg2, uuid, datetime
+from llm_client import call_llm  # bạn gói vendor LLM nào cũng được
+
+ASIN = "B0CHNYFDLM"
+WEEK_START = "2025-09-28"  # khi chạy thật: tự động tính "Chủ nhật gần nhất"
+
+def q(sql, params=None):
+    with psycopg2.connect(os.getenv("PG_DSN")) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params or ())
+            cols = [c.name for c in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            return rows
+
+def save(run_id, step_no, step_name, input_excerpt, analysis_md):
+    q("""insert into agent_outputs(run_id, step_no, step_name, input_excerpt, analysis_md)
+         values(%s,%s,%s,%s,%s)""", (run_id, step_no, step_name, input_excerpt, analysis_md))
+
+def main():
+    run_id = str(uuid.uuid4())
+    q("insert into agent_runs(run_id, asin, week_start) values(%s,%s,%s)",
+      (run_id, ASIN, WEEK_START))
+
+    # B1: KPI
+    kpi = q("""select * from vw_st_weekly where asin=%s and week_start=%s""", (ASIN, WEEK_START))
+    daily = q("""select d, units, sales, sessions, pageviews from mv_st_daily
+                 where asin=%s and d between %s::date and (%s::date + interval '6 day') order by d""",
+               (ASIN, WEEK_START, WEEK_START))
+    analysis1 = call_llm(system="Bạn là analyst Amazon...",
+                         prompt=f"KPI tuần:\n{kpi}\nDaily:\n{daily}\nHãy tóm tắt...")
+    save(run_id, 1, "KPI", {"kpi": kpi, "daily": daily}, analysis1)
+
+    # B2: Ads
+    stream = q("""select * from vw_stream_weekly where asin=%s and week_start=%s""", (ASIN, WEEK_START))
+    analysis2 = call_llm(system="Bạn là chuyên gia quảng cáo Amazon...",
+                         prompt=f"Dữ liệu Ads:\n{stream}\nPhân tích match-type...")
+    save(run_id, 2, "Ads", {"stream": stream}, analysis2)
+
+    # B3: Mapping
+    sqp = q("""select search_query, searchqueryscore, searchqueryvolume,
+                      market_impr, market_clicks, market_median_price,
+                      asin_impr, asin_clicks, asin_purch
+               from mv_sqp_weekly where asin=%s and week_start=%s
+               order by searchqueryvolume desc limit 60""", (ASIN, WEEK_START))
+    sr_wins = q("""select search_term, clk, orders, sales, spend
+                   from vw_sr_weekly where asin=%s and week_start=%s and orders>0""",
+                (ASIN, WEEK_START))
+    analysis3 = call_llm(system="Bạn là chuyên gia keyword...",
+                         prompt=f"SQP top:\n{sqp}\nSR winners:\n{sr_wins}\nHãy ghép & đề xuất...")
+    save(run_id, 3, "Mapping", {"sqp": sqp, "sr_wins": sr_wins}, analysis3)
+
+    # B4: P&L
+    st = q("""select sales from vw_st_weekly where asin=%s and week_start=%s""", (ASIN, WEEK_START))[0]
+    spend = q("""select coalesce(sum(spend),0) ad_spend from vw_stream_weekly where asin=%s and week_start=%s""",
+              (ASIN, WEEK_START))[0]
+    inputs4 = {"price": 13.99, "cogs": 1.5, "fees": 5.5, "sales": st["sales"], "ad_spend": spend["ad_spend"]}
+    analysis4 = call_llm(system="Bạn là tài chính thương mại điện tử...",
+                         prompt=f"Input P&L: {inputs4}\nTính break-even ACOS, TACOS, profit...")
+    save(run_id, 4, "P&L", inputs4, analysis4)
+
+    # B5: Compose
+    parts = q("""select step_no, step_name, analysis_md from agent_outputs
+                 where run_id=%s order by step_no""", (run_id,))
+    analysis5 = call_llm(system="Bạn là biên tập viên báo cáo...",
+                         prompt=f"Hãy ghép các phần sau thành báo cáo tuần mạch lạc:\n{parts}")
+    save(run_id, 5, "Actions+Report", {"parts": [p["step_name"] for p in parts]}, analysis5)
+
+    q("update agent_runs set finished_at=now() where run_id=%s", (run_id,))
+    print("DONE", run_id)
+
+if __name__ == "__main__":
+    main()
+
+
+Ghi chú: call_llm là wrapper của bạn (OpenAI API hay model nào tuỳ), nhớ giới hạn token & log lời gọi.
+
+6) Tạo báo cáo cuối & xuất file
+-- Lấy Markdown cuối cùng
+select analysis_md from agent_outputs
+where run_id = $RUN_ID and step_no = 5;
+
+
+Dùng Python chuyển Markdown → HTML/PDF (vd: markdown → HTML rồi wkhtmltopdf).
+
+Gửi email/Slack: dùng SMTP/Slack webhook.
+
+7) Lịch chạy (cron – Ubuntu)
+# Mở crontab
+crontab -e
+
+# Chạy mỗi Thứ Hai 08:30 (Asia/Bangkok)
+# Cron dùng UTC: Bangkok = UTC+7 => 01:30 UTC
+30 1 * * 1 /usr/bin/env PG_DSN="postgres://user:pass@127.0.0.1:5432/amazon" \
+  /usr/bin/python3 /opt/amazon/weekly_report.py >> /var/log/weekly_report.log 2>&1
+
+8) Nguyên tắc “chunked mode” (để agent không bị “ngộp” dữ liệu)
+
+Mỗi bước 1 mục tiêu (KPI → Ads → Mapping → P&L → Compose).
+
+Chỉ gửi dữ liệu đúng phạm vi bước (ví dụ Bước 2 chỉ có Stream tuần).
+
+Giới hạn hàng (top 30–60 query từ SQP; chỉ “winners” của SR).
+
+Lưu dấu vết (Markdown từng bước trong agent_outputs) → kiểm toán dễ.
+
+Idempotent: pipeline có thể chạy lại cho cùng asin + week_start (dùng upsert hoặc xóa run cũ trước khi ghi).
+
+Retry: nếu một bước lỗi, chỉ cần chạy lại từ bước đó (dựa step_no tối đa đã hoàn thành).
+
+9) Quy tắc quyết định (Agent nên dùng ở Bước 3 & 4)
+
+Exact/Phrase ưu tiên nếu: (a) SR có ≥1 đơn hoặc CVR tốt, và (b) SQP volume cao & market_median_price ≥ price.
+
+Negatives nếu: SR nhiều click 0 đơn và SQP intent lệch (ví dụ “calico/black cat gifts”, “cat statue”, “personalized” khi listing không cá nhân hoá).
+
+Break-even ACOS = (Price − Fees − COGS) ÷ Price.
+
+CPC hoà vốn ≈ (Contribution/Unit) × (CVR).
+
+Day-parting: so chéo mv_st_daily với mv_stream_daily: nếu ngày/khung giờ nào ads tốn tiền mà units không tăng → giảm bid khung đó.
+
+10) Bảo mật & vận hành
+
+Secrets (PG_DSN, API keys) để trong /etc/amazon/.env + EnvironmentFile= của systemd (nếu muốn chạy service).
+
+Ràng buộc ngày: luôn dùng week_start từ Chủ nhật (khớp SR/Stream daily & SQP weekly).
+
+Kiểm thử: chạy thử với tuần 2025-09-28, so sánh số tính tay (ACOS, TACOS) với kết quả agent.
+
+Bạn cần gì để bắt đầu?
+
+Tạo các materialized views & views tuần (mục 2).
+
+Tạo bảng agent_runs / agent_outputs (mục 3).
+
+Thả file weekly_report.py (mục 5) + wrapper llm_client.py.
+
+Thêm cron (mục 7).
+
+Nếu muốn, mình có thể tinh chỉnh prompt cho từng bước theo văn phong bạn muốn (ngắn gọn/chi tiết, có hoặc không có emoji, tiếng Việt/Anh), hoặc thêm bước 6 để tự động viết SP/NEGATIVE list dạng CSV cho bạn upload vào Ads Console.

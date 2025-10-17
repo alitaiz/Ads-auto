@@ -69,6 +69,7 @@ async function getAllActiveKeys(service) {
 
 /**
  * Classifies a batch of search terms using Gemini, with structured JSON output, key rotation, and delays.
+ * Includes robust retry logic for API calls.
  * @param {string[]} searchTerms - An array of search term strings.
  * @param {object} productDetails - Object containing product title and bullet points.
  * @returns {Promise<{relevant: string[], irrelevant: string[]}>}
@@ -97,34 +98,52 @@ const classifySearchTermsWithAI = async (searchTerms, productDetails) => {
         const chunk = searchTerms.slice(i, i + CHUNK_SIZE_AI_CLASSIFY);
         const currentApiKey = allKeys[keyIndex];
         keyIndex = (keyIndex + 1) % allKeys.length;
-        console.log(`[AI Report] Classifying search term chunk ${i/CHUNK_SIZE_AI_CLASSIFY + 1} with key ...${currentApiKey.slice(-4)}`);
+        console.log(`[AI Report] Classifying search term chunk ${Math.floor(i / CHUNK_SIZE_AI_CLASSIFY) + 1} with key ...${currentApiKey.slice(-4)}`);
 
         const prompt = `Product Title: "${productDetails.title}"\nProduct Bullets:\n- ${(productDetails.bullet_points || []).join('\n- ')}\n\nClassify the relevance of the following search terms for this product:\n${JSON.stringify(chunk)}`;
         
-        try {
-            const ai = new GoogleGenAI({ apiKey: currentApiKey });
-            const response = await ai.models.generateContent({
-                model: 'gemini-flash-latest',
-                contents: prompt,
-                config: {
-                    systemInstruction,
-                    responseMimeType: "application/json",
-                    responseSchema: schema,
-                }
-            });
-            const result = JSON.parse(response.text.trim());
+        // --- Retry logic added here ---
+        let attempt = 0;
+        const maxRetries = 3;
+        let delay = 1000;
+        let success = false;
 
-            if (Array.isArray(result)) {
-                result.forEach(item => {
-                    if (item.isRelevant) {
-                        relevantTerms.add(item.searchTerm);
-                    } else {
-                        irrelevantTerms.add(item.searchTerm);
+        while (attempt < maxRetries && !success) {
+            try {
+                const ai = new GoogleGenAI({ apiKey: currentApiKey });
+                const response = await ai.models.generateContent({
+                    model: 'gemini-flash-latest',
+                    contents: prompt,
+                    config: {
+                        systemInstruction,
+                        responseMimeType: "application/json",
+                        responseSchema: schema,
                     }
                 });
+                const result = JSON.parse(response.text.trim());
+
+                if (Array.isArray(result)) {
+                    result.forEach(item => {
+                        if (item.isRelevant) {
+                            relevantTerms.add(item.searchTerm);
+                        } else {
+                            irrelevantTerms.add(item.searchTerm);
+                        }
+                    });
+                }
+                success = true; // Mark as successful to exit the while loop
+            } catch (error) {
+                const isRetryable = error.status === 503 || error.status === 429 || (error.message && (error.message.includes('UNAVAILABLE') || error.message.includes('overloaded')));
+                attempt++;
+                if (isRetryable && attempt < maxRetries) {
+                    console.warn(`[AI Report] Failed to classify chunk (Attempt ${attempt}/${maxRetries}). Retrying in ${delay / 1000}s...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2; // Exponential backoff
+                } else {
+                    console.error(`[AI Report] Failed to classify chunk after ${attempt} attempts:`, error);
+                    break; // Exit the loop on non-retryable error or max retries
+                }
             }
-        } catch (error) {
-            console.error(`[AI Report] Failed to classify chunk:`, error);
         }
         
         if (i + CHUNK_SIZE_AI_CLASSIFY < searchTerms.length) {

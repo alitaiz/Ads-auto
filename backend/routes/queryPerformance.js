@@ -160,7 +160,7 @@ router.get('/query-performance', async (req, res) => {
             agg.cartAddData.totalTwoDayShippingCartAddCount += raw.cartAddData?.totalTwoDayShippingCartAddCount || 0;
             
             agg.purchaseData.totalPurchaseCount += raw.purchaseData?.totalPurchaseCount || 0;
-            agg.purchaseData.asinCount += raw.purchaseData?.asinCount || 0;
+            agg.purchaseData.asinCount += raw.purchaseData?.asinPurchaseCount || 0;
             if(raw.purchaseData?.totalMedianPurchasePrice?.amount) agg.purchaseData.totalMedianPurchasePrices.push(raw.purchaseData.totalMedianPurchasePrice.amount);
             if(raw.purchaseData?.asinMedianPurchasePrice?.amount) agg.purchaseData.asinMedianPurchasePrices.push(raw.purchaseData.asinMedianPurchasePrice.amount);
             agg.purchaseData.totalSameDayShippingPurchaseCount += raw.purchaseData?.totalSameDayShippingPurchaseCount || 0;
@@ -369,8 +369,8 @@ router.get('/query-performance-history', async (req, res) => {
                     purchases: {
                         totalCount: raw.purchaseData?.totalPurchaseCount,
                         purchaseRate: safeDivide(raw.purchaseData?.totalPurchaseCount, raw.impressionData?.totalQueryImpressionCount),
-                        asinCount: raw.purchaseData?.asinCount,
-                        asinShare: safeDivide(raw.purchaseData?.asinCount, raw.purchaseData?.totalPurchaseCount),
+                        asinCount: raw.purchaseData?.asinPurchaseCount,
+                        asinShare: safeDivide(raw.purchaseData?.asinPurchaseCount, raw.purchaseData?.totalPurchaseCount),
                     },
                 };
                 const value = getNested(transformed, metricId);

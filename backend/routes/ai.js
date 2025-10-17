@@ -326,8 +326,8 @@ async function fetchSqpDataForAI(asin, weeks) {
                 purchases: {
                     totalCount: raw.purchaseData?.totalPurchaseCount || 0,
                     purchaseRate: safeDivide(raw.purchaseData?.totalPurchaseCount || 0, totalImpressions),
-                    asinCount: raw.purchaseData?.asinCount || 0,
-                    asinShare: safeDivide(raw.purchaseData?.asinCount || 0, raw.purchaseData?.totalPurchaseCount || 0),
+                    asinCount: raw.purchaseData?.asinPurchaseCount || 0,
+                    asinShare: safeDivide(raw.purchaseData?.asinPurchaseCount || 0, raw.purchaseData?.totalPurchaseCount || 0),
                     totalMedianPrice: formatPrice(raw.purchaseData?.totalMedianPurchasePrice),
                     asinMedianPrice: formatPrice(raw.purchaseData?.asinMedianPurchasePrice),
                 },
@@ -561,7 +561,7 @@ router.post('/ai/chat-gpt', async (req, res) => {
         messages.push({ role: 'user', content: question });
         
         const stream = await openai.chat.completions.create({
-            model: 'gpt-5',
+            model: 'gpt-4',
             messages: messages,
             stream: true,
         });

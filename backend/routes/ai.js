@@ -455,7 +455,8 @@ router.post('/ai/chat', async (req, res) => {
         }
 
         const chat = ai.chats.create({
-            model: 'gemini-2.5-flash',
+            // Cập nhật: Sử dụng model 'gemini-flash-latest' theo hướng dẫn.
+            model: 'gemini-flash-latest',
             history: history,
             config: { systemInstruction }
         });

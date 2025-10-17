@@ -81,7 +81,8 @@ async function generateContentWithRetry(apiKey, prompt, maxRetries = 3, initialD
 
     while (retries < maxRetries) {
         try {
-            const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
+            // Cập nhật: Sử dụng model 'gemini-flash-latest' theo hướng dẫn.
+            const response = await ai.models.generateContent({ model: 'gemini-flash-latest', contents: prompt });
             return response;
         } catch (error) {
             // Check for specific transient errors like 503 Service Unavailable or 429 Rate Limit

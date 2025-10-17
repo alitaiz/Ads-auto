@@ -1,7 +1,8 @@
 // views/AnalysisReportView.tsx
 import React, { useState, useEffect } from 'react';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
-import { Bar, Line, Doughnut } from 'react-chartjs-2';
+// Sửa lỗi: Thêm component 'Chart' từ 'react-chartjs-2' để hỗ trợ hiển thị biểu đồ kết hợp.
+import { Chart, Bar, Line, Doughnut } from 'react-chartjs-2';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement);
 
@@ -47,7 +48,7 @@ const KpiCard = ({ value, label, tooltip }: { value: string | number, label: str
 
 const DetailRow = ({ analysis, onToggle, isExpanded }: { analysis: any, onToggle: () => void, isExpanded: boolean }) => (
     <>
-        <tr onClick={onToggle} style={styles.expandableRow} title="Click to expand/collapse details">
+        <tr onClick={onToggle} style={styles.expandableRow} title="Nhấn để xem/ẩn chi tiết">
             <td style={styles.detailTd}>{analysis.searchTerm}</td>
             <td style={styles.detailTd}>{`$${analysis.adsPerformance.spend}`}</td>
             <td style={styles.detailTd}>{analysis.adsPerformance.orders}</td>
@@ -59,8 +60,8 @@ const DetailRow = ({ analysis, onToggle, isExpanded }: { analysis: any, onToggle
         {isExpanded && (
             <tr>
                 <td colSpan={7} style={styles.expandedContent}>
-                    <p><strong>AI Analysis:</strong> {analysis?.aiAnalysis || 'Not available.'}</p>
-                    <p><strong>AI Recommendation:</strong> {analysis?.aiRecommendation || 'Not available.'}</p>
+                    <p><strong>Phân tích của AI:</strong> {analysis?.aiAnalysis || 'Không có.'}</p>
+                    <p><strong>Đề xuất của AI:</strong> {analysis?.aiRecommendation || 'Không có.'}</p>
                 </td>
             </tr>
         )}
@@ -96,7 +97,7 @@ export function AnalysisReportView() {
     }, []);
 
     const handleGenerateReport = async () => {
-        if (!selectedAsin) { setError('Please select an ASIN.'); return; }
+        if (!selectedAsin) { setError('Vui lòng chọn một ASIN.'); return; }
         setLoading(true); setError(null); setReportData(null);
 
         try {
@@ -106,10 +107,10 @@ export function AnalysisReportView() {
                 body: JSON.stringify({ asin: selectedAsin, startDate: dateRange.start, endDate: dateRange.end, profileId: localStorage.getItem('selectedProfileId') }),
             });
             const data = await response.json();
-            if (!response.ok) throw new Error(data.error || 'Failed to generate report.');
+            if (!response.ok) throw new Error(data.error || 'Tạo báo cáo thất bại.');
             setReportData(data);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'An unknown error occurred.');
+            setError(err instanceof Error ? err.message : 'Đã xảy ra lỗi không xác định.');
         } finally {
             setLoading(false);
         }
@@ -118,81 +119,89 @@ export function AnalysisReportView() {
     const dailyChartData = reportData?.weeklyOverview?.trends?.daily ? {
         labels: reportData.weeklyOverview.trends.daily.map((d: any) => new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })),
         datasets: [
-            { type: 'bar' as const, label: 'Ad Spend', data: reportData.weeklyOverview.trends.daily.map((d: any) => d.adSpend), backgroundColor: 'rgba(255, 99, 132, 0.5)', yAxisID: 'y' },
-            { type: 'line' as const, label: 'Ad Orders', data: reportData.weeklyOverview.trends.daily.map((d: any) => d.adOrders), borderColor: 'rgb(54, 162, 235)', yAxisID: 'y1' },
-            { type: 'line' as const, label: 'Ad Sales', data: reportData.weeklyOverview.trends.daily.map((d: any) => d.adSales), borderColor: 'rgb(75, 192, 192)', yAxisID: 'y' },
+            { type: 'bar' as const, label: 'Chi tiêu QC', data: reportData.weeklyOverview.trends.daily.map((d: any) => d.adSpend), backgroundColor: 'rgba(255, 99, 132, 0.5)', yAxisID: 'y' },
+            { type: 'line' as const, label: 'Đơn hàng QC', data: reportData.weeklyOverview.trends.daily.map((d: any) => d.adOrders), borderColor: 'rgb(54, 162, 235)', yAxisID: 'y1' },
+            { type: 'line' as const, label: 'Doanh thu QC', data: reportData.weeklyOverview.trends.daily.map((d: any) => d.adSales), borderColor: 'rgb(75, 192, 192)', yAxisID: 'y' },
         ]
     } : null;
     
     const deviceChartData = reportData?.weeklyOverview?.trends?.daily ? {
-        labels: ['Mobile', 'Browser'],
+        labels: ['Di động (Mobile)', 'Máy tính (Browser)'],
         datasets: [{
             data: [reportData.weeklyOverview.conversionAndDevices.mobileSessionShare, 100 - reportData.weeklyOverview.conversionAndDevices.mobileSessionShare],
             backgroundColor: ['#007185', '#adb5bd'],
         }]
     } : null;
+    
+    const getAsinStatusText = (status: string) => {
+        switch (status) {
+            case 'New': return 'Mới launching';
+            case 'Launching': return 'Trong thời gian launching';
+            case 'Established': return 'Cũ (Established)';
+            default: return status;
+        }
+    };
 
     return (
         <div style={styles.container}>
-            <header style={styles.header}><h1 style={styles.title}>AI Analysis Report</h1></header>
+            <header style={styles.header}><h1 style={styles.title}>Báo cáo Phân tích AI</h1></header>
             <div style={styles.controls}>
-                {/* Controls... */}
-                <div style={styles.formGroup}><label style={styles.label} htmlFor="asin-select">Select ASIN</label><select id="asin-select" style={styles.input} value={selectedAsin} onChange={e => setSelectedAsin(e.target.value)} disabled={asins.length === 0}>{asins.length > 0 ? asins.map(a => <option key={a} value={a}>{a}</option>) : <option>Loading...</option>}</select></div>
-                <div style={styles.formGroup}><label style={styles.label} htmlFor="start-date">Start Date</label><input type="date" id="start-date" style={styles.input} value={dateRange.start} onChange={e => setDateRange(prev => ({...prev, start: e.target.value}))} /></div>
-                <div style={styles.formGroup}><label style={styles.label} htmlFor="end-date">End Date</label><input type="date" id="end-date" style={styles.input} value={dateRange.end} onChange={e => setDateRange(prev => ({...prev, end: e.target.value}))} /></div>
-                <button onClick={handleGenerateReport} style={loading ? {...styles.button, ...styles.buttonDisabled} : styles.button} disabled={loading}>{loading ? 'Generating...' : 'Generate Report'}</button>
+                <div style={styles.formGroup}><label style={styles.label} htmlFor="asin-select">Chọn ASIN</label><select id="asin-select" style={styles.input} value={selectedAsin} onChange={e => setSelectedAsin(e.target.value)} disabled={asins.length === 0}>{asins.length > 0 ? asins.map(a => <option key={a} value={a}>{a}</option>) : <option>Đang tải...</option>}</select></div>
+                <div style={styles.formGroup}><label style={styles.label} htmlFor="start-date">Ngày bắt đầu</label><input type="date" id="start-date" style={styles.input} value={dateRange.start} onChange={e => setDateRange(prev => ({...prev, start: e.target.value}))} /></div>
+                <div style={styles.formGroup}><label style={styles.label} htmlFor="end-date">Ngày kết thúc</label><input type="date" id="end-date" style={styles.input} value={dateRange.end} onChange={e => setDateRange(prev => ({...prev, end: e.target.value}))} /></div>
+                <button onClick={handleGenerateReport} style={loading ? {...styles.button, ...styles.buttonDisabled} : styles.button} disabled={loading}>{loading ? 'Đang tạo...' : 'Tạo Báo cáo'}</button>
             </div>
             {error && <div style={styles.error}>{error}</div>}
-            {loading && <div style={styles.message}>AI is analyzing your data. This may take a few minutes...</div>}
-            {!loading && !error && !reportData && <div style={styles.message}>Select an ASIN and date range to generate an analysis.</div>}
+            {loading && <div style={styles.message}>AI đang phân tích dữ liệu của bạn. Quá trình này có thể mất vài phút...</div>}
+            {!loading && !error && !reportData && <div style={styles.message}>Chọn ASIN và khoảng thời gian để tạo báo cáo phân tích.</div>}
             {reportData && (
                 <div style={styles.reportContainer}>
-                    {/* ASIN Status and Data Freshness */}
                     <div style={{...styles.reportCard, display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8f9fa' }}>
-                        <div><strong>ASIN Status:</strong> {reportData.asinStatus.status} ({reportData.asinStatus.daysOfData} days of data)</div>
-                        {reportData.dataFreshness.isDelayed && <div style={{color: 'var(--danger-color)'}}><strong>Data Freshness Warning:</strong> Data is delayed by {reportData.dataFreshness.delayDays} days.</div>}
+                        <div><strong>Trạng thái ASIN:</strong> {getAsinStatusText(reportData.asinStatus.status)} ({reportData.asinStatus.daysOfData} ngày dữ liệu)</div>
+                        {reportData.dataFreshness.isDelayed && <div style={{color: 'var(--danger-color)'}}><strong>Cảnh báo Dữ liệu:</strong> Dữ liệu bị trễ {reportData.dataFreshness.delayDays} ngày.</div>}
                     </div>
-                    {/* Cost Analysis */}
                     <div style={styles.reportCard}>
-                        <h2 style={styles.cardTitle}>Cost & Profitability Analysis</h2>
-                        <div style={styles.kpiGrid}>
-                            <KpiCard value={`$${reportData.costAnalysis.price}`} label="Price" />
-                            <KpiCard value={`$${reportData.costAnalysis.profitMarginBeforeAd}`} label="Profit / Unit (Pre-Ad)" />
-                            <KpiCard value={`${reportData.costAnalysis.breakEvenAcos}%`} label="Break-Even ACOS" />
-                            <KpiCard value={`$${reportData.costAnalysis.avgCpa}`} label="Avg. Ad CPA" tooltip="Average Ad Spend per Ad Order" />
-                             <KpiCard value={`$${reportData.costAnalysis.profitMarginAfterAd}`} label="Profit / Ad Order" />
-                             <KpiCard value={`$${reportData.costAnalysis.blendedCpa}`} label="Blended CPA" tooltip="Total Ad Spend / Total Units Sold" />
-                            <KpiCard value={`$${reportData.costAnalysis.blendedProfitMargin}`} label="Blended Profit / Unit" />
+                        <h2 style={styles.cardTitle}>Phân tích Chi phí & Lợi nhuận</h2>
+                        <div style={{...styles.kpiGrid, gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))'}}>
+                            <KpiCard value={`$${reportData.costAnalysis.price}`} label="Giá bán" />
+                            <KpiCard value={`$${reportData.costAnalysis.profitMarginBeforeAd}`} label="Lợi nhuận/Đơn vị (Trước QC)" />
+                            <KpiCard value={`${reportData.costAnalysis.breakEvenAcos}%`} label="ACoS Hòa vốn" />
+                            <KpiCard value={`$${reportData.costAnalysis.avgCpa}`} label="CPA Quảng cáo (TB)" tooltip="Chi phí quảng cáo trung bình cho mỗi đơn hàng từ quảng cáo" />
+                             <KpiCard value={`$${reportData.costAnalysis.profitMarginAfterAd}`} label="Lợi nhuận / Đơn hàng QC" />
+                             <KpiCard value={`$${reportData.costAnalysis.blendedCpa}`} label="CPA Tổng hợp" tooltip="Tổng chi tiêu QC / Tổng số đơn vị đã bán" />
+                            <KpiCard value={`$${reportData.costAnalysis.blendedProfitMargin}`} label="Lợi nhuận Tổng hợp / Đơn vị" />
                         </div>
                         <p style={styles.insights}><strong>AI Insight:</strong> {reportData.costAnalysis.aiInsights}</p>
                     </div>
-                    {/* Weekly Overview */}
                     <div style={styles.reportCard}>
-                        <h2 style={styles.cardTitle}>Weekly Overview</h2>
-                        <div style={{...styles.kpiGrid, gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: '20px' }}>
-                            <KpiCard value={`$${reportData.weeklyOverview.spendEfficiency.totalAdSpend}`} label="Total Ad Spend" />
-                            <KpiCard value={`$${reportData.weeklyOverview.spendEfficiency.adSales}`} label="Total Ad Sales" />
+                        <h2 style={styles.cardTitle}>Tổng quan Tuần</h2>
+                        <h3 style={{fontSize: '1.2rem'}}>Hiệu quả Chi tiêu</h3>
+                        <div style={styles.kpiGrid}>
+                            <KpiCard value={`$${reportData.weeklyOverview.spendEfficiency.totalAdSpend}`} label="Tổng chi tiêu QC" />
+                            <KpiCard value={`$${reportData.weeklyOverview.spendEfficiency.adSales}`} label="Doanh thu từ QC" />
                             <KpiCard value={`${reportData.weeklyOverview.spendEfficiency.acos}%`} label="ACOS" />
-                             <KpiCard value={`$${reportData.weeklyOverview.spendEfficiency.totalSales}`} label="Total Sales (Ads + Organic)" />
+                             <KpiCard value={`$${reportData.weeklyOverview.spendEfficiency.totalSales}`} label="Tổng Doanh thu (Ads + Organic)" />
                              <KpiCard value={`${reportData.weeklyOverview.spendEfficiency.tacos}%`} label="TACoS" />
                         </div>
-                        <p style={styles.insights}><strong>AI Insight (Spend Efficiency):</strong> {reportData.weeklyOverview.spendEfficiency.aiInsights}</p>
-                        <hr style={{margin: '20px 0', border: 'none', borderTop: '1px solid #eee'}} />
-                        <div style={{display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px'}}>
-                            {dailyChartData && <div style={styles.chartContainer}><Line data={dailyChartData} options={{ responsive: true, maintainAspectRatio: false, scales: { y: { position: 'left' }, y1: { position: 'right', grid: { drawOnChartArea: false } } } }} /></div>}
+                        <p style={styles.insights}><strong>AI Insight (Hiệu quả Chi tiêu):</strong> {reportData.weeklyOverview.spendEfficiency.aiInsights}</p>
+                        <hr style={{margin: '30px 0', border: 'none', borderTop: '1px solid #eee'}} />
+
+                        <h3 style={{fontSize: '1.2rem'}}>Xu hướng & Thiết bị</h3>
+                        <div style={{display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px', alignItems: 'center'}}>
+                            {/* Sửa lỗi: Sử dụng component 'Chart' với type='bar' để render biểu đồ kết hợp đúng cách, thay vì component 'Line' chỉ dành cho biểu đồ đường. */}
+                            {dailyChartData && <div style={styles.chartContainer}><Chart type='bar' data={dailyChartData} options={{ responsive: true, maintainAspectRatio: false, scales: { y: { position: 'left' }, y1: { position: 'right', grid: { drawOnChartArea: false } } } }} /></div>}
                             {deviceChartData && <div style={styles.chartContainer}><Doughnut data={deviceChartData} options={{ responsive: true, maintainAspectRatio: false }} /></div>}
                         </div>
-                         <p style={styles.insights}><strong>AI Insight (Trends & Devices):</strong> {reportData.weeklyOverview.trends.aiInsights} {reportData.weeklyOverview.conversionAndDevices.aiInsights}</p>
+                         <p style={styles.insights}><strong>AI Insight (Xu hướng & Thiết bị):</strong> {reportData.weeklyOverview.trends.aiInsights} {reportData.weeklyOverview.conversionAndDevices.aiInsights}</p>
                     </div>
-                    {/* Detailed Search Term Analysis */}
                     <div style={styles.reportCard}>
-                        <h2 style={styles.cardTitle}>Detailed Search Term Analysis</h2>
+                        <h2 style={styles.cardTitle}>Phân tích chi tiết Search Term</h2>
                         <table style={{...styles.detailTable, tableLayout: 'auto'}}>
                             <thead><tr>
                                 <th style={styles.detailTh}>Search Term</th>
-                                <th style={styles.detailTh}>Spend</th>
-                                <th style={styles.detailTh}>Orders</th>
-                                <th style={styles.detailTh}>Sales</th>
+                                <th style={styles.detailTh}>Chi tiêu</th>
+                                <th style={styles.detailTh}>Đơn hàng</th>
+                                <th style={styles.detailTh}>Doanh thu</th>
                                 <th style={styles.detailTh}>ACOS</th>
                                 <th style={styles.detailTh}>CPA</th>
                                 <th style={styles.detailTh}></th>
@@ -209,13 +218,19 @@ export function AnalysisReportView() {
                             </tbody>
                         </table>
                     </div>
-                    {/* Weekly Action Plan */}
                     <div style={styles.reportCard}>
-                        <h2 style={styles.cardTitle}>Weekly Action Plan</h2>
+                        <h2 style={styles.cardTitle}>Kế hoạch Hành động Tuần tới</h2>
                         {Object.entries(reportData.weeklyActionPlan).map(([category, actions]) => (
                             (actions as string[]).length > 0 && (
                                 <div key={category} style={{marginBottom: '15px'}}>
-                                    <h3 style={{fontSize: '1.2rem', textTransform: 'capitalize'}}>{category.replace(/([A-Z])/g, ' $1').trim()}</h3>
+                                    <h3 style={{fontSize: '1.2rem', textTransform: 'capitalize'}}>{
+                                        {
+                                            bidManagement: 'Quản lý Giá thầu (Bid)',
+                                            negativeKeywords: 'Từ khóa Phủ định',
+                                            campaignStructure: 'Cấu trúc Chiến dịch',
+                                            listingOptimization: 'Tối ưu Listing'
+                                        }[category] || category
+                                    }</h3>
                                     <ul style={styles.actionList}>{(actions as string[]).map((action, i) => <li key={i}>{action}</li>)}</ul>
                                 </div>
                             )

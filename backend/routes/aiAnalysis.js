@@ -15,8 +15,9 @@ const callGeminiWithSchema = async (prompt, systemInstruction, schema) => {
         const apiKey = await getApiKey('gemini');
         const ai = new GoogleGenAI({ apiKey });
         
+        // Cập nhật: Sử dụng model 'gemini-flash-latest' theo hướng dẫn.
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-flash-latest',
             contents: prompt,
             config: {
                 systemInstruction,
@@ -25,12 +26,10 @@ const callGeminiWithSchema = async (prompt, systemInstruction, schema) => {
             }
         });
         
-        // The response.text is a string, so we need to parse it into a JSON object.
         const jsonText = response.text.trim();
         return JSON.parse(jsonText);
     } catch (e) {
         console.error("Gemini call with schema failed:", e);
-        // Create a structured error response that matches the expected schema format
         return {
             error: `Error from AI: ${e.message}`,
             costAnalysisInsights: "Could not generate insights due to an API error.",
@@ -49,7 +48,6 @@ const callGeminiWithSchema = async (prompt, systemInstruction, schema) => {
 const formatDateSafe = (d) => {
     if (!d) return '';
     const date = new Date(d);
-    // Adjust for timezone to ensure the date is correct before converting to string
     const userTimezoneOffset = date.getTimezoneOffset() * 60000;
     const adjustedDate = new Date(date.getTime() + userTimezoneOffset);
     return adjustedDate.toISOString().split('T')[0];
@@ -117,7 +115,6 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
         const productData = productRes.rows[0];
         if (!productData || productData.sale_price == null) throw new Error(`Product data (price, cost, fee) not found for ASIN ${asin}. Please add it in the Listings tab.`);
         
-        // Cost Analysis
         const price = parseFloat(productData.sale_price);
         const profitMarginBeforeAd = price - parseFloat(productData.product_cost) - parseFloat(productData.amazon_fee);
         const breakEvenAcos = price > 0 ? (profitMarginBeforeAd / price) * 100 : 0;
@@ -135,16 +132,13 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
         
         const blendedCpa = totalUnits > 0 ? totalAdSpend / totalUnits : 0;
 
-        // Search Term Summary
         const searchTerms = adPerformance.map(r => r.customer_search_term);
         const relevantTerms = searchTerms.filter(t => RELEVANT_KEYWORDS.test(t) && !IRRELEVANT_KEYWORDS.test(t));
         const irrelevantTerms = searchTerms.filter(t => !RELEVANT_KEYWORDS.test(t) || IRRELEVANT_KEYWORDS.test(t));
         
-        // Spend Efficiency
         const topPerformers = adPerformance.filter(r => r.total_orders > 0).sort((a,b) => (parseFloat(a.total_spend)/parseFloat(a.total_orders)) - (parseFloat(b.total_spend)/parseFloat(b.total_orders))).slice(0, 5);
         const inefficientSpenders = adPerformance.filter(r => r.total_orders == 0).sort((a,b) => parseFloat(b.total_spend) - parseFloat(a.total_spend)).slice(0, 5);
         
-        // Trends & Devices
         const dailyData = dailyTrendsRes.rows.map(r => ({
             date: formatDateSafe(r.report_date),
             adSpend: parseFloat(r.ad_spend),
@@ -158,15 +152,14 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
         const mobileSessions = dailyData.reduce((sum, d) => sum + d.mobileSessions, 0);
         const mobileSessionShare = totalSessions > 0 ? (mobileSessions / totalSessions) * 100 : 0;
 
-        // Data Freshness
         const daysOfData = asinStatusRes.rows[0]?.days_of_data || 0;
         let asinStatusStr = daysOfData > 60 ? 'Established' : (daysOfData >= 30 ? 'Launching' : 'New');
         const lastDate = asinStatusRes.rows[0]?.last_date;
         const delayDays = lastDate ? Math.floor((new Date() - new Date(lastDate)) / (1000 * 60 * 60 * 24)) - 1 : 99;
         
-        // Top Search Terms for Detailed Analysis
         const topSearchTermsForAI = adPerformance.sort((a,b) => parseFloat(b.total_spend) - parseFloat(a.total_spend)).slice(0, 5);
-        
+        const sqpData = sqpRes.rows.map(r => ({ searchQuery: r.search_query, ...r.performance_data }));
+
         // --- 3. AI Prompt Construction & Schema Definition ---
         const prompt = `
             Analyze the following Amazon PPC data for ASIN ${asin} from ${startDate} to ${endDate}.
@@ -185,6 +178,8 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
 
             Top 5 Search Terms by Spend for Detailed Analysis: ${JSON.stringify(topSearchTermsForAI.map(t => ({term: t.customer_search_term, spend: t.total_spend})))}
             
+            Search Query Performance Data (Market Context): ${JSON.stringify(sqpData)}
+
             Based on ALL the data provided, perform the analysis and fill out the JSON object according to the schema.
         `;
 
@@ -198,13 +193,13 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
                 conversionAndDevicesInsights: { type: Type.STRING, description: "One-sentence insight on overall conversion rate and device performance." },
                 detailedTermAnalysis: {
                     type: Type.ARRAY,
-                    description: "Provide a detailed analysis for each of the top 5 search terms provided.",
+                    description: "Provide a detailed analysis for each of the top 5 search terms. For each term, compare its ad performance (spend, orders) with the broader market context from the Search Query Performance Data. Analyze the conversion funnel (impressions, clicks, add to carts, purchases) comparing the ASIN's share versus the total market.",
                     items: {
                         type: Type.OBJECT,
                         properties: {
                             searchTerm: { type: Type.STRING },
-                            aiAnalysis: { type: Type.STRING, description: "Detailed analysis of why this term is performing well or poorly." },
-                            aiRecommendation: { type: Type.STRING, description: "A specific, actionable recommendation for this term." }
+                            aiAnalysis: { type: Type.STRING, description: "Detailed analysis of why this term is performing well or poorly, incorporating market comparison." },
+                            aiRecommendation: { type: Type.STRING, description: "A specific, actionable recommendation for this term based on the analysis." }
                         }
                     }
                 },
@@ -242,7 +237,7 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
             weeklyOverview: {
                 searchTermSummary: {
                     total: searchTerms.length, relevant: relevantTerms.length, irrelevant: irrelevantTerms.length,
-                    topRelevantVolume: [], // This would require SQP data join which is complex and slow for this context
+                    topRelevantVolume: [],
                     topRelevantExamples: relevantTerms.slice(0, 5),
                     topIrrelevantExamples: irrelevantTerms.slice(0, 5),
                     aiInsights: aiResult.weeklyOverviewInsights

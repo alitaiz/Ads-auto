@@ -102,6 +102,7 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
             WHERE child_asin = $1 AND report_date BETWEEN $2 AND $3;
         `, [asin, startDate, endDate]);
 
+        // Fetch SQP data where the start of the week falls within our range.
         const sqpPromise = client.query(`
             SELECT search_query, performance_data
             FROM query_performance_data
@@ -117,6 +118,35 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
 
         // --- Algorithmic Analysis ---
         const report = {};
+        
+        // --- NEW: Master Aggregation Logic ---
+        const masterAnalysisMap = new Map();
+        
+        // 1. Populate map with SQP data (the master list of terms)
+        sqpResult.rows.forEach(row => {
+            const sq = row.performance_data?.searchQueryData?.searchQuery;
+            if (!sq) return;
+
+            if (!masterAnalysisMap.has(sq)) {
+                masterAnalysisMap.set(sq, {
+                    adsPerformance: { spend: 0, orders: 0, clicks: 0 },
+                    sqpData: []
+                });
+            }
+            masterAnalysisMap.get(sq).sqpData.push(row.performance_data);
+        });
+        
+        // 2. Enrich map with Advertising data
+        adDataResult.rows.forEach(row => {
+            const term = row.customer_search_term;
+            if (masterAnalysisMap.has(term)) {
+                const entry = masterAnalysisMap.get(term);
+                entry.adsPerformance.spend += parseFloat(row.cost || '0');
+                entry.adsPerformance.orders += parseInt(row.orders || '0', 10);
+                entry.adsPerformance.clicks += parseInt(row.clicks || '0', 10);
+            }
+        });
+
 
         // 1. ASIN Status & Data Freshness
         const daysOfDataResult = await client.query('SELECT COUNT(DISTINCT report_date) as count FROM sales_and_traffic_by_asin WHERE child_asin = $1', [asin]);
@@ -133,7 +163,6 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
 
         // 2. Cost Analysis
         const costData = costResult.rows[0];
-        // FIX: Ensure all values are parsed to floats
         const sale_price = parseFloat(costData?.sale_price || '0');
         const product_cost = parseFloat(costData?.product_cost || '0');
         const amazon_fee = parseFloat(costData?.amazon_fee || '0');
@@ -151,115 +180,81 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
         const blendedProfitMargin = profitMarginBeforeAd - blendedCpa;
 
         report.costAnalysis = {
-            price: sale_price,
-            product_cost,
-            amazon_fee,
-            profitMarginBeforeAd,
-            breakEvenAcos,
-            avgCpa,
-            profitMarginAfterAd,
-            blendedCpa,
-            blendedProfitMargin
+            price: sale_price, product_cost, amazon_fee, profitMarginBeforeAd, breakEvenAcos,
+            avgCpa, profitMarginAfterAd, blendedCpa, blendedProfitMargin
         };
 
         // 3. Weekly Overview
-        const totalAdSales = adDataResult.rows.reduce((sum, r) => sum + parseFloat(r.sales || '0'), 0);
+        const allSearchTerms = Array.from(masterAnalysisMap.keys());
+        const relevantTerms = allSearchTerms.filter(term => RELEVANT_KEYWORDS.some(kw => term.toLowerCase().includes(kw)));
+        const irrelevantTerms = allSearchTerms.filter(term => !relevantTerms.includes(term));
+        
         const totalSales = salesTrafficResult.rows.reduce((sum, r) => sum + parseFloat(r.sales_data?.orderedProductSales?.amount || '0'), 0);
         const totalSessions = salesTrafficResult.rows.reduce((sum, r) => sum + parseInt(r.traffic_data?.sessions || '0', 10), 0);
         const mobileSessions = salesTrafficResult.rows.reduce((sum, r) => sum + parseInt(r.traffic_data?.mobileAppSessions || '0', 10), 0);
-
-        const allSearchTerms = [...new Set(adDataResult.rows.map(r => r.customer_search_term).filter(Boolean))];
-        const relevantTerms = allSearchTerms.filter(term => RELEVANT_KEYWORDS.some(kw => term.toLowerCase().includes(kw)));
-        const irrelevantTerms = allSearchTerms.filter(term => !relevantTerms.includes(term));
+        const totalAdSales = adDataResult.rows.reduce((sum, r) => sum + parseFloat(r.sales || '0'), 0);
 
         report.weeklyOverview = {
-            spendEfficiency: {
-                totalAdSpend,
-                adSales: totalAdSales,
-                acos: totalAdSales > 0 ? (totalAdSpend / totalAdSales) * 100 : 0,
-                totalSales,
-                tacos: totalSales > 0 ? (totalAdSpend / totalSales) * 100 : 0,
-            },
-            searchTermClassification: {
-                totalCount: allSearchTerms.length,
-                relevantCount: relevantTerms.length,
-                irrelevantCount: irrelevantTerms.length,
-                relevantTerms: relevantTerms.slice(0, 10),
-                irrelevantTerms: irrelevantTerms.slice(0, 10),
-            },
-            conversionAndDevices: {
-                totalUnits: totalUnitsSold,
-                totalSessions,
-                unitSessionPercentage: totalSessions > 0 ? (totalUnitsSold / totalSessions) * 100 : 0,
-                mobileSessionShare: totalSessions > 0 ? (mobileSessions / totalSessions) * 100 : 0,
-            },
-            trends: {
-                daily: adDataResult.rows.reduce((acc, row) => {
+            spendEfficiency: { totalAdSpend, adSales: totalAdSales, acos: totalAdSales > 0 ? (totalAdSpend / totalAdSales) * 100 : 0, totalSales, tacos: totalSales > 0 ? (totalAdSpend / totalSales) * 100 : 0 },
+            searchTermClassification: { totalCount: allSearchTerms.length, relevantCount: relevantTerms.length, irrelevantCount: irrelevantTerms.length, relevantTerms: relevantTerms.slice(0, 10), irrelevantTerms: irrelevantTerms.slice(0, 10) },
+            conversionAndDevices: { totalUnits: totalUnitsSold, totalSessions, unitSessionPercentage: totalSessions > 0 ? (totalUnitsSold / totalSessions) * 100 : 0, mobileSessionShare: totalSessions > 0 ? (mobileSessions / totalSessions) * 100 : 0 },
+            trends: { daily: Object.values(adDataResult.rows.reduce((acc, row) => {
                     const date = new Date(row.report_date).toISOString().split('T')[0];
                     if (!acc[date]) acc[date] = { date, adSpend: 0, adSales: 0, adOrders: 0 };
                     acc[date].adSpend += parseFloat(row.cost || '0');
                     acc[date].adSales += parseFloat(row.sales || '0');
                     acc[date].adOrders += parseInt(row.orders || '0', 10);
                     return acc;
-                }, {}),
-            }
+                }, {})).sort((a, b) => new Date(a.date) - new Date(b.date)) }
         };
-        report.weeklyOverview.trends.daily = Object.values(report.weeklyOverview.trends.daily).sort((a,b) => new Date(a.date) - new Date(b.date));
-
 
         // 4. Detailed Search Term Analysis
-        const detailedAnalysis = [];
-        const topAdTerms = [...new Set(adDataResult.rows.map(r => r.customer_search_term))].slice(0, 50);
-
-        for (const term of topAdTerms) {
-            const adPerf = adDataResult.rows.filter(r => r.customer_search_term === term).reduce((acc, r) => {
-                acc.spend += parseFloat(r.cost || '0');
-                acc.orders += parseInt(r.orders || '0', 10);
+        report.detailedSearchTermAnalysis = [];
+        for (const [term, data] of masterAnalysisMap.entries()) {
+            const aggregatedSqp = data.sqpData.reduce((acc, perf) => {
+                acc.marketVolume += parseInt(perf.searchQueryData?.searchQueryVolume || '0', 10);
+                acc.marketImpressions += parseInt(perf.impressionData?.totalQueryImpressionCount || '0', 10);
+                acc.marketClicks += parseInt(perf.clickData?.totalClickCount || '0', 10);
+                acc.marketCarts += parseInt(perf.cartAddData?.totalCartAddCount || '0', 10);
+                acc.marketPurchases += parseInt(perf.purchaseData?.totalPurchaseCount || '0', 10);
+                acc.asinClicks += parseInt(perf.clickData?.asinClickCount || '0', 10);
+                acc.asinPurchases += parseInt(perf.purchaseData?.asinPurchaseCount || '0', 10);
                 return acc;
-            }, { spend: 0, orders: 0 });
+            }, { marketVolume: 0, marketImpressions: 0, marketClicks: 0, marketCarts: 0, marketPurchases: 0, asinClicks: 0, asinPurchases: 0 });
 
-            const sqpPerf = sqpResult.rows.find(r => r.search_query === term)?.performance_data;
-            const marketImpressions = parseInt(sqpPerf?.impressionData?.totalQueryImpressionCount || '0', 10);
-            const marketClicks = parseInt(sqpPerf?.clickData?.totalClickCount || '0', 10);
-            const marketCarts = parseInt(sqpPerf?.cartAddData?.totalCartAddCount || '0', 10);
-            const marketPurchases = parseInt(sqpPerf?.purchaseData?.totalPurchaseCount || '0', 10);
-
-            detailedAnalysis.push({
+            const safeDivide = (num, den) => den > 0 ? num / den : 0;
+            
+            report.detailedSearchTermAnalysis.push({
                 searchTerm: term,
                 adsPerformance: {
-                    spend: adPerf.spend,
-                    orders: adPerf.orders,
-                    acos: totalAdSales > 0 ? (adPerf.spend / totalAdSales) * 100 : 0, // Simplified ACOS for example
-                    cpa: adPerf.orders > 0 ? adPerf.spend / adPerf.orders : 0,
+                    spend: data.adsPerformance.spend,
+                    orders: data.adsPerformance.orders,
+                    acos: totalAdSales > 0 ? (data.adsPerformance.spend / totalAdSales) * 100 : 0,
+                    cpa: data.adsPerformance.orders > 0 ? data.adsPerformance.spend / data.adsPerformance.orders : 0,
                 },
-                marketPerformance: { marketVolume: parseInt(sqpPerf?.searchQueryData?.searchQueryVolume || '0', 10) },
+                marketPerformance: { marketVolume: aggregatedSqp.marketVolume },
                 asinShare: {
-                    clickShare: parseFloat(sqpPerf?.clickData?.asinClickShare || '0'),
-                    purchaseShare: parseFloat(sqpPerf?.purchaseData?.asinPurchaseShare || '0'),
+                    clickShare: safeDivide(aggregatedSqp.asinClicks, aggregatedSqp.marketClicks),
+                    purchaseShare: safeDivide(aggregatedSqp.asinPurchases, aggregatedSqp.marketPurchases),
                 },
                 funnelAnalysis: {
-                    marketCtr: marketImpressions > 0 ? marketClicks / marketImpressions : 0,
-                    asinCtr: parseFloat(sqpPerf?.clickData?.asinClickRate || '0'), // SQP provides this
-                    marketCartRate: marketClicks > 0 ? marketCarts / marketClicks : 0,
-                    asinCartRate: parseFloat(sqpPerf?.cartAddData?.asinCartAddRate || '0'),
-                    marketPurchaseRate: marketCarts > 0 ? marketPurchases / marketCarts : 0,
-                    asinPurchaseRate: parseFloat(sqpPerf?.purchaseData?.asinPurchaseRate || '0'),
+                    marketCtr: safeDivide(aggregatedSqp.marketClicks, aggregatedSqp.marketImpressions),
+                    asinCtr: safeDivide(aggregatedSqp.asinClicks, aggregatedSqp.marketImpressions), // Simplified, can be refined
+                    marketCartRate: safeDivide(aggregatedSqp.marketCarts, aggregatedSqp.marketClicks),
+                    asinCartRate: safeDivide(data.sqpData.reduce((s, p) => s + parseInt(p.cartAddData?.asinCartAddCount || '0', 10), 0), aggregatedSqp.asinClicks),
+                    marketPurchaseRate: safeDivide(aggregatedSqp.marketPurchases, aggregatedSqp.marketCarts),
+                    asinPurchaseRate: safeDivide(aggregatedSqp.asinPurchases, data.sqpData.reduce((s, p) => s + parseInt(p.cartAddData?.asinCartAddCount || '0', 10), 0)),
                 }
             });
         }
-        report.detailedSearchTermAnalysis = detailedAnalysis;
+        report.detailedSearchTermAnalysis.sort((a,b) => b.marketPerformance.marketVolume - a.marketPerformance.marketVolume);
+
 
         // 5. Action Plan (simple logic based on analysis)
         const actionPlan = { bidManagement: [], negativeKeywords: [], listingOptimization: [] };
-        if (report.weeklyOverview.spendEfficiency.acos > breakEvenAcos) {
-            actionPlan.bidManagement.push(`ACOS (${report.weeklyOverview.spendEfficiency.acos.toFixed(2)}%) is higher than break-even ACOS (${breakEvenAcos.toFixed(2)}%). Review high-spend, low-order search terms and consider reducing bids.`);
-        }
-        if (irrelevantTerms.length > 0) {
-            actionPlan.negativeKeywords.push(`Consider adding these ${irrelevantTerms.length} irrelevant terms as negative keywords: ${irrelevantTerms.slice(0, 5).join(', ')}...`);
-        }
-        if (report.weeklyOverview.conversionAndDevices.unitSessionPercentage < 5) { // example threshold
-             actionPlan.listingOptimization.push(`Overall conversion rate is low (${report.weeklyOverview.conversionAndDevices.unitSessionPercentage.toFixed(2)}%). Review listing images, title, and A+ content for clarity and appeal.`);
-        }
+        if (report.weeklyOverview.spendEfficiency.acos > breakEvenAcos) actionPlan.bidManagement.push(`ACOS (${report.weeklyOverview.spendEfficiency.acos.toFixed(2)}%) is higher than break-even ACOS (${breakEvenAcos.toFixed(2)}%). Review high-spend, low-order search terms and consider reducing bids.`);
+        if (irrelevantTerms.length > 0) actionPlan.negativeKeywords.push(`Consider adding these ${irrelevantTerms.length} irrelevant terms as negative keywords: ${irrelevantTerms.slice(0, 5).join(', ')}...`);
+        if (report.weeklyOverview.conversionAndDevices.unitSessionPercentage < 5) actionPlan.listingOptimization.push(`Overall conversion rate is low (${report.weeklyOverview.conversionAndDevices.unitSessionPercentage.toFixed(2)}%). Review listing images, title, and A+ content for clarity and appeal.`);
         report.weeklyActionPlan = actionPlan;
 
         res.json(sanitizeAndFormatReport(report));

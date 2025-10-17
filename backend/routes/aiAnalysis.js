@@ -106,6 +106,7 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
         console.log('[Report Engine] Data gathering complete.');
         
         // --- 2. Algorithmic Analysis ---
+        console.log('[Report Engine] Starting algorithmic and AI analysis.');
         const listing = listingRes.rows[0];
         if (!listing) throw new Error(`Listing for ASIN ${asin} not found. Please add cost details in the Listings tab.`);
         
@@ -197,7 +198,7 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
             detailedSearchTermAnalysis,
             weeklyActionPlan: actionPlan,
         };
-
+        console.log('[Report Engine] Starting chunked AI analysis steps...');
         res.json(sanitizeAndFormatReport(report));
 
     } catch (error) {

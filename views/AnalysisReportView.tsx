@@ -208,7 +208,6 @@ export function AnalysisReportView() {
                                         {
                                             bidManagement: 'Quản lý Giá thầu (Bid)',
                                             negativeKeywords: 'Từ khóa Phủ định',
-                                            campaignStructure: 'Cấu trúc Chiến dịch',
                                             listingOptimization: 'Tối ưu Listing'
                                         }[category] || category
                                     }</h3>

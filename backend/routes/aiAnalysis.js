@@ -155,8 +155,9 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
         return res.status(400).json({ error: 'asin, startDate, endDate, and profileId are required.' });
     }
 
-    const client = await pool.connect();
+    let client;
     try {
+        client = await pool.connect();
         console.log(`[AI Report] Starting data gathering for ASIN ${asin}`);
         
         // --- 1. Data Gathering ---
@@ -314,7 +315,7 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
         console.error('[AI Report] Error generating report:', error);
         res.status(500).json({ error: error.message || 'An internal server error occurred.' });
     } finally {
-        client.release();
+        if (client) client.release();
     }
 });
 

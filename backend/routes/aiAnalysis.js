@@ -5,14 +5,21 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { getApiKey } from '../helpers/keyManager.js';
 
 const router = express.Router();
+const CHUNK_SIZE_AI_CLASSIFY = 20; // Process 20 terms per AI batch call
+const DELAY_BETWEEN_CHUNKS = 3000; // 3 seconds delay
 
-// --- Constants and Helpers ---
-const RELEVANT_KEYWORDS = /\b(memorial|sympathy|loss|lost|passed|passing|remembrance|condolence|bereavement|death|keepsake|goodbye|died|rainbow)\b/i;
-const IRRELEVANT_KEYWORDS = /\b(figurine|statue|calico|siamese|tuxedo|kitty suncatcher|black cat gifts|angel with black cat|cat chime for window|personalized)\b/i;
+// --- Helper Functions ---
 
-const callGeminiWithSchema = async (prompt, systemInstruction, schema) => {
+/**
+ * Calls the Gemini API with a specific prompt, schema, and retry logic.
+ * @param {string} prompt The full prompt text.
+ * @param {string} systemInstruction The system instruction for the model.
+ * @param {object} schema The expected JSON output schema.
+ * @returns {Promise<any>} The parsed JSON response.
+ */
+const callGeminiStep = async (prompt, systemInstruction, schema) => {
     const maxRetries = 3;
-    let delay = 2000; // Start with a 2-second delay
+    let delay = 2000;
 
     for (let i = 0; i < maxRetries; i++) {
         try {
@@ -30,50 +37,112 @@ const callGeminiWithSchema = async (prompt, systemInstruction, schema) => {
             });
             
             const jsonText = response.text.trim();
-            return JSON.parse(jsonText); // Success, return the parsed JSON
+            return JSON.parse(jsonText);
         } catch (e) {
             const isRetryable = e.status === 503 || e.status === 429 || (e.message && (e.message.includes('UNAVAILABLE') || e.message.includes('overloaded')));
-
-            if (isRetryable) {
-                if (i === maxRetries - 1) {
-                    console.error(`[AI Report] Gemini API call failed after ${maxRetries} retries.`, e);
-                    // Fall through to return the error object after the last retry fails.
-                } else {
-                    console.warn(`[AI Report] Gemini API is overloaded or rate-limited (Attempt ${i + 1}/${maxRetries}). Retrying in ${delay / 1000}s...`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    delay *= 2; // Exponential backoff
-                    continue; // Go to the next iteration of the loop to retry
-                }
+            if (isRetryable && i < maxRetries - 1) {
+                console.warn(`[AI Report Step] Gemini API is overloaded (Attempt ${i + 1}/${maxRetries}). Retrying in ${delay / 1000}s...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2;
             } else {
-                // Not a retryable error, log it and fall through to return the error object immediately.
-                console.error("Gemini call with schema failed with a non-retryable error:", e);
+                console.error(`[AI Report Step] Gemini API call failed after ${i + 1} attempt(s).`, e);
+                throw e; // Rethrow the final error
             }
-
-            // This part is reached if a non-retryable error occurs or all retries fail.
-            // Return a structured error object that the frontend can handle gracefully.
-            return {
-                error: `Error from AI: ${e.message}`,
-                costAnalysisInsights: "Could not generate insights due to an API error.",
-                weeklyOverviewInsights: "Could not generate insights due to an API error.",
-                spendEfficiencyInsights: "Could not generate insights due to an API error.",
-                trendsInsights: "Could not generate insights due to an API error.",
-                conversionAndDevicesInsights: "Could not generate insights due to an API error.",
-                detailedTermAnalysis: [],
-                weeklyActionPlan: {
-                    bidManagement: ["AI analysis failed, no recommendations available."],
-                    negativeKeywords: [],
-                    campaignStructure: [],
-                    listingOptimization: []
-                }
-            };
         }
     }
+};
+
+/**
+ * Gets all active API keys for rotation.
+ * @param {string} service The service name (e.g., 'gemini').
+ * @returns {Promise<string[]>} An array of API keys.
+ */
+async function getAllActiveKeys(service) {
+    const client = await pool.connect();
+    try {
+        const result = await client.query('SELECT api_key FROM api_keys WHERE service = $1 AND is_active = TRUE ORDER BY id', [service]);
+        return result.rows.map(r => r.api_key);
+    } finally {
+        client.release();
+    }
+}
+
+/**
+ * Classifies a batch of search terms using Gemini, with structured JSON output, key rotation, and delays.
+ * @param {string[]} searchTerms - An array of search term strings.
+ * @param {object} productDetails - Object containing product title and bullet points.
+ * @returns {Promise<{relevant: string[], irrelevant: string[]}>}
+ */
+const classifySearchTermsWithAI = async (searchTerms, productDetails) => {
+    const relevantTerms = new Set();
+    const irrelevantTerms = new Set();
+    const allKeys = await getAllActiveKeys('gemini');
+    if (allKeys.length === 0) throw new Error("No active Gemini keys found.");
+    let keyIndex = 0;
+
+    const systemInstruction = `You are an Amazon PPC expert. Your task is to determine if a customer's search term is relevant for selling a specific product. A search term is relevant if a customer searching for it would likely be satisfied to see this product. It is irrelevant if it's for a different product type, feature, or intent.`;
+    const schema = {
+        type: Type.ARRAY,
+        items: {
+            type: Type.OBJECT,
+            properties: {
+                searchTerm: { type: Type.STRING },
+                isRelevant: { type: Type.BOOLEAN, description: "True if relevant, false if not." },
+            },
+            required: ['searchTerm', 'isRelevant']
+        }
+    };
+    
+    for (let i = 0; i < searchTerms.length; i += CHUNK_SIZE_AI_CLASSIFY) {
+        const chunk = searchTerms.slice(i, i + CHUNK_SIZE_AI_CLASSIFY);
+        const currentApiKey = allKeys[keyIndex];
+        keyIndex = (keyIndex + 1) % allKeys.length;
+        console.log(`[AI Report] Classifying search term chunk ${i/CHUNK_SIZE_AI_CLASSIFY + 1} with key ...${currentApiKey.slice(-4)}`);
+
+        const prompt = `Product Title: "${productDetails.title}"\nProduct Bullets:\n- ${(productDetails.bullet_points || []).join('\n- ')}\n\nClassify the relevance of the following search terms for this product:\n${JSON.stringify(chunk)}`;
+        
+        try {
+            const ai = new GoogleGenAI({ apiKey: currentApiKey });
+            const response = await ai.models.generateContent({
+                model: 'gemini-flash-latest',
+                contents: prompt,
+                config: {
+                    systemInstruction,
+                    responseMimeType: "application/json",
+                    responseSchema: schema,
+                }
+            });
+            const result = JSON.parse(response.text.trim());
+
+            if (Array.isArray(result)) {
+                result.forEach(item => {
+                    if (item.isRelevant) {
+                        relevantTerms.add(item.searchTerm);
+                    } else {
+                        irrelevantTerms.add(item.searchTerm);
+                    }
+                });
+            }
+        } catch (error) {
+            console.error(`[AI Report] Failed to classify chunk:`, error);
+        }
+        
+        if (i + CHUNK_SIZE_AI_CLASSIFY < searchTerms.length) {
+            await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_CHUNKS));
+        }
+    }
+
+    return {
+        relevant: Array.from(relevantTerms),
+        irrelevant: Array.from(irrelevantTerms),
+    };
 };
 
 
 const formatDateSafe = (d) => {
     if (!d) return '';
     const date = new Date(d);
+    // Adjust for timezone offset to get the correct YYYY-MM-DD
     const userTimezoneOffset = date.getTimezoneOffset() * 60000;
     const adjustedDate = new Date(date.getTime() + userTimezoneOffset);
     return adjustedDate.toISOString().split('T')[0];
@@ -90,9 +159,9 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
     try {
         console.log(`[AI Report] Starting data gathering for ASIN ${asin}`);
         
-        // --- 1. Data Gathering (Parallel) ---
+        // --- 1. Data Gathering ---
         const queries = {
-            product: client.query('SELECT sale_price, product_cost, amazon_fee FROM product_listings WHERE asin = $1 LIMIT 1', [asin]),
+            product: client.query('SELECT title, sale_price, product_cost, amazon_fee FROM product_listings WHERE asin = $1 LIMIT 1', [asin]),
             asinStatus: client.query(`SELECT (CURRENT_DATE - MIN(report_date)) as days_of_data, MAX(report_date) as last_date FROM sales_and_traffic_by_asin WHERE child_asin = $1`, [asin]),
             adsData: client.query(`
                 WITH combined_reports AS (
@@ -136,16 +205,24 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
         const [productRes, asinStatusRes, adsRes, totalSalesRes, dailyTrendsRes, sqpRes] = await Promise.all(Object.values(queries));
         console.log('[AI Report] Data gathering complete.');
 
-        // --- 2. Algorithmic Analysis & Data Structuring ---
-        console.log('[AI Report] Starting algorithmic analysis.');
+        // --- 2. Algorithmic & AI-Powered Analysis ---
+        console.log('[AI Report] Starting algorithmic and AI analysis.');
         const productData = productRes.rows[0];
         if (!productData || productData.sale_price == null) throw new Error(`Product data (price, cost, fee) not found for ASIN ${asin}. Please add it in the Listings tab.`);
         
+        const productDetailsForAI = {
+            title: productData.title,
+            bullet_points: productData.bullet_points || []
+        };
+
+        const adPerformance = adsRes.rows;
+        const allSearchTerms = [...new Set(adPerformance.map(r => r.customer_search_term))];
+        const { relevant: relevantTerms, irrelevant: irrelevantTerms } = await classifySearchTermsWithAI(allSearchTerms, productDetailsForAI);
+
         const price = parseFloat(productData.sale_price);
         const profitMarginBeforeAd = price - parseFloat(productData.product_cost) - parseFloat(productData.amazon_fee);
         const breakEvenAcos = price > 0 ? (profitMarginBeforeAd / price) * 100 : 0;
 
-        const adPerformance = adsRes.rows;
         const totalAdSpend = adPerformance.reduce((sum, r) => sum + parseFloat(r.total_spend), 0);
         const totalAdSales = adPerformance.reduce((sum, r) => sum + parseFloat(r.total_sales), 0);
         const totalAdOrders = adPerformance.reduce((sum, r) => sum + parseFloat(r.total_orders), 0);
@@ -155,148 +232,80 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
         const totalSales = parseFloat(totalSalesRes.rows[0]?.total_sales || 0);
         const totalUnits = parseInt(totalSalesRes.rows[0]?.total_units || 0);
         const tacos = totalSales > 0 ? (totalAdSpend / totalSales) * 100 : 0;
-        
         const blendedCpa = totalUnits > 0 ? totalAdSpend / totalUnits : 0;
-
-        const searchTerms = adPerformance.map(r => r.customer_search_term);
-        const relevantTerms = searchTerms.filter(t => RELEVANT_KEYWORDS.test(t) && !IRRELEVANT_KEYWORDS.test(t));
-        const irrelevantTerms = searchTerms.filter(t => !RELEVANT_KEYWORDS.test(t) || IRRELEVANT_KEYWORDS.test(t));
-        
-        const topPerformers = adPerformance.filter(r => r.total_orders > 0).sort((a,b) => (parseFloat(a.total_spend)/parseFloat(a.total_orders)) - (parseFloat(b.total_spend)/parseFloat(b.total_orders))).slice(0, 5);
-        const inefficientSpenders = adPerformance.filter(r => r.total_orders == 0).sort((a,b) => parseFloat(b.total_spend) - parseFloat(a.total_spend)).slice(0, 5);
         
         const dailyData = dailyTrendsRes.rows.map(r => ({
-            date: formatDateSafe(r.report_date),
-            adSpend: parseFloat(r.ad_spend),
-            adSales: parseFloat(r.ad_sales),
-            adOrders: parseInt(r.ad_orders, 10),
-            totalUnits: parseInt(r.total_units, 10),
-            totalSessions: parseInt(r.total_sessions, 10),
-            mobileSessions: parseInt(r.mobile_sessions, 10)
+            date: formatDateSafe(r.report_date), adSpend: parseFloat(r.ad_spend), adSales: parseFloat(r.ad_sales), adOrders: parseInt(r.ad_orders, 10),
+            totalUnits: parseInt(r.total_units, 10), totalSessions: parseInt(r.total_sessions, 10), mobileSessions: parseInt(r.mobile_sessions, 10)
         }));
         const totalSessions = dailyData.reduce((sum, d) => sum + d.totalSessions, 0);
-        const mobileSessions = dailyData.reduce((sum, d) => sum + d.mobileSessions, 0);
-        const mobileSessionShare = totalSessions > 0 ? (mobileSessions / totalSessions) * 100 : 0;
+        const mobileSessionShare = totalSessions > 0 ? (dailyData.reduce((sum, d) => sum + d.mobileSessions, 0) / totalSessions) * 100 : 0;
 
         const daysOfData = asinStatusRes.rows[0]?.days_of_data || 0;
         let asinStatusStr = daysOfData > 60 ? 'Established' : (daysOfData >= 30 ? 'Launching' : 'New');
         const lastDate = asinStatusRes.rows[0]?.last_date;
         const delayDays = lastDate ? Math.floor((new Date() - new Date(lastDate)) / (1000 * 60 * 60 * 24)) - 1 : 99;
+
+        // --- 3. AI Analysis (Chunked Mode) ---
+        console.log('[AI Report] Starting chunked AI analysis steps...');
         
-        const topSearchTermsForAI = adPerformance.sort((a,b) => parseFloat(b.total_spend) - parseFloat(a.total_spend)).slice(0, 5);
+        const costAnalysisPrompt = `Analyze profitability for ASIN ${asin}. Price: $${price.toFixed(2)}, Cost: $${productData.product_cost}, Amazon Fee: $${productData.amazon_fee}. Ad Spend: $${totalAdSpend.toFixed(2)}, Ad Orders: ${totalAdOrders}. Give a one-sentence insight on profitability after ad costs.`;
+        const costAnalysisResult = await callGeminiStep(costAnalysisPrompt, "You are a financial analyst.", { type: Type.OBJECT, properties: { costAnalysisInsights: { type: Type.STRING } } });
+
+        const overviewPrompt = `Data for ASIN ${asin}: Total search terms: ${allSearchTerms.length}, Relevant (AI-classified): ${relevantTerms.length}, Irrelevant (AI-classified): ${irrelevantTerms.length}. Ad Spend: $${totalAdSpend.toFixed(2)}, Ad Sales: $${totalAdSales.toFixed(2)}. Total Sales: $${totalSales.toFixed(2)}. Mobile Session Share: ${mobileSessionShare.toFixed(1)}%. Daily Trends: ${JSON.stringify(dailyData)}. Give separate, one-sentence insights for spend efficiency/TACoS, search term relevance, daily trends, and device performance.`;
+        const overviewResult = await callGeminiStep(overviewPrompt, "You are a strategic PPC analyst.", { type: Type.OBJECT, properties: { spendEfficiencyInsights: { type: Type.STRING }, weeklyOverviewInsights: { type: Type.STRING }, trendsInsights: { type: Type.STRING }, conversionAndDevicesInsights: { type: Type.STRING } } });
+
+        const topSearchTermsForAI = adPerformance.sort((a,b) => parseFloat(b.total_spend) - parseFloat(a.total_spend)).slice(0, 10);
         const sqpData = sqpRes.rows.map(r => ({ searchQuery: r.search_query, ...r.performance_data }));
+        const detailedAnalysisPrompt = `For each of these top 10 search terms for ASIN ${asin}, provide a detailed analysis comparing its ad performance to the broader market context from the Search Query Performance Data. Then give a specific, actionable recommendation. Terms: ${JSON.stringify(topSearchTermsForAI.map(t => ({term: t.customer_search_term, spend: t.total_spend, orders: t.total_orders})))}. Market Data: ${JSON.stringify(sqpData)}.`;
+        const detailedAnalysisResult = await callGeminiStep(detailedAnalysisPrompt, "You are a search term optimization expert.", { type: Type.OBJECT, properties: { detailedTermAnalysis: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { searchTerm: { type: Type.STRING }, aiAnalysis: { type: Type.STRING }, aiRecommendation: { type: Type.STRING } } } } } });
 
-        // --- 3. AI Prompt Construction & Schema Definition ---
-        const prompt = `
-            Analyze the following Amazon PPC data for ASIN ${asin} from ${startDate} to ${endDate}.
-            Product Info: Price $${price.toFixed(2)}, Cost $${productData.product_cost}, Amazon Fee $${productData.amazon_fee}.
-            
-            Key Metrics:
-            - Ad Spend: $${totalAdSpend.toFixed(2)}, Ad Sales: $${totalAdSales.toFixed(2)}, Ad Orders: ${totalAdOrders}, ACOS: ${((totalAdSales > 0 ? totalAdSpend / totalAdSales : 0)*100).toFixed(1)}%
-            - Total Sales: $${totalSales.toFixed(2)}, Total Units: ${totalUnits}, TACoS: ${tacos.toFixed(1)}%
-            - Total Sessions: ${totalSessions}, Mobile Session Share: ${mobileSessionShare.toFixed(1)}%
-            - Search Terms: ${searchTerms.length} total, ${relevantTerms.length} relevant, ${irrelevantTerms.length} irrelevant.
-            
-            Top Performing Terms (by CPA): ${JSON.stringify(topPerformers)}
-            Top Inefficient Terms (by spend, 0 orders): ${JSON.stringify(inefficientSpenders)}
-            
-            Daily Trend Data: ${JSON.stringify(dailyData)}
-
-            Top 5 Search Terms by Spend for Detailed Analysis: ${JSON.stringify(topSearchTermsForAI.map(t => ({term: t.customer_search_term, spend: t.total_spend})))}
-            
-            Search Query Performance Data (Market Context): ${JSON.stringify(sqpData)}
-
-            Based on ALL the data provided, perform the analysis and fill out the JSON object according to the schema.
+        const composerPrompt = `Based on these separate analyses, create a final, prioritized weekly action plan.
+        - Cost/Profitability Insight: ${costAnalysisResult.costAnalysisInsights}
+        - Spend Efficiency Insight: ${overviewResult.spendEfficiencyInsights}
+        - Trends & Devices Insight: ${overviewResult.trendsInsights} ${overviewResult.conversionAndDevicesInsights}
+        - Detailed Term Recommendations: ${JSON.stringify(detailedAnalysisResult.detailedTermAnalysis)}
         `;
-
-        const aiSchema = {
-            type: Type.OBJECT,
-            properties: {
-                costAnalysisInsights: { type: Type.STRING, description: "One-sentence insight on profitability after ad costs." },
-                weeklyOverviewInsights: { type: Type.STRING, description: "One-sentence strategic summary of the search term relevance ratio." },
-                spendEfficiencyInsights: { type: Type.STRING, description: "One-sentence insight on spend efficiency and TACoS." },
-                trendsInsights: { type: Type.STRING, description: "One-sentence insight on daily trends, noting any anomalies." },
-                conversionAndDevicesInsights: { type: Type.STRING, description: "One-sentence insight on overall conversion rate and device performance." },
-                detailedTermAnalysis: {
-                    type: Type.ARRAY,
-                    description: "Provide a detailed analysis for each of the top 5 search terms. For each term, compare its ad performance (spend, orders) with the broader market context from the Search Query Performance Data. Analyze the conversion funnel (impressions, clicks, add to carts, purchases) comparing the ASIN's share versus the total market.",
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            searchTerm: { type: Type.STRING },
-                            aiAnalysis: { type: Type.STRING, description: "Detailed analysis of why this term is performing well or poorly, incorporating market comparison." },
-                            aiRecommendation: { type: Type.STRING, description: "A specific, actionable recommendation for this term based on the analysis." }
-                        }
-                    }
-                },
-                weeklyActionPlan: {
-                    type: Type.OBJECT,
-                    description: "A final, prioritized action plan for the upcoming week.",
-                    properties: {
-                        bidManagement: { type: Type.ARRAY, items: { type: Type.STRING } },
-                        negativeKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
-                        campaignStructure: { type: Type.ARRAY, items: { type: Type.STRING } },
-                        listingOptimization: { type: Type.ARRAY, items: { type: Type.STRING } }
-                    }
-                }
-            }
-        };
+        const actionPlanResult = await callGeminiStep(composerPrompt, "You are a senior PPC strategist creating a weekly plan.", { type: Type.OBJECT, properties: { weeklyActionPlan: { type: Type.OBJECT, properties: { bidManagement: { type: Type.ARRAY, items: { type: Type.STRING } }, negativeKeywords: { type: Type.ARRAY, items: { type: Type.STRING } }, campaignStructure: { type: Type.ARRAY, items: { type: Type.STRING } }, listingOptimization: { type: Type.ARRAY, items: { type: Type.STRING } } } } } });
         
-        console.log('[AI Report] Sending structured request to AI...');
-        const aiResult = await callGeminiWithSchema(prompt, "You are an expert Amazon PPC Analyst. Your response must be a valid JSON object matching the provided schema.", aiSchema);
         console.log('[AI Report] AI analysis complete.');
         
-        // --- 4. Final Composition ---
         const finalReport = {
             asinStatus: { status: asinStatusStr, daysOfData },
             dataFreshness: { isDelayed: delayDays > 3, delayDays, lastDate: lastDate ? formatDateSafe(lastDate) : 'N/A' },
             costAnalysis: {
-                price: price.toFixed(2),
-                profitMarginBeforeAd: profitMarginBeforeAd.toFixed(2),
-                breakEvenAcos: breakEvenAcos.toFixed(1),
-                avgCpa: avgCpa.toFixed(2),
-                profitMarginAfterAd: profitMarginAfterAd.toFixed(2),
-                blendedCpa: blendedCpa.toFixed(2),
-                blendedProfitMargin: (profitMarginBeforeAd - blendedCpa).toFixed(2),
-                aiInsights: aiResult.costAnalysisInsights
+                price: price.toFixed(2), profitMarginBeforeAd: profitMarginBeforeAd.toFixed(2), breakEvenAcos: breakEvenAcos.toFixed(1),
+                avgCpa: avgCpa.toFixed(2), profitMarginAfterAd: profitMarginAfterAd.toFixed(2), blendedCpa: blendedCpa.toFixed(2),
+                blendedProfitMargin: (profitMarginBeforeAd - blendedCpa).toFixed(2), aiInsights: costAnalysisResult.costAnalysisInsights
             },
             weeklyOverview: {
-                searchTermSummary: {
-                    total: searchTerms.length, relevant: relevantTerms.length, irrelevant: irrelevantTerms.length,
-                    topRelevantVolume: [],
-                    topRelevantExamples: relevantTerms.slice(0, 5),
-                    topIrrelevantExamples: irrelevantTerms.slice(0, 5),
-                    aiInsights: aiResult.weeklyOverviewInsights
-                },
+                searchTermSummary: { aiInsights: overviewResult.weeklyOverviewInsights },
                 spendEfficiency: {
                     totalAdSpend: totalAdSpend.toFixed(2), adSales: totalAdSales.toFixed(2),
                     acos: ((totalAdSales > 0 ? totalAdSpend / totalAdSales : 0) * 100).toFixed(1),
                     totalSales: totalSales.toFixed(2), tacos: tacos.toFixed(1),
-                    topPerformingTerms: topPerformers.map(t => ({ term: t.customer_search_term, cpa: (parseFloat(t.total_spend) / parseFloat(t.total_orders)).toFixed(2) })),
-                    inefficientTerms: inefficientSpenders.map(t => ({ term: t.customer_search_term, spend: parseFloat(t.total_spend).toFixed(2) })),
-                    aiInsights: aiResult.spendEfficiencyInsights
+                    aiInsights: overviewResult.spendEfficiencyInsights
                 },
-                trends: { daily: dailyData, aiInsights: aiResult.trendsInsights },
+                trends: { daily: dailyData, aiInsights: overviewResult.trendsInsights },
                 conversionAndDevices: {
                     overallCR: (totalSessions > 0 ? (totalUnits / totalSessions) * 100 : 0).toFixed(1),
                     mobileSessionShare: mobileSessionShare.toFixed(1),
-                    aiInsights: aiResult.conversionAndDevicesInsights
+                    aiInsights: overviewResult.conversionAndDevicesInsights
                 }
             },
-            detailedSearchTermAnalysis: aiResult.detailedTermAnalysis.map((analysis) => {
+            detailedSearchTermAnalysis: detailedAnalysisResult.detailedTermAnalysis.map((analysis) => {
                 const termData = adPerformance.find(p => p.customer_search_term === analysis.searchTerm);
                 return {
                     ...analysis,
                     adsPerformance: {
-                        spend: parseFloat(termData?.total_spend || 0).toFixed(2),
-                        orders: parseInt(termData?.total_orders || 0, 10),
+                        spend: parseFloat(termData?.total_spend || 0).toFixed(2), orders: parseInt(termData?.total_orders || 0, 10),
                         sales: parseFloat(termData?.total_sales || 0).toFixed(2),
                         cpa: (termData?.total_orders > 0 ? parseFloat(termData.total_spend) / parseFloat(termData.total_orders) : 0).toFixed(2),
                         acos: (termData?.total_sales > 0 ? (parseFloat(termData.total_spend) / parseFloat(termData.total_sales)) * 100 : 0).toFixed(1) + '%'
                     }
                 }
             }),
-            weeklyActionPlan: aiResult.weeklyActionPlan
+            weeklyActionPlan: actionPlanResult.weeklyActionPlan
         };
         
         res.json(finalReport);

@@ -118,8 +118,11 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
             yAxisID: 'y',
         }];
 
-        const hasSpData = historyData.some(d => d.sp_clicks !== null && typeof d.sp_clicks === 'number');
-        const shouldShowSpClicksChart = hasSpData && config.metricId === 'clicks.asinCount';
+        const hasSpClicksData = historyData.some(d => d.sp_clicks !== null && typeof d.sp_clicks === 'number');
+        const hasSpImpressionsData = historyData.some(d => d.sp_impressions !== null && typeof d.sp_impressions === 'number');
+
+        const shouldShowSpClicksChart = hasSpClicksData && config.metricId === 'clicks.asinCount';
+        const shouldShowSpImpressionsChart = hasSpImpressionsData && config.metricId === 'impressions.asinCount';
 
         if (shouldShowSpClicksChart) {
             datasets.push({
@@ -127,7 +130,17 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
                 label: 'SP Clicks',
                 data: historyData.map(d => d.sp_clicks),
                 backgroundColor: 'rgba(40, 167, 69, 0.6)',
-                yAxisID: 'y', // Plot on the primary y-axis
+                yAxisID: 'y',
+            });
+        }
+        
+        if (shouldShowSpImpressionsChart) {
+            datasets.push({
+                type: 'bar' as const,
+                label: 'SP Impressions',
+                data: historyData.map(d => d.sp_impressions),
+                backgroundColor: 'rgba(255, 159, 64, 0.6)', // Orange color for impressions
+                yAxisID: 'y',
             });
         }
         

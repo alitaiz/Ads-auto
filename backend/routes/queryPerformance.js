@@ -84,19 +84,23 @@ router.get('/query-performance', async (req, res) => {
     console.log(`[Server] Querying performance data for ASIN: ${asin}, from ${startDate} to ${endDate}`);
 
     try {
-        // Fetch SP clicks aggregated for the whole period for each search query, now filtered by ASIN
-        const spClicksQuery = `
+        // Fetch SP clicks and impressions aggregated for the whole period for each search query, filtered by ASIN
+        const spDataQuery = `
             SELECT 
                 customer_search_term, 
-                SUM(clicks)::int as "spClicks"
+                SUM(clicks)::int as "spClicks",
+                SUM(impressions)::int as "spImpressions"
             FROM sponsored_products_search_term_report
             WHERE report_date BETWEEN $1 AND $2 AND asin = $3
             GROUP BY customer_search_term;
         `;
-        const spClicksResult = await pool.query(spClicksQuery, [startDate, endDate, asin]);
-        const spClicksMap = new Map();
-        spClicksResult.rows.forEach(row => {
-            spClicksMap.set(row.customer_search_term, row.spClicks);
+        const spDataResult = await pool.query(spDataQuery, [startDate, endDate, asin]);
+        const spDataMap = new Map();
+        spDataResult.rows.forEach(row => {
+            spDataMap.set(row.customer_search_term, {
+                spClicks: row.spClicks || 0,
+                spImpressions: row.spImpressions || 0,
+            });
         });
 
         const query = `
@@ -174,14 +178,21 @@ router.get('/query-performance', async (req, res) => {
         for (const [searchQuery, agg] of aggregationMap.entries()) {
              const currencyCode = 'USD'; // Assume USD for aggregated median price
              const safeDivide = (num, den) => (den > 0 ? num / den : 0);
-             const spClicks = spClicksMap.get(searchQuery) || 0;
+             const spData = spDataMap.get(searchQuery) || { spClicks: 0, spImpressions: 0 };
+             let spStatus = 'none';
+             if (spData.spClicks > 0) {
+                 spStatus = 'with_clicks';
+             } else if (spData.spImpressions > 0) {
+                 spStatus = 'no_clicks';
+             }
 
             transformedData.push({
                 searchQuery,
                 searchQueryScore: agg.searchQueryScore,
                 searchQueryVolume: agg.searchQueryVolume,
-                hasSPData: spClicks > 0,
-                spClicks: spClicks,
+                spStatus: spStatus,
+                spClicks: spData.spClicks,
+                spImpressions: spData.spImpressions,
                 impressions: {
                     totalCount: agg.impressionData.totalQueryImpressionCount,
                     asinCount: agg.impressionData.asinImpressionCount,

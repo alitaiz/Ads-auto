@@ -331,8 +331,9 @@ export interface QueryPerformanceData {
     clicks: { clickRate: number; totalCount: number; asinCount: number; asinShare: number; totalMedianPrice: string; asinMedianPrice: string; sameDayShippingCount: number; oneDayShippingCount: number; twoDayShippingCount: number; };
     cartAdds: { cartAddRate: number; totalCount: number; asinCount: number; asinShare: number; totalMedianPrice: string; asinMedianPrice: string; sameDayShippingCount: number; oneDayShippingCount: number; twoDayShippingCount: number; };
     purchases: { purchaseRate: number; totalCount: number; asinCount: number; asinShare: number; totalMedianPrice: string; asinMedianPrice: string; sameDayShippingCount: number; oneDayShippingCount: number; twoDayShippingCount: number; };
-    hasSPData?: boolean;
+    spStatus?: 'none' | 'no_clicks' | 'with_clicks';
     spClicks?: number;
+    spImpressions?: number;
 }
 
 export interface PerformanceFilterOptions {

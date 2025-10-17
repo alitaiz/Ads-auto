@@ -324,20 +324,6 @@ export function SearchQueryPerformanceView() {
         });
     };
 
-    const renderClickableCell = (item: QueryPerformanceData, col: ColumnConfig) => {
-        const value = getNestedValue(item, col.id);
-        const canBeClicked = !!col.metricFormat;
-        return (
-            <td
-                style={{ ...styles.td, ...(canBeClicked && styles.clickableCell) }}
-                onClick={() => canBeClicked && handleCellClick(item.searchQuery, col)}
-                title={String(value)}
-            >
-                {col.formatter(value)}
-            </td>
-        );
-    };
-
     const handleSaveCustomization = (newVisibleIds: Set<string>) => {
         const newVisibleColumns = allColumns.filter(c => newVisibleIds.has(c.id));
         setVisibleColumns(newVisibleColumns);
@@ -432,37 +418,50 @@ export function SearchQueryPerformanceView() {
                             </tr>
                         </thead>
                         <tbody>
-                            {sortedData.map(item => (
+                           {sortedData.map(item => (
                                 <tr key={item.searchQuery}>
                                     {visibleColumns.map(col => {
                                         const value = getNestedValue(item, col.id);
                                         const canBeClicked = !!col.metricFormat;
                                         
+                                        let cellContent = <>{col.formatter(value)}</>;
+
                                         if (col.id === 'searchQuery') {
-                                            return (
-                                                <td key={col.id} style={styles.td} title={item.searchQuery}>
+                                            cellContent = (
+                                                <>
                                                     {item.searchQuery}
-                                                    {item.hasSPData && <span style={styles.spBadge}>SP</span>}
-                                                </td>
+                                                    {item.spStatus === 'with_clicks' && <span style={styles.spBadge}>SP</span>}
+                                                    {item.spStatus === 'no_clicks' && <span style={{...styles.spBadge, backgroundColor: 'orange'}}>SP</span>}
+                                                </>
+                                            );
+                                        } else if (col.id === 'impressions.asinCount') {
+                                            const spImpressions = item.spImpressions;
+                                            cellContent = (
+                                                <>
+                                                    {col.formatter(value)}
+                                                    {spImpressions && spImpressions > 0 && <span style={{ color: '#28a745', marginLeft: '8px' }}>(SP: {formatNumber(spImpressions)})</span>}
+                                                </>
+                                            );
+                                        } else if (col.id === 'clicks.asinCount') {
+                                            const spClicks = item.spClicks;
+                                            cellContent = (
+                                                <>
+                                                    {col.formatter(value)}
+                                                    {spClicks && spClicks > 0 && <span style={{ color: '#28a745', marginLeft: '8px' }}>(SP: {formatNumber(spClicks)})</span>}
+                                                </>
                                             );
                                         }
 
-                                        if (col.id === 'clicks.asinCount') {
-                                            const spClicks = item.spClicks;
-                                            return (
-                                                <td
-                                                    key={col.id}
-                                                    style={{ ...styles.td, ...(canBeClicked && styles.clickableCell) }}
-                                                    onClick={() => canBeClicked && handleCellClick(item.searchQuery, col)}
-                                                    title={String(value)}
-                                                >
-                                                    {col.formatter(value)}
-                                                    {spClicks && spClicks > 0 && <span style={{ color: '#28a745', marginLeft: '8px' }}>(SP: {spClicks})</span>}
-                                                </td>
-                                            )
-                                        }
-
-                                        return renderClickableCell(item, col);
+                                        return (
+                                            <td
+                                                key={col.id}
+                                                style={{ ...styles.td, ...(canBeClicked && col.id !== 'searchQuery' && styles.clickableCell) }}
+                                                onClick={() => canBeClicked && col.id !== 'searchQuery' && handleCellClick(item.searchQuery, col)}
+                                                title={col.id === 'searchQuery' ? item.searchQuery : String(value)}
+                                            >
+                                                {cellContent}
+                                            </td>
+                                        );
                                     })}
                                 </tr>
                             ))}

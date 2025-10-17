@@ -1,11 +1,14 @@
 // views/AnalysisReportView.tsx
 import React, { useState, useEffect } from 'react';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
+import { Bar, Line, Doughnut } from 'react-chartjs-2';
 
-// Define a placeholder for the complex report data structure
+ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement);
+
 type AnalysisReport = any;
 
 const styles: { [key: string]: React.CSSProperties } = {
-    container: { maxWidth: '1200px', margin: '0 auto', padding: '20px' },
+    container: { maxWidth: '1200px', margin: '0 auto', padding: '20px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' },
     header: { marginBottom: '20px' },
     title: { fontSize: '2rem', margin: 0 },
     controls: { display: 'flex', gap: '20px', alignItems: 'flex-end', padding: '20px', backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)', marginBottom: '30px' },
@@ -16,16 +19,54 @@ const styles: { [key: string]: React.CSSProperties } = {
     buttonDisabled: { backgroundColor: 'var(--primary-hover-color)', cursor: 'not-allowed' },
     message: { textAlign: 'center', padding: '50px', fontSize: '1.2rem', color: '#666', backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)' },
     error: { color: 'var(--danger-color)', padding: '20px', backgroundColor: '#fdd', borderRadius: 'var(--border-radius)' },
-    reportContainer: { display: 'flex', flexDirection: 'column', gap: '20px' },
-    reportCard: { backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)', padding: '20px' },
-    cardTitle: { fontSize: '1.5rem', fontWeight: 600, margin: '0 0 15px 0', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' },
-    kpiGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '15px' },
-    kpiCard: { textAlign: 'center', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px' },
+    reportContainer: { display: 'flex', flexDirection: 'column', gap: '25px' },
+    reportCard: { backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)', padding: '25px' },
+    cardTitle: { fontSize: '1.5rem', fontWeight: 600, margin: '0 0 20px 0', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' },
+    kpiGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '20px' },
+    kpiCard: { textAlign: 'center', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e9ecef' },
     kpiValue: { fontSize: '1.75rem', fontWeight: 'bold', margin: 0, color: 'var(--primary-color)' },
     kpiLabel: { fontSize: '0.9rem', color: '#666', margin: '5px 0 0 0' },
-    insights: { fontStyle: 'italic', color: '#333', backgroundColor: '#eef2f3', padding: '15px', borderRadius: '8px', borderLeft: '4px solid var(--primary-color)' },
-    pre: { whiteSpace: 'pre-wrap', wordBreak: 'break-all', backgroundColor: '#f0f2f2', padding: '15px', borderRadius: '4px', fontSize: '0.9rem', maxHeight: '500px', overflowY: 'auto' }
+    insights: { fontStyle: 'italic', color: '#333', backgroundColor: '#eef2f3', padding: '15px', borderRadius: '8px', borderLeft: '4px solid var(--primary-color)', marginTop: '20px' },
+    termList: { listStyle: 'none', padding: 0, margin: 0, columns: 2, columnGap: '20px' },
+    termChip: { backgroundColor: '#e9ecef', padding: '4px 8px', borderRadius: '12px', fontSize: '0.85rem', marginBottom: '5px', display: 'inline-block' },
+    detailTable: { width: '100%', borderCollapse: 'collapse', marginTop: '20px' },
+    detailTh: { padding: '10px', textAlign: 'left', borderBottom: '2px solid #ccc', background: '#f8f9fa' },
+    detailTd: { padding: '10px', borderBottom: '1px solid #eee' },
+    actionList: { listStyleType: 'decimal', paddingLeft: '20px' },
+    chartContainer: { height: '250px', marginTop: '20px' },
+    expandableRow: { cursor: 'pointer' },
+    expandedContent: { backgroundColor: '#f8f9fa', padding: '15px' },
 };
+
+const KpiCard = ({ value, label, tooltip }: { value: string | number, label: string, tooltip?: string }) => (
+    <div style={styles.kpiCard} title={tooltip}>
+        <p style={styles.kpiValue}>{value}</p>
+        <p style={styles.kpiLabel}>{label}</p>
+    </div>
+);
+
+const DetailRow = ({ analysis, onToggle, isExpanded }: { analysis: any, onToggle: () => void, isExpanded: boolean }) => (
+    <>
+        <tr onClick={onToggle} style={styles.expandableRow} title="Click to expand/collapse details">
+            <td style={styles.detailTd}>{analysis.searchTerm}</td>
+            <td style={styles.detailTd}>{`$${analysis.adsPerformance.spend}`}</td>
+            <td style={styles.detailTd}>{analysis.adsPerformance.orders}</td>
+            <td style={styles.detailTd}>{`$${analysis.adsPerformance.sales}`}</td>
+            <td style={styles.detailTd}>{analysis.adsPerformance.acos}</td>
+            <td style={styles.detailTd}>{`$${analysis.adsPerformance.cpa}`}</td>
+            <td style={styles.detailTd}>{isExpanded ? '▼' : '►'}</td>
+        </tr>
+        {isExpanded && (
+            <tr>
+                <td colSpan={7} style={styles.expandedContent}>
+                    <p><strong>AI Analysis:</strong> {analysis?.aiAnalysis || 'Not available.'}</p>
+                    <p><strong>AI Recommendation:</strong> {analysis?.aiRecommendation || 'Not available.'}</p>
+                </td>
+            </tr>
+        )}
+    </>
+);
+
 
 export function AnalysisReportView() {
     const [asins, setAsins] = useState<string[]>([]);
@@ -33,6 +74,7 @@ export function AnalysisReportView() {
     const [reportData, setReportData] = useState<AnalysisReport | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [expandedTerm, setExpandedTerm] = useState<string | null>(null);
     
     const today = new Date().toISOString().split('T')[0];
     const sevenDaysAgo = new Date();
@@ -47,35 +89,21 @@ export function AnalysisReportView() {
                 const data = await response.json();
                 const asinList = data.map((item: any) => item.asin);
                 setAsins(asinList);
-                if (asinList.length > 0) {
-                    setSelectedAsin(asinList[0]);
-                }
-            } catch (err) {
-                setError(err instanceof Error ? err.message : 'Could not load ASINs.');
-            }
+                if (asinList.length > 0) setSelectedAsin(asinList[0]);
+            } catch (err) { setError(err instanceof Error ? err.message : 'Could not load ASINs.'); }
         };
         fetchAsins();
     }, []);
 
     const handleGenerateReport = async () => {
-        if (!selectedAsin) {
-            setError('Please select an ASIN.');
-            return;
-        }
-        setLoading(true);
-        setError(null);
-        setReportData(null);
+        if (!selectedAsin) { setError('Please select an ASIN.'); return; }
+        setLoading(true); setError(null); setReportData(null);
 
         try {
             const response = await fetch('/api/ai/generate-analysis-report', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    asin: selectedAsin,
-                    startDate: dateRange.start,
-                    endDate: dateRange.end,
-                    profileId: localStorage.getItem('selectedProfileId'),
-                }),
+                body: JSON.stringify({ asin: selectedAsin, startDate: dateRange.start, endDate: dateRange.end, profileId: localStorage.getItem('selectedProfileId') }),
             });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Failed to generate report.');
@@ -86,90 +114,113 @@ export function AnalysisReportView() {
             setLoading(false);
         }
     };
+
+    const dailyChartData = reportData?.weeklyOverview?.trends?.daily ? {
+        labels: reportData.weeklyOverview.trends.daily.map((d: any) => new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })),
+        datasets: [
+            { type: 'bar' as const, label: 'Ad Spend', data: reportData.weeklyOverview.trends.daily.map((d: any) => d.adSpend), backgroundColor: 'rgba(255, 99, 132, 0.5)', yAxisID: 'y' },
+            { type: 'line' as const, label: 'Ad Orders', data: reportData.weeklyOverview.trends.daily.map((d: any) => d.adOrders), borderColor: 'rgb(54, 162, 235)', yAxisID: 'y1' },
+            { type: 'line' as const, label: 'Ad Sales', data: reportData.weeklyOverview.trends.daily.map((d: any) => d.adSales), borderColor: 'rgb(75, 192, 192)', yAxisID: 'y' },
+        ]
+    } : null;
     
-    const KpiCard = ({ value, label }: { value: string | number, label: string }) => (
-        <div style={styles.kpiCard}>
-            <p style={styles.kpiValue}>{value}</p>
-            <p style={styles.kpiLabel}>{label}</p>
-        </div>
-    );
+    const deviceChartData = reportData?.weeklyOverview?.trends?.daily ? {
+        labels: ['Mobile', 'Browser'],
+        datasets: [{
+            data: [reportData.weeklyOverview.conversionAndDevices.mobileSessionShare, 100 - reportData.weeklyOverview.conversionAndDevices.mobileSessionShare],
+            backgroundColor: ['#007185', '#adb5bd'],
+        }]
+    } : null;
 
     return (
         <div style={styles.container}>
-            <header style={styles.header}>
-                <h1 style={styles.title}>AI Analysis Report</h1>
-            </header>
-
+            <header style={styles.header}><h1 style={styles.title}>AI Analysis Report</h1></header>
             <div style={styles.controls}>
-                <div style={styles.formGroup}>
-                    <label style={styles.label} htmlFor="asin-select">Select ASIN</label>
-                    <select id="asin-select" style={styles.input} value={selectedAsin} onChange={e => setSelectedAsin(e.target.value)} disabled={asins.length === 0}>
-                        {asins.length > 0 ? asins.map(a => <option key={a} value={a}>{a}</option>) : <option>Loading ASINs...</option>}
-                    </select>
-                </div>
-                 <div style={styles.formGroup}>
-                    <label style={styles.label} htmlFor="start-date">Start Date</label>
-                    <input type="date" id="start-date" style={styles.input} value={dateRange.start} onChange={e => setDateRange(prev => ({...prev, start: e.target.value}))} />
-                </div>
-                <div style={styles.formGroup}>
-                    <label style={styles.label} htmlFor="end-date">End Date</label>
-                    <input type="date" id="end-date" style={styles.input} value={dateRange.end} onChange={e => setDateRange(prev => ({...prev, end: e.target.value}))} />
-                </div>
-                <button onClick={handleGenerateReport} style={loading ? {...styles.button, ...styles.buttonDisabled} : styles.button} disabled={loading}>
-                    {loading ? 'Generating...' : 'Generate Report'}
-                </button>
+                {/* Controls... */}
+                <div style={styles.formGroup}><label style={styles.label} htmlFor="asin-select">Select ASIN</label><select id="asin-select" style={styles.input} value={selectedAsin} onChange={e => setSelectedAsin(e.target.value)} disabled={asins.length === 0}>{asins.length > 0 ? asins.map(a => <option key={a} value={a}>{a}</option>) : <option>Loading...</option>}</select></div>
+                <div style={styles.formGroup}><label style={styles.label} htmlFor="start-date">Start Date</label><input type="date" id="start-date" style={styles.input} value={dateRange.start} onChange={e => setDateRange(prev => ({...prev, start: e.target.value}))} /></div>
+                <div style={styles.formGroup}><label style={styles.label} htmlFor="end-date">End Date</label><input type="date" id="end-date" style={styles.input} value={dateRange.end} onChange={e => setDateRange(prev => ({...prev, end: e.target.value}))} /></div>
+                <button onClick={handleGenerateReport} style={loading ? {...styles.button, ...styles.buttonDisabled} : styles.button} disabled={loading}>{loading ? 'Generating...' : 'Generate Report'}</button>
             </div>
-
             {error && <div style={styles.error}>{error}</div>}
-
             {loading && <div style={styles.message}>AI is analyzing your data. This may take a few minutes...</div>}
-            
-            {!loading && !error && !reportData && (
-                <div style={styles.message}>
-                    Select an ASIN and date range to generate a comprehensive performance analysis.
-                </div>
-            )}
-
+            {!loading && !error && !reportData && <div style={styles.message}>Select an ASIN and date range to generate an analysis.</div>}
             {reportData && (
                 <div style={styles.reportContainer}>
-                     <div style={{...styles.reportCard, display: 'flex', justifyContent: 'space-around', alignItems: 'center', backgroundColor: '#eef2f3' }}>
+                    {/* ASIN Status and Data Freshness */}
+                    <div style={{...styles.reportCard, display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8f9fa' }}>
                         <div><strong>ASIN Status:</strong> {reportData.asinStatus.status} ({reportData.asinStatus.daysOfData} days of data)</div>
-                        {reportData.dataFreshness.isDelayed && <div style={{color: 'var(--danger-color)'}}><strong>Data Freshness Warning:</strong> Data is delayed by {reportData.dataFreshness.delayDays} days. Last data is from {reportData.dataFreshness.lastDate}.</div>}
+                        {reportData.dataFreshness.isDelayed && <div style={{color: 'var(--danger-color)'}}><strong>Data Freshness Warning:</strong> Data is delayed by {reportData.dataFreshness.delayDays} days.</div>}
                     </div>
-
+                    {/* Cost Analysis */}
                     <div style={styles.reportCard}>
                         <h2 style={styles.cardTitle}>Cost & Profitability Analysis</h2>
                         <div style={styles.kpiGrid}>
                             <KpiCard value={`$${reportData.costAnalysis.price}`} label="Price" />
-                            <KpiCard value={`$${reportData.costAnalysis.profitMarginBeforeAd}`} label="Profit / Unit (Before Ads)" />
+                            <KpiCard value={`$${reportData.costAnalysis.profitMarginBeforeAd}`} label="Profit / Unit (Pre-Ad)" />
                             <KpiCard value={`${reportData.costAnalysis.breakEvenAcos}%`} label="Break-Even ACOS" />
-                            <KpiCard value={`$${reportData.costAnalysis.avgCpa}`} label="Avg. Ad CPA (Cost per Order)" />
-                            <KpiCard value={`$${reportData.costAnalysis.profitMarginAfterAd}`} label="Profit / Ad Order" />
-                            <KpiCard value={`${reportData.costAnalysis.tacos}%`} label="TACoS" />
+                            <KpiCard value={`$${reportData.costAnalysis.avgCpa}`} label="Avg. Ad CPA" tooltip="Average Ad Spend per Ad Order" />
+                             <KpiCard value={`$${reportData.costAnalysis.profitMarginAfterAd}`} label="Profit / Ad Order" />
+                             <KpiCard value={`$${reportData.costAnalysis.blendedCpa}`} label="Blended CPA" tooltip="Total Ad Spend / Total Units Sold" />
+                            <KpiCard value={`$${reportData.costAnalysis.blendedProfitMargin}`} label="Blended Profit / Unit" />
                         </div>
-                        <p style={styles.insights}><strong>AI Insights:</strong> {reportData.costAnalysis.aiInsights}</p>
+                        <p style={styles.insights}><strong>AI Insight:</strong> {reportData.costAnalysis.aiInsights}</p>
                     </div>
-                    
+                    {/* Weekly Overview */}
                     <div style={styles.reportCard}>
                         <h2 style={styles.cardTitle}>Weekly Overview</h2>
-                        <h3>Search Term Summary</h3>
-                        <p>{`Total Search Terms: ${reportData.weeklyOverview.searchTermSummary.total} | Relevant: ${reportData.weeklyOverview.searchTermSummary.relevant} | Irrelevant: ${reportData.weeklyOverview.searchTermSummary.irrelevant}`}</p>
-                        <p style={styles.insights}><strong>AI Insights:</strong> {reportData.weeklyOverview.searchTermSummary.aiInsights}</p>
-                        
-                        <h3>Spend Efficiency</h3>
-                         <div style={styles.kpiGrid}>
+                        <div style={{...styles.kpiGrid, gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: '20px' }}>
                             <KpiCard value={`$${reportData.weeklyOverview.spendEfficiency.totalAdSpend}`} label="Total Ad Spend" />
                             <KpiCard value={`$${reportData.weeklyOverview.spendEfficiency.adSales}`} label="Total Ad Sales" />
-                            <KpiCard value={`${reportData.weeklyOverview.spendEfficiency.acos}%`} label="Overall ACOS" />
+                            <KpiCard value={`${reportData.weeklyOverview.spendEfficiency.acos}%`} label="ACOS" />
+                             <KpiCard value={`$${reportData.weeklyOverview.spendEfficiency.totalSales}`} label="Total Sales (Ads + Organic)" />
+                             <KpiCard value={`${reportData.weeklyOverview.spendEfficiency.tacos}%`} label="TACoS" />
                         </div>
-                        <p style={styles.insights}><strong>AI Insights:</strong> {reportData.weeklyOverview.spendEfficiency.aiInsights}</p>
+                        <p style={styles.insights}><strong>AI Insight (Spend Efficiency):</strong> {reportData.weeklyOverview.spendEfficiency.aiInsights}</p>
+                        <hr style={{margin: '20px 0', border: 'none', borderTop: '1px solid #eee'}} />
+                        <div style={{display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px'}}>
+                            {dailyChartData && <div style={styles.chartContainer}><Line data={dailyChartData} options={{ responsive: true, maintainAspectRatio: false, scales: { y: { position: 'left' }, y1: { position: 'right', grid: { drawOnChartArea: false } } } }} /></div>}
+                            {deviceChartData && <div style={styles.chartContainer}><Doughnut data={deviceChartData} options={{ responsive: true, maintainAspectRatio: false }} /></div>}
+                        </div>
+                         <p style={styles.insights}><strong>AI Insight (Trends & Devices):</strong> {reportData.weeklyOverview.trends.aiInsights} {reportData.weeklyOverview.conversionAndDevices.aiInsights}</p>
                     </div>
-
+                    {/* Detailed Search Term Analysis */}
                     <div style={styles.reportCard}>
-                        <h2 style={styles.cardTitle}>Full AI Analysis (JSON Output)</h2>
-                        <pre style={styles.pre}>{JSON.stringify(reportData, null, 2)}</pre>
+                        <h2 style={styles.cardTitle}>Detailed Search Term Analysis</h2>
+                        <table style={{...styles.detailTable, tableLayout: 'auto'}}>
+                            <thead><tr>
+                                <th style={styles.detailTh}>Search Term</th>
+                                <th style={styles.detailTh}>Spend</th>
+                                <th style={styles.detailTh}>Orders</th>
+                                <th style={styles.detailTh}>Sales</th>
+                                <th style={styles.detailTh}>ACOS</th>
+                                <th style={styles.detailTh}>CPA</th>
+                                <th style={styles.detailTh}></th>
+                            </tr></thead>
+                            <tbody>
+                                {reportData.detailedSearchTermAnalysis.map((analysis: any) => (
+                                    <DetailRow 
+                                        key={analysis.searchTerm} 
+                                        analysis={analysis}
+                                        onToggle={() => setExpandedTerm(prev => prev === analysis.searchTerm ? null : analysis.searchTerm)}
+                                        isExpanded={expandedTerm === analysis.searchTerm}
+                                    />
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
-
+                    {/* Weekly Action Plan */}
+                    <div style={styles.reportCard}>
+                        <h2 style={styles.cardTitle}>Weekly Action Plan</h2>
+                        {Object.entries(reportData.weeklyActionPlan).map(([category, actions]) => (
+                            (actions as string[]).length > 0 && (
+                                <div key={category} style={{marginBottom: '15px'}}>
+                                    <h3 style={{fontSize: '1.2rem', textTransform: 'capitalize'}}>{category.replace(/([A-Z])/g, ' $1').trim()}</h3>
+                                    <ul style={styles.actionList}>{(actions as string[]).map((action, i) => <li key={i}>{action}</li>)}</ul>
+                                </div>
+                            )
+                        ))}
+                    </div>
                 </div>
             )}
         </div>

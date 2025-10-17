@@ -283,8 +283,7 @@ export interface AICopilotCache {
         asin: string;
         salePrice: string;
         cost: string;
-        fbaFee: string;
-        referralFeePercent: string;
+        amazonFee: string; // Changed from fbaFee and referralFeePercent
     };
     dateRange: {
         startDate: string;
@@ -357,4 +356,7 @@ export interface ProductListing {
     asin: string;
     sku: string;
     title: string;
+    sale_price?: number;
+    product_cost?: number;
+    amazon_fee?: number; // Changed from fba_fee and referral_fee_percent
 }

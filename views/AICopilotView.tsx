@@ -119,7 +119,7 @@ const systemPromptTemplates = [
         prompt: `You are an expert Amazon PPC Analyst named "Co-Pilot". Your goal is to help users analyze performance data and provide strategic advice.
 
 You will be provided with several pieces of data:
-1.  **Product Info:** ASIN, sale price, product cost, and a single **Total Amazon Fee**. This is for profitability calculations. Note: This total fee is passed in the 'FBA Fee' field, and 'Referral Fee' is set to 0.
+1.  **Product Info:** ASIN, sale price, product cost, and a single **Total Amazon Fee**. This is for profitability calculations.
 2.  **Performance Data:** This is a JSON object containing up to four data sets. Understand their differences:
 
     *   **Search Term Report Data:** This is HISTORICAL, AGGREGATED data from official reports. It has a **2-day reporting delay**. Use this for long-term trend analysis, identifying high-performing customer search terms, and finding irrelevant terms to negate. It reflects ADVERTISING performance for specific search terms.
@@ -145,8 +145,8 @@ Your Task:
     {
         name: "Profitability Guardian",
         prompt: `You are a meticulous Amazon PPC Analyst laser-focused on profitability. Your primary directive is to maximize profit from ad spend.
-1.  **Product Info:** ASIN, sale price, product cost, and a single **Total Amazon Fee**. This is for profitability calculations. Note: This total fee is passed in the 'FBA Fee' field, and 'Referral Fee' is set to 0.
-2. Always calculate the break-even ACOS first using the provided product info (Sale Price - Product Cost - Total Amazon Fee). The Total Amazon Fee is provided in the 'FBA Fee' field.
+1.  **Product Info:** ASIN, sale price, product cost, and a single **Total Amazon Fee**. This is for profitability calculations.
+2. Always calculate the break-even ACOS first using the provided product info (Sale Price - Product Cost - Total Amazon Fee).
 3. Analyze performance data strictly through the lens of profitability. Identify keywords and campaigns that are unprofitable (ACOS > break-even ACOS).
 4. Your recommendations should prioritize cutting wasteful spend and improving the ACOS of profitable campaigns.
 5. When suggesting bid adjustments, explain *why* based on the profitability calculation. Suggest aggressive bid reductions for unprofitable terms.
@@ -155,7 +155,7 @@ Your Task:
     {
         name: "Aggressive Growth Hacker",
         prompt: `You are a bold Amazon PPC Strategist focused on aggressive growth and market share domination. Your main goal is to increase visibility and sales velocity, even if it means a temporarily higher ACOS.
-1.  **Product Info:** ASIN, sale price, product cost, and a single **Total Amazon Fee**. This is for profitability calculations. Note: This total fee is passed in the 'FBA Fee' field, and 'Referral Fee' is set to 0.
+1.  **Product Info:** ASIN, sale price, product cost, and a single **Total Amazon Fee**. This is for profitability calculations.
 2. Identify the highest-traffic search terms from the reports, regardless of their current ACOS.
 3. Suggest strategies to increase impression share and top-of-search rank for key terms.
 4. Look for opportunities to expand into new keywords and targeting methods based on customer search patterns.
@@ -309,14 +309,6 @@ export function AICopilotView() {
     const setProductInfo = (key: keyof AICopilotCache['productInfo'], value: string) => {
         updateAiCache(prev => ({ ...prev, productInfo: { ...prev.productInfo, [key]: value } }));
     };
-
-    useEffect(() => {
-        // This ensures the referral fee is always zero for the new single-field logic,
-        // even on the initial load before the user interacts with the fee input.
-        if (aiCache.productInfo.referralFeePercent !== '0') {
-            setProductInfo('referralFeePercent', '0');
-        }
-    }, [aiCache.productInfo.referralFeePercent]);
     
     const setSystemInstruction = (instruction: string) => {
         updateAiCache(prev => ({ ...prev, chat: { ...prev.chat, systemInstruction: instruction } }));
@@ -475,7 +467,7 @@ Here is the data context for my question. Please analyze it before answering, pa
 - ASIN: ${productInfo.asin || 'Not provided'}
 - Sale Price: $${productInfo.salePrice || 'Not provided'}
 - Product Cost: $${productInfo.cost || 'Not provided'}
-- Total Amazon Fee: $${productInfo.fbaFee || 'Not provided'}
+- Total Amazon Fee: $${productInfo.amazonFee || 'Not provided'}
 
 **Performance Data:**
 ${formatData('Search Term Report Data', searchTermData)}
@@ -747,16 +739,13 @@ ${formatData('Search Query Performance Data', searchQueryPerformanceData)}
                         </div>
 
                         <div style={styles.formGroup}>
-                           <label style={styles.label}>Amazon Fee</label>
+                           <label style={styles.label}>Total Amazon Fee</label>
                             <input 
                                 type="number" 
                                 step="0.01" 
                                 style={styles.input} 
-                                value={aiCache.productInfo.fbaFee} // Repurposing fbaFee state to hold the total fee
-                                onChange={e => {
-                                    setProductInfo('fbaFee', e.target.value);
-                                    setProductInfo('referralFeePercent', '0'); // Ensure referral is always 0
-                                }} 
+                                value={aiCache.productInfo.amazonFee}
+                                onChange={e => setProductInfo('amazonFee', e.target.value)}
                                 placeholder="e.g., 11.00" 
                                 title="Total Amazon Fee (FBA + Referral)"
                             />

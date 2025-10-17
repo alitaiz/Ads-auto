@@ -1,0 +1,596 @@
+Tôi muốn tạo một web analysis report UI/UX cho các dữ liệu trên Hãy giúp tôi mô tả nó theo nội dung dưới:
+xác định ASIN mới hay cũ	dữ liệu sale & traffic < 30 ngày là mới launching , 30 ngày đến 60 ngày là trong thời gian launching, lớn hơn 60 ngày là cũ
+xác định chi phí	giá cost, Amazon fee, price ở tab Listing
+Đánh giá tổng quan tuần hiện tại	"có tổng bao nhiêu search term, có bao nhiêu search term liên quan và liệt kê, bao nhiêu search term không liên quan và liệt kê, những search term liên quan volume lớn, những search term liên quan volume thấp
+chi $ cho những search term , asin nào không hiệu quả và cái nào hiệu quả , xu hướng thế nào so với dữ liệu lịch sử . đánh giá tacos ( organic và ads sale thế nào ...) , tỷ lệ chuyển đổi ra sao, mobile hay web tốt hơn, xu hướng thế nào so với dữ liệu lịch sử
+Dữ liệu search term report và sale&traffic sẽ bị delay 2-3 ngày so với hiện tại nên có 1 thuật toán kiểm tra dữ liệu xem có chưa trước khi phân tích"
+đánh giá chi tiết từng search term	"so sánh với dữ liệu performance lịch sử của cả market và asin : seach volume, click, add card, purchase.... , so sánh với search term report (impress, click, purchase ads chiếm bao nhiêu...) .
+đánh giá tỷ lệ chuyển đổi giữa impress và click, giữa click và add card, giữa add card và purchase , so sánh với tỷ lệ chuyển đổi giữa market và ASIN"
+từ những đánh giá ở trên, đưa ra đề xuất tuần này	
+Phương án thực thi	
+ChatGPT said:
+Thought for 3m 8s
+
+Tuyệt vời—dưới đây là bản mô tả UI/UX cho “Web Analysis Report” theo đúng nội dung bạn yêu cầu, kèm các con số đã tính từ dữ liệu tuần 28/09 → 04/10.
+
+1) Xác định trạng thái ASIN (mới/đang launch/cũ)
+
+Quy tắc hiển thị (banner nhỏ ngay đầu trang):
+
+< 30 ngày: Mới launching
+
+30–60 ngày: Trong thời gian launching
+
+> 60 ngày: Cũ
+
+Áp vào dữ liệu hiện có: phạm vi Sales & Traffic chỉ ~7 ngày ⇒ gắn nhãn Mới launching.
+
+2) Khối “Chi phí & giá”
+
+Nguồn: tab Listing (Price), Cost, Amazon fee.
+
+Hiển thị dạng thẻ (cards):
+
+Price: $13.99
+
+Cost: $1.50
+
+Amazon fee: $5.50
+
+Biên góp trước quảng cáo / đơn: $13.99 − $1.50 − $5.50 = $6.99
+
+Chi phí quảng cáo bình quân/đơn qua Ads (CPA, 7d): ~$4.41
+
+Biên góp sau Ads (đơn đến từ Ads): ~$2.58
+
+Chi phí quảng cáo bình quân/đơn toàn shop (blended): $44.10 / 34 ≈ $1.30 → biên góp blended ~$5.69
+
+Gợi ý UX: icon “i” bật tooltip công thức tính, 1 nút “Chỉnh sửa chi phí” để cập nhật Cost/Fee khi cần.
+
+3) Tổng quan tuần hiện tại (Overview)
+3.1. Search term: số lượng & phân loại
+
+Tổng số search term (Ads): 46
+
+Liên quan (memorial/sympathy/loss…): ~34 (ví dụ: “loss of cat sympathy gift”, “cat memorial gifts for loss of cat”, “pet memorial for cat”, “gift when cat died”…)
+
+Không liên quan/ít liên quan: ~12 (ví dụ: “cat figurine”, “cat statue”, “black cat gifts”, “calico cat”, “kitty suncatcher”, “angel with black cat”…)
+
+Liên quan – volume lớn (gợi ý từ thị trường):
+“cat memorial gifts for loss of cat” (~4,121), “cat memorial” (~2,873), “cat memorial gifts” (~1,834), “pet memorial gifts for cats” (~1,334), “loss of cat sympathy gift” (~995).
+(Hiển thị danh sách có badge “Market volume”)
+
+Gợi ý UX:
+
+2 cột “Liên quan” / “Không liên quan”, mỗi term là một chip (filterable).
+
+Toggle “Top volume (market)” để chỉ hiện những term volume cao.
+
+3.2. Chi tiêu & hiệu quả theo search term/ASIN
+
+Tổng chi Ads (tuần): $44.10
+
+Doanh thu quy thuộc Ads (7d): $134.70 → ACOS ~32.7%
+
+Tổng doanh thu (Sales & Traffic): $457.86 → TACoS ~9.6%
+
+Thuần Ads hiệu quả (có đơn): 7 search term tiêu biểu & CPA:
+
+“something to give someone who lost their pet cat”: $0.51/đơn
+
+“gift when cat died”: $0.53/đơn
+
+“a suncatcher memorialized for a cats death”: $0.86/đơn
+
+“gift for female that lost cat”: $0.86/đơn
+
+“cat suncatcher memorial”: $0.90/đơn
+
+“condolences death of pet cat”: $0.90/đơn
+
+“sympathy gift for cat”: $0.86/đơn
+
+Chi tiêu kém hiệu quả (chi mà chưa có đơn):
+
+“cat memorial gifts for loss of cat” (spend ~$1.80, 0 order)
+
+“tabby cat memorial gifts” (~$1.72, 0)
+
+“sympathy gifts for losing a pet cat” (~$0.90, 0)
+
+“cat memorial gifts for loss of cat” là term có market volume cao, nên đề xuất giữ – tối ưu thay vì tắt ngay.
+
+Gợi ý UX: Bảng “Search Term ROI” với cột Impr, Click, Spend, Orders, Sales, CPA, ACOS, Tỷ lệ liên quan; có filter “Chưa có đơn”, “CPA cao”.
+
+3.3. Xu hướng so với dữ liệu lịch sử
+
+Trong tuần (so ngày với ngày):
+
+01–03/10: có chi & có doanh thu tốt.
+
+30/09 và 04/10: chi có nhưng 0 doanh thu (cần siết targeting/bid).
+
+So lịch sử dài hơn: chưa có dữ liệu tuần trước → UI hiển thị nhãn “Chưa đủ dữ liệu lịch sử” và gợi ý “Tải thêm N-1 tuần”.
+
+Gợi ý UX: mini-chart theo ngày (Spend, Orders, Sales 7d) + badge “Tốt/Trung bình/Kém”.
+
+3.4. TACoS, chuyển đổi, thiết bị
+
+TACoS: ~9.6% (ổn với giai đoạn launch).
+
+CR tổng (Units/Sessions): 34 / 315 ≈ 10.8% (khớp Unit Session %).
+
+Thiết bị: Mobile chiếm ~73% sessions; Browser ~27%. Pageviews/session gần tương đương (≈1.5).
+⇒ Mobile quan trọng, cần ưu tiên ảnh/video & A+ tối ưu hiển thị trên app.
+
+Gợi ý UX: donut “Session share (Mobile vs Web)” + chip “Mobile-first”.
+
+3.5. Kiểm tra độ trễ dữ liệu (2–3 ngày)
+
+Thuật toán (chạy trước khi render số):
+
+Lấy max(report_date) của Search Term Report và Sales & Traffic.
+
+Nếu today − max_date ≤ 3 ngày ⇒ Đánh dấu “OK”. Ngược lại ⇒ banner “Dữ liệu chưa cập nhật đầy đủ – không tính các ngày thiếu”.
+
+Các biểu đồ/ bảng tự động exclude ngày thiếu.
+
+Áp vào dữ liệu hiện có: ngày mới nhất 04/10, so với hiện tại chậm >3 ngày ⇒ hiển thị cảnh báo “delay”.
+
+4) Trang chi tiết từng search term
+
+Mỗi search term có trang chi tiết (hoặc ngăn trượt/side-panel) gồm:
+
+Hiệu suất Ads (từ Search Term Report): Impr, Click, Spend, Orders, Sales, CTR, CPC, CPA, ACOS.
+
+Hiệu suất Market & ASIN (từ Search Query Performance Data):
+
+Market: impressions, clicks, add-to-cart, purchases, CR chuỗi (Impr→Click, Click→Add-to-Cart, Add-to-Cart→Purchase).
+
+ASIN: share/đóng góp của ASIN trong click/add-to-cart/purchase nếu có.
+
+So sánh chuyển đổi:
+
+Impr→Click, Click→Cart, Cart→Purchase: ASIN vs Market (hiển thị bar song song + chênh lệch).
+
+Kết luận chi tiết: “ASIN đang kém ở Click→Cart”, “… đang thiếu hiển thị (low share) nhưng CTR cao—tăng bid”, v.v.
+
+Lịch sử xu hướng của term (nếu đã tích lũy ≥2 tuần): đường xu hướng Spend/Orders/ACOS.
+
+Ví dụ minh họa nhanh (từ dữ liệu tuần):
+
+“something to give someone who lost their pet cat”: CPA $0.51, có order → giữ & tăng nhẹ bid.
+
+“cat memorial gifts for loss of cat”: spend có, 0 order nhưng market volume lớn → chuyển sang cụm exact + bổ sung phủ định (figurine, statue, calico…), test đẩy nội dung listing sát intent “memorial/sympathy”.
+
+5) Đề xuất tuần này (Actionable)
+
+Giữ & tăng bid 5–10% cho các term đã có đơn & CPA tốt:
+something to give someone who lost their pet cat, gift when cat died, a suncatcher memorialized for a cats death, sympathy gift for cat, gift for female that lost cat, condolences death of pet cat, cat suncatcher memorial.
+
+Tối ưu cụm volume lớn nhưng chưa chốt đơn:
+
+Với “cat memorial gifts for loss of cat”, “tabby cat memorial gifts”: tách Exact, hạ Broad/Loose, thêm từ phủ định: figurine, statue, calico, black cat gifts, kitty suncatcher, angel with black cat, tuxedo, siamese…
+
+Đồng bộ title/bullet và hình ảnh nhấn mạnh ngữ cảnh “memorial/sympathy” (ý nghĩa, đóng gói quà, thẻ chia buồn).
+
+Ngân sách & cấu trúc chiến dịch:
+
+Dồn ngân sách vào nhóm liên quan cao; giới hạn daily budget cho nhóm generic.
+
+Tạo Ad Group “High-Intent Memorial Exact”; riêng nhóm “Breed/Color” chuyển ở mức thử nghiệm (capped).
+
+Tối ưu trải nghiệm Mobile: mobile ~73% sessions ⇒ ưu tiên ảnh lifestyle + infographic dễ đọc trên di động; kiểm tra A+ trên app.
+
+Theo dõi chỉ số theo ngày: tránh chi “xấu” như ngày 30/09 & 04/10 (spend>0, sales=0) bằng rule tự động giảm bid −10% nếu Orders(d-1)=0 và Spend(d-1) ≥ ngưỡng.
+
+6) Phương án thực thi (Implementation Plan)
+
+Dữ liệu & kiểm tra delay
+
+Cron hằng ngày: nạp Search Term Report và Sales & Traffic; kiểm tra max_date theo thuật toán ở mục 3.5; nếu thiếu → banner cảnh báo & exclude ngày thiếu khỏi KPI.
+
+Xử lý & phân loại search term
+
+Bộ quy tắc “liên quan” dựa trên từ khóa: memorial|sympathy|loss|lost|passed|passing|remembrance|condolence|bereavement|death|keepsake|goodbye|died|rainbow.
+
+Danh sách phủ định/generic: figurine|statue|calico|siamese|tuxedo|kitty suncatcher|black cat gifts|angel with black cat|cat chime for window (mở rộng dần theo dữ liệu).
+
+Chỉ số tính toán
+
+ACOS = Spend / Ad Sales(7d).
+
+TACoS = Spend / Total Sales.
+
+CPA = Spend / Orders.
+
+CR Impr→Click = Click / Impr; Click→Cart = Add-to-Cart / Click; Cart→Purchase = Purchase / Add-to-Cart (từ Search Query Performance Data).
+
+Blended CPA = Tổng Spend / Tổng Units.
+
+Organic Sales = Total Sales − Ad Sales(7d).
+
+UI/UX cấu trúc
+
+Header: trạng thái ASIN + cảnh báo delay (nếu có).
+
+Cards KPI: Spend, Ad Sales(7d), ACOS, TACoS, Total Sales, Units, CR, Buy Box, Mobile Share.
+
+Charts:
+
+Line: Spend vs Orders vs Sales(7d) theo ngày.
+
+Donut: Mobile vs Browser sessions.
+
+Bảng Search Term ROI: sortable + filter (Liên quan/Không liên quan, Chưa có đơn, CPA cao).
+
+Side-panel Search Term: so sánh Market vs ASIN, chuỗi chuyển đổi, lịch sử.
+
+Action Drawer: danh sách đề xuất kèm “Lý do” (dựa trên ngưỡng KPI).
+
+Tự động hoá tối ưu (tuỳ chọn)
+
+Rule engine:
+
+Giảm bid 5–10% nếu 3 ngày liên tiếp Orders=0 & Spend>ngưỡng.
+
+Tăng bid 5–10% nếu CPA ≤ mục tiêu và Impr share thấp.
+
+Tự động thêm từ phủ định khi CTR thấp & no-order nhiều ngày.
+
+Nếu bạn muốn, mình có thể dựng nhanh prototype (Figma hoặc code React) đúng layout trên + mock data sẵn để bạn xem tương tác (bảng KPI, biểu đồ, filter “Liên quan/Không liên quan”, side-panel chi tiết search term).
+
+You said:
+Hãy mô tả chi tiết giao diện cho web, phần nào dùng thuật toán , phần nào dùng AI agent
+ChatGPT said:
+
+Tuyệt vời. Dưới đây là bản mô tả UI/UX cho web analysis report chia rõ: phần dùng thuật toán (rule-based/analytics) và phần dùng AI Agent (tự động suy luận/đề xuất/ngôn ngữ). Ngôn ngữ hiển thị mặc định: vi-VN.
+
+Kiến trúc tổng quan trang
+A) Layout 3 tầng
+
+Header cố định
+
+Banner trạng thái ASIN (mới/đang launch/cũ)
+
+Cảnh báo độ trễ dữ liệu (nếu có)
+
+Bộ lọc nhanh: Date range (mặc định tuần gần nhất), Kênh (Ads/Organic/All), Marketplace.
+
+KPI & Charts
+
+Nhóm thẻ KPI (Spend, Ad Sales 7d, ACOS, TACoS, Total Sales, Units, CR, Mobile Share, Buy Box).
+
+Biểu đồ: Line (Spend/Orders/Sales), Donut (Mobile vs Browser), Bar (ACOS/TACoS theo ngày).
+
+Bảng & Chi tiết
+
+Bảng Search Term ROI (sortable, filterable).
+
+Side-panel Chi tiết Search Term (Market vs ASIN, funnel chuyển đổi, lịch sử).
+
+Action Drawer (đề xuất + nút áp dụng/ghi chú).
+
+Gắn nhãn: phần nào dùng thuật toán, phần nào dùng AI Agent
+1) Header
+1.1 Banner trạng thái ASIN
+
+UI: thẻ nhãn: “Mới launching / 0–30 ngày”, “Trong thời gian launching / 30–60 ngày”, “Cũ / >60 ngày”.
+
+Thuật toán (rule-based):
+
+Đọc số ngày có dữ liệu Sales & Traffic cho ASIN.
+
+days < 30 → Mới launching; 30 ≤ days ≤ 60 → Trong thời gian launching; > 60 → Cũ.
+
+AI Agent: không bắt buộc. (Chỉ dùng nếu muốn giải thích lý do xếp hạng khi người dùng bấm “Vì sao?”)
+
+1.2 Cảnh báo độ trễ dữ liệu
+
+UI: banner vàng/đỏ trên cùng: “Dữ liệu bị delay X ngày, tự động loại trừ ngày thiếu.”
+
+Thuật toán:
+
+Lấy max(report_date) của Search Term Report & Sales & Traffic.
+
+Nếu today − max_date > 3 ngày → hiển thị cảnh báo; auto-exclude các ngày trống khỏi KPI.
+
+AI Agent: tóm tắt ngắn gọn tác động (“Tuần này thiếu 2 ngày nên CR có thể biến động”).
+
+2) KPI Cards & Charts
+2.1 KPI Cards
+
+UI: 8–10 thẻ có tooltip công thức + icon “i”.
+
+Spend (tuần)
+
+Ad Sales (7d attribution)
+
+ACOS = Spend / Ad Sales
+
+Total Sales
+
+TACoS = Spend / Total Sales
+
+Units
+
+CR (Unit/session)
+
+Mobile Share (% sessions)
+
+Buy Box %
+
+Thuật toán:
+
+Tính ACOS, TACoS, CR, Mobile Share theo công thức cố định.
+
+Organic Sales = Total Sales − Ad Sales(7d).
+
+AI Agent (tuỳ chọn):
+
+Viết insight tự động 2–3 câu: “ACOS 32.7% ở mức phù hợp với giai đoạn launch; TACoS 9.6% ổn định. Mobile chiếm ~73%, nên ưu tiên ảnh trên app.”
+
+2.2 Charts
+
+UI:
+
+Line chart: Spend, Orders, Ad Sales(7d) theo ngày (3 trục hoặc 2 y-axis).
+
+Donut chart: Sessions Mobile vs Browser.
+
+Bar: ACOS/TACoS theo ngày.
+
+Thuật toán:
+
+Smoothing (moving average 3 ngày) tùy chọn.
+
+Anomaly detection đơn giản: z-score theo ngày cho Spend/Orders (đánh dấu chấm đỏ nếu lệch >2σ).
+
+AI Agent:
+
+Tạo chú thích tự động khi có anomaly: “Ngày 30/09 & 04/10 chi >0 nhưng không có Sales — xem lại từ khóa & bid.”
+
+3) Bảng “Search Term ROI”
+3.1 Cột dữ liệu
+
+UI: bảng có cột:
+
+Term, Match type, Impr, Click, CTR, CPC, Spend, Orders, Ad Sales, CPA, ACOS, Relevance (chip), Market Volume (nếu có), Trend (7d arrow).
+
+Thuật toán:
+
+Gắn nhãn Relevance (liên quan/không liên quan) bằng từ điển quy tắc:
+
+Liên quan: memorial|sympathy|loss|lost|passed|passing|remembrance|condolence|bereavement|keepsake|goodbye|died|rainbow.
+
+Ít liên quan/không liên quan: figurine|statue|calico|siamese|tuxedo|kitty suncatcher|black cat gifts|angel with black cat|cat chime.
+
+Tính CPA, ACOS; xếp hạng hiệu quả (Good/Watch/Bad) theo ngưỡng (ví dụ CPA ≤ mục tiêu & ACOS ≤ mục tiêu → Good).
+
+Delay guard: exclude ngày thiếu trước khi cộng dồn tuần.
+
+AI Agent:
+
+Tự động đề xuất thao tác ở mỗi dòng: “Tăng bid 5–10%”, “Hạ bid 10%”, “Thêm phủ định”, “Chuyển Exact”, kèm lý do (dựa vào CPA/ACOS/CTR/Volume/Share).
+
+3.2 Bộ lọc & quick views
+
+UI: toggle “Liên quan”, “Không liên quan”, “Chưa có đơn”, “CPA cao”, “ACOS cao”, “Top Volume”.
+
+Thuật toán: lọc client/server theo điều kiện các cột.
+
+AI Agent: khi người dùng chọn “Giải thích,” agent viết summary: “12 term không liên quan tiêu tốn $X, khuyến nghị phủ định A/B/C.”
+
+4) Side-panel Chi tiết Search Term
+4.1 Tabs trong panel
+
+Ads Performance (từ Search Term Report):
+
+Impr, Click, CTR, CPC, Spend, Orders, Sales, CPA, ACOS theo ngày.
+
+Market vs ASIN (Search Query Performance Data):
+
+Market metrics: impressions, clicks, add-to-cart, purchases, median price.
+
+ASIN share: click/cart/purchase share nếu có.
+
+Funnel chuyển đổi:
+
+Impr→Click, Click→Cart, Cart→Purchase của Market & ASIN (bar so sánh + delta).
+
+Lịch sử & xu hướng:
+
+Line trend 2–4 tuần (khi đủ dữ liệu).
+
+Đề xuất & tác vụ:
+
+Nút: “Tăng/Hạ bid”, “Thêm phủ định”, “Tách ad group”, “Chỉnh creative”.
+
+4.2 Logic
+
+Thuật toán:
+
+Tính chuỗi chuyển đổi:
+
+Market: ClickRate = clicks/impr, CartRate = carts/clicks, PurchaseRate = purchases/carts.
+
+ASIN: tương tự nhưng dùng phần đóng góp của ASIN.
+
+Gap analysis: highlight bước yếu nhất (ví dụ Click→Cart thấp).
+
+AI Agent:
+
+Soạn nhận định chi tiết: “ASIN đang underperform ở bước Click→Cart so với market (−X điểm phần trăm); đề xuất chỉnh ảnh 1/tiêu đề phù hợp intent ‘memorial’.”
+
+Sinh gợi ý copy (title/bullet 1–2 câu) và negative keywords thông minh dựa trên logs.
+
+5) Action Drawer (Đề xuất tuần & áp dụng)
+5.1 Danh sách đề xuất
+
+Nhóm theo chủ đề: Bid, Từ phủ định, Cấu trúc campaign, Creative listing, Ngân sách, Thiết bị/Mobile.
+
+Mỗi đề xuất có: Mô tả, Lý do (data-backed), Tác động kỳ vọng (ví dụ “giảm ACOS ~2–4%”), Ưu tiên (High/Med/Low), Nút đánh dấu Done/Skip.
+
+5.2 Nguồn đề xuất
+
+Thuật toán:
+
+Rule engine:
+
+Giảm bid 5–10% nếu 3 ngày liên tiếp Orders=0 & Spend > ngưỡng.
+
+Tăng bid 5–10% nếu CPA ≤ mục tiêu & Impr share thấp (dựa volume & share).
+
+Đề xuất thêm phủ định khi CTR thấp & Spend cao & 0 order.
+
+AI Agent:
+
+Ưu tiên hóa (ranking) dựa trên lợi ích ước tính.
+
+Viết summary ngắn gọn, dễ hiểu.
+
+Sinh kế hoạch A/B (ví dụ 2 biến thể ảnh hero, 2 headline) + KPI theo dõi.
+
+Dòng dữ liệu & kiểm soát chất lượng
+6) Data freshness & guardrails
+
+Thuật toán:
+
+“Freshness check” trước khi render: loại trừ ngày thiếu, hiển thị banner delay.
+
+Nếu thiếu cả tập (không có tuần), hiển thị empty state với hướng dẫn nạp dữ liệu.
+
+AI Agent: giải thích rủi ro phân tích khi thiếu ngày (bias CR/ACOS), đề xuất phạm vi ngày an toàn.
+
+7) Phân loại liên quan (Relevant/Irrelevant)
+
+Thuật toán (mặc định): regex/từ điển như mục 3.1.
+
+AI Agent (tuỳ chọn, chế độ “học mở rộng”):
+
+Học từ feedback người dùng (gắn nhãn thủ công) → mở rộng từ điển.
+
+Gợi ý synonym/biến thể chính tả (“rememberance”, “sympthay”, “celetrial”…).
+
+Hành vi UI quan trọng
+
+Tooltips ở KPI/thuật ngữ (ACOS/TACoS/CPA/Attribution 7d).
+
+Sticky filters: bộ lọc giữ nguyên khi chuyển trang/refresh.
+
+Saved views: người dùng lưu bộ lọc & cột.
+
+Xuất báo cáo: CSV/XLSX/PDF snapshot (kèm chú thích delay).
+
+Accessibility: contrast, keyboard nav, aria-labels.
+
+Mobile-first: bảng có column density linh hoạt, side-panel full-screen trên mobile.
+
+Quy trình AI Agent
+8) Triggers
+
+Khi:
+
+Có anomaly chi tiêu/đơn theo ngày.
+
+Term volume lớn nhưng no-order > N lần.
+
+Tỷ lệ chuyển đổi của ASIN thấp hơn market ở bước bất kỳ > ngưỡng.
+
+9) Nhiệm vụ Agent
+
+Explain: giải thích ngắn lý do chỉ số xấu/tốt.
+
+Recommend: đề xuất hành động ưu tiên; sinh danh sách negative keywords cụ thể.
+
+Create: nháp title/bullets/A+ gợi ý theo intent “memorial/sympathy”.
+
+Plan: phác thảo test plan (biến thể, KPI, thời lượng, tiêu chí thắng).
+
+Coach: checklist tối ưu mobile (ảnh 1, text overlay ≤ 20%, thumbnail, A+ trên app).
+
+10) Guardrails AI
+
+Luôn hiển thị ngưỡng & số liệu nguồn (Spend, Orders, CPA…).
+
+Không tự động thay đổi bid/ngân sách; chỉ đề xuất (user xác nhận).
+
+Nếu dữ liệu delay >3 ngày, thêm cảnh báo “Độ tin cậy đề xuất: Trung bình/Thấp”.
+
+Phần “Thuật toán” chi tiết
+
+KPI cơ bản: ACOS, TACoS, CPA, CR, BuyBox%, Mobile Share.
+
+Freshness check: max_date, exclude ngày thiếu.
+
+Relevance: regex dictionary + stemming nhẹ (loss/lost).
+
+Anomaly (z-score): tính theo từng chuỗi ngày; đánh dấu điểm bất thường.
+
+Hiệu quả term: Rule xếp hạng Good/Watch/Bad.
+
+Gap funnel: So sánh % Market vs ASIN ở 3 bước; bôi đỏ bước tệ nhất.
+
+Ước tính tác động: ΔACOS, ΔCPA sơ bộ dựa trên elasticities mặc định (có thể chỉnh).
+
+Phần “AI Agent” chi tiết
+
+Sinh negative keywords từ nhóm “không liên quan” + các biến thể lỗi chính tả.
+
+Sinh copy: 2–3 tiêu đề/bullet nhấn mạnh “sympathy memorial gift”, “ready-to-gift”, “card/packaging”.
+
+Tóm tắt tuần: 5–7 dòng “điểm sáng/điểm rủi ro”, “ưu tiên hành động”.
+
+Ưu tiên hoá: xếp hạng đề xuất theo ROI ước tính (Spend hiện tại × tỷ lệ cải thiện dự kiến).
+
+Giải thích quyết định (on-demand): vì sao khuyên tăng/hạ bid đối với từng term.
+
+API & dữ liệu (gợi ý)
+
+/ingest/str: nạp Search Term Report.
+
+/ingest/sales: nạp Sales & Traffic.
+
+/ingest/query-perf: nạp Search Query Performance.
+
+/metrics/kpi?asin&range → trả KPI tổng.
+
+/terms/table?asin&range&filters → bảng ROI.
+
+/terms/{id}/detail → panel chi tiết (ads + market).
+
+/recommendations?asin&range → danh sách đề xuất (AI + rule).
+
+/health/freshness → trả độ trễ & ngày thiếu.
+
+Schema cột cốt lõi: term, match_type, date, impr, clicks, spend, orders, ad_sales, device (app/browser), sessions, pageviews.
+
+Onboarding & quyền
+
+Mục tiêu CPA/ACOS đặt ở Settings → dùng cho rule/agent.
+
+Vai trò: Viewer (xem), Analyst (đánh dấu đề xuất), Manager (duyệt hành động).
+
+Nhật ký: log mọi đề xuất/duyệt để audit.
+
+Trải nghiệm người dùng (flow chuẩn)
+
+Vào trang → thấy Banner delay (nếu có) + ASIN = Mới launching.
+
+Nhìn KPI cards & charts để nắm nhanh (insight auto).
+
+Xuống bảng ROI → bật filter “Chưa có đơn” + “Top Volume” để khoanh vùng lãng phí.
+
+Mở side-panel 1–2 term quan trọng → xem funnel Market vs ASIN.
+
+Mở Action Drawer → áp dụng 3–5 hành động ưu tiên (được AI viết sẵn lý do + ước tính tác động).
+
+Xuất PDF/CSV & lưu view.
+
+Tổng kết: ranh giới rõ ràng
+
+Thuật toán: tính KPI, kiểm tra độ trễ, phân loại liên quan (từ điển), anomaly basic, xếp hạng hiệu quả, gap funnel, filter/sort, ước tính tác động cơ bản.
+
+AI Agent: giải thích & tóm tắt, sinh đề xuất (bid/negative/structure/creative), ưu tiên hoá theo ROI, gợi ý copy/A+, mở rộng từ điển qua học từ phản hồi, tạo test plan & checklist mobile.
+
+Nếu bạn muốn, mình có thể phác wireframe cho từng phần (Figma) hoặc dựng prototype React (bảng + chart + panel) với mock data hiện có.

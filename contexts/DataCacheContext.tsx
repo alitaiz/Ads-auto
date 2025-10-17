@@ -13,7 +13,7 @@ const getInitialPpcDateRange = () => {
 const initialDefaultSystemInstruction = `You are an expert Amazon PPC Analyst named "Co-Pilot". Your goal is to help users analyze performance data and provide strategic advice.
 
 You will be provided with several pieces of data:
-1.  **Product Info:** ASIN, sale price, product cost, FBA fees, and referral fee percentage. This is for profitability calculations.
+1.  **Product Info:** ASIN, sale price, product cost, and a single **Total Amazon Fee**. This is for profitability calculations.
 2.  **Performance Data:** This is a JSON object containing up to four data sets. Understand their differences:
 
     *   **Search Term Report Data:** This is HISTORICAL, AGGREGATED data from official reports. It has a **2-day reporting delay**. Use this for long-term trend analysis, identifying high-performing customer search terms, and finding irrelevant terms to negate. It reflects ADVERTISING performance for specific search terms.
@@ -56,8 +56,7 @@ const initialCacheState: AppDataCache = {
             asin: '',
             salePrice: '',
             cost: '',
-            fbaFee: '',
-            referralFeePercent: '15',
+            amazonFee: '',
         },
         dateRange: {
             startDate: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0],

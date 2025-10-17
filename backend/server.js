@@ -11,6 +11,7 @@ import salesAndTrafficRoutes from './routes/salesAndTraffic.js';
 import databaseRoutes from './routes/database.js'; // Replaced eventsRoutes
 import automationRoutes from './routes/automation.js';
 import aiRoutes from './routes/ai.js';
+import aiAnalysisRoutes from './routes/aiAnalysis.js'; // New import for analysis report
 import aiConversationRoutes from './routes/aiConversations.js'; // New route for chat history
 import queryPerformanceRoutes from './routes/queryPerformance.js';
 import productDetailsRoutes from './routes/productDetails.js';
@@ -38,6 +39,7 @@ app.use('/api', salesAndTrafficRoutes);
 app.use('/api', databaseRoutes); // Use the new database router
 app.use('/api', automationRoutes);
 app.use('/api', aiRoutes);
+app.use('/api', aiAnalysisRoutes); // Mount the new analysis report route
 app.use('/api/ai/conversations', aiConversationRoutes); // Mount the new conversation routes
 app.use('/api', queryPerformanceRoutes);
 app.use('/api', productDetailsRoutes);

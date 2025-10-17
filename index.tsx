@@ -15,6 +15,7 @@ import { SearchQueryPerformanceView } from './views/SearchQueryPerformanceView';
 import { DataCacheProvider } from './contexts/DataCacheContext';
 import { ListingView } from './views/ListingView';
 import { CreateAdsView } from './views/CreateAdsView';
+import { AnalysisReportView } from './views/AnalysisReportView';
 
 // Basic global styles
 const styles = `
@@ -77,6 +78,7 @@ function App() {
           <Route path="ai-copilot" element={<AICopilotView />} />
           <Route path="listings" element={<ListingView />} />
           <Route path="create-ads" element={<CreateAdsView />} />
+          <Route path="analysis-report" element={<AnalysisReportView />} />
           <Route path="*" element={<Navigate to="/campaigns" replace />} />
         </Route>
       </Routes>

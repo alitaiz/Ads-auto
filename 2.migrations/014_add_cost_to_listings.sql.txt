@@ -1,0 +1,16 @@
+-- Migration: Add cost and price columns to product_listings table
+-- This allows for profitability calculations in the AI Analysis Report.
+-- V2: Consolidates FBA and Referral fees into a single `amazon_fee` column.
+
+ALTER TABLE product_listings
+    DROP COLUMN IF EXISTS fba_fee,
+    DROP COLUMN IF EXISTS referral_fee_percent;
+
+ALTER TABLE product_listings
+    ADD COLUMN IF NOT EXISTS sale_price NUMERIC(10, 2),
+    ADD COLUMN IF NOT EXISTS product_cost NUMERIC(10, 2),
+    ADD COLUMN IF NOT EXISTS amazon_fee NUMERIC(10, 2);
+
+-- Grant permissions again in case they were missed
+-- IMPORTANT: Replace 'yourdbuser' with the actual DB_USER from your .env file.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE product_listings TO yourdbuser;

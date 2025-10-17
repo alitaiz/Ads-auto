@@ -17,14 +17,14 @@ router.get('/listings', async (req, res) => {
 
 // POST /api/listings - Create a new product listing
 router.post('/listings', async (req, res) => {
-    const { asin, sku, title } = req.body;
+    const { asin, sku, title, sale_price, product_cost, amazon_fee } = req.body;
     if (!asin || !sku) {
         return res.status(400).json({ error: 'ASIN and SKU are required.' });
     }
     try {
         const { rows } = await pool.query(
-            'INSERT INTO product_listings (asin, sku, title) VALUES ($1, $2, $3) RETURNING *',
-            [asin, sku, title]
+            'INSERT INTO product_listings (asin, sku, title, sale_price, product_cost, amazon_fee) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [asin, sku, title, sale_price, product_cost, amazon_fee]
         );
         res.status(201).json(rows[0]);
     } catch (error) {
@@ -39,14 +39,14 @@ router.post('/listings', async (req, res) => {
 // PUT /api/listings/:id - Update an existing product listing
 router.put('/listings/:id', async (req, res) => {
     const { id } = req.params;
-    const { asin, sku, title } = req.body;
+    const { asin, sku, title, sale_price, product_cost, amazon_fee } = req.body;
     if (!asin || !sku) {
         return res.status(400).json({ error: 'ASIN and SKU are required.' });
     }
     try {
         const { rows } = await pool.query(
-            'UPDATE product_listings SET asin = $1, sku = $2, title = $3 WHERE id = $4 RETURNING *',
-            [asin, sku, title, id]
+            'UPDATE product_listings SET asin = $1, sku = $2, title = $3, sale_price = $4, product_cost = $5, amazon_fee = $6 WHERE id = $7 RETURNING *',
+            [asin, sku, title, sale_price, product_cost, amazon_fee, id]
         );
         if (rows.length === 0) {
             return res.status(404).json({ error: 'Listing not found.' });

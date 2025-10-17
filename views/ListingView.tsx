@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { ProductListing } from '../types';
 
 const styles: { [key: string]: React.CSSProperties } = {
-    container: { padding: '20px', maxWidth: '1200px', margin: '0 auto' },
+    container: { padding: '20px', maxWidth: '1400px', margin: '0 auto' },
     header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
     title: { fontSize: '2rem', margin: 0 },
     primaryButton: { padding: '10px 20px', backgroundColor: 'var(--primary-color)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '1rem' },
@@ -17,9 +17,10 @@ const styles: { [key: string]: React.CSSProperties } = {
     message: { textAlign: 'center', padding: '50px', fontSize: '1.2rem', color: '#666' },
     error: { color: 'var(--danger-color)', padding: '20px', backgroundColor: '#fdd', borderRadius: 'var(--border-radius)' },
     modalBackdrop: { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
-    modalContent: { backgroundColor: 'white', padding: '30px', borderRadius: 'var(--border-radius)', width: '90%', maxWidth: '500px', display: 'flex', flexDirection: 'column', gap: '20px' },
+    modalContent: { backgroundColor: 'white', padding: '30px', borderRadius: 'var(--border-radius)', width: '90%', maxWidth: '600px', display: 'flex', flexDirection: 'column', gap: '20px' },
     modalHeader: { fontSize: '1.5rem', margin: 0, paddingBottom: '10px', borderBottom: '1px solid var(--border-color)' },
     formGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
+    formGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' },
     label: { fontWeight: 500 },
     input: { padding: '10px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '1rem' },
     modalFooter: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' },
@@ -53,7 +54,7 @@ export function ListingView() {
     }, [fetchListings]);
 
     const handleOpenModal = (listing: Partial<ProductListing> | null = null) => {
-        setEditingListing(listing || { asin: '', sku: '', title: '' });
+        setEditingListing(listing || { asin: '', sku: '', title: '', sale_price: undefined, product_cost: undefined, amazon_fee: undefined });
         setIsModalOpen(true);
     };
 
@@ -64,7 +65,15 @@ export function ListingView() {
 
     const handleSave = async () => {
         if (!editingListing) return;
-        const { id, ...data } = editingListing;
+        
+        const payload = {
+            ...editingListing,
+            sale_price: editingListing.sale_price ? parseFloat(String(editingListing.sale_price)) : null,
+            product_cost: editingListing.product_cost ? parseFloat(String(editingListing.product_cost)) : null,
+            amazon_fee: editingListing.amazon_fee ? parseFloat(String(editingListing.amazon_fee)) : null,
+        };
+
+        const { id, ...data } = payload;
         const method = id ? 'PUT' : 'POST';
         const url = id ? `/api/listings/${id}` : '/api/listings';
         
@@ -103,12 +112,10 @@ export function ListingView() {
         let sortableItems = [...listings];
         if (sortConfig !== null) {
             sortableItems.sort((a, b) => {
-                if (a[sortConfig.key] < b[sortConfig.key]) {
-                    return sortConfig.direction === 'ascending' ? -1 : 1;
-                }
-                if (a[sortConfig.key] > b[sortConfig.key]) {
-                    return sortConfig.direction === 'ascending' ? 1 : -1;
-                }
+                const aVal = a[sortConfig.key] ?? '';
+                const bVal = b[sortConfig.key] ?? '';
+                if (aVal < bVal) return sortConfig.direction === 'ascending' ? -1 : 1;
+                if (aVal > bVal) return sortConfig.direction === 'ascending' ? 1 : -1;
                 return 0;
             });
         }
@@ -139,9 +146,12 @@ export function ListingView() {
                     <table style={styles.table}>
                         <thead>
                             <tr>
-                                <th style={styles.th} onClick={() => requestSort('asin')}>ASIN {sortConfig.key === 'asin' ? (sortConfig.direction === 'ascending' ? '▲' : '▼') : ''}</th>
-                                <th style={styles.th} onClick={() => requestSort('sku')}>SKU {sortConfig.key === 'sku' ? (sortConfig.direction === 'ascending' ? '▲' : '▼') : ''}</th>
-                                <th style={styles.th} onClick={() => requestSort('title')}>Title {sortConfig.key === 'title' ? (sortConfig.direction === 'ascending' ? '▲' : '▼') : ''}</th>
+                                <th style={styles.th} onClick={() => requestSort('asin')}>ASIN {sortConfig.key === 'asin' && (sortConfig.direction === 'ascending' ? '▲' : '▼')}</th>
+                                <th style={styles.th} onClick={() => requestSort('sku')}>SKU {sortConfig.key === 'sku' && (sortConfig.direction === 'ascending' ? '▲' : '▼')}</th>
+                                <th style={styles.th} onClick={() => requestSort('title')}>Title {sortConfig.key === 'title' && (sortConfig.direction === 'ascending' ? '▲' : '▼')}</th>
+                                <th style={styles.th} onClick={() => requestSort('sale_price')}>Sale Price {sortConfig.key === 'sale_price' && (sortConfig.direction === 'ascending' ? '▲' : '▼')}</th>
+                                <th style={styles.th} onClick={() => requestSort('product_cost')}>Product Cost {sortConfig.key === 'product_cost' && (sortConfig.direction === 'ascending' ? '▲' : '▼')}</th>
+                                <th style={styles.th} onClick={() => requestSort('amazon_fee')}>Amazon Fee {sortConfig.key === 'amazon_fee' && (sortConfig.direction === 'ascending' ? '▲' : '▼')}</th>
                                 <th style={{...styles.th, cursor: 'default'}}>Actions</th>
                             </tr>
                         </thead>
@@ -151,6 +161,9 @@ export function ListingView() {
                                     <td style={styles.td}>{listing.asin}</td>
                                     <td style={styles.td}>{listing.sku}</td>
                                     <td style={styles.td}>{listing.title}</td>
+                                    <td style={styles.td}>{listing.sale_price != null ? `$${listing.sale_price.toFixed(2)}` : 'N/A'}</td>
+                                    <td style={styles.td}>{listing.product_cost != null ? `$${listing.product_cost.toFixed(2)}` : 'N/A'}</td>
+                                    <td style={styles.td}>{listing.amazon_fee != null ? `$${listing.amazon_fee.toFixed(2)}` : 'N/A'}</td>
                                     <td style={styles.td}>
                                         <div style={styles.actionCell}>
                                             <button style={styles.button} onClick={() => handleOpenModal(listing)}>Edit</button>
@@ -171,15 +184,29 @@ export function ListingView() {
                         <h2 style={styles.modalHeader}>{editingListing?.id ? 'Edit Listing' : 'Add New Listing'}</h2>
                         <div style={styles.formGroup}>
                             <label style={styles.label} htmlFor="asin">ASIN</label>
-                            <input id="asin" style={styles.input} value={editingListing?.asin} onChange={e => setEditingListing(p => ({...p, asin: e.target.value}))} required />
+                            <input id="asin" style={styles.input} value={editingListing?.asin || ''} onChange={e => setEditingListing(p => ({...p, asin: e.target.value}))} required />
                         </div>
                          <div style={styles.formGroup}>
                             <label style={styles.label} htmlFor="sku">SKU</label>
-                            <input id="sku" style={styles.input} value={editingListing?.sku} onChange={e => setEditingListing(p => ({...p, sku: e.target.value}))} required />
+                            <input id="sku" style={styles.input} value={editingListing?.sku || ''} onChange={e => setEditingListing(p => ({...p, sku: e.target.value}))} required />
                         </div>
                          <div style={styles.formGroup}>
                             <label style={styles.label} htmlFor="title">Title</label>
-                            <input id="title" style={styles.input} value={editingListing?.title} onChange={e => setEditingListing(p => ({...p, title: e.target.value}))} />
+                            <input id="title" style={styles.input} value={editingListing?.title || ''} onChange={e => setEditingListing(p => ({...p, title: e.target.value}))} />
+                        </div>
+                        <div style={styles.formGrid}>
+                            <div style={styles.formGroup}>
+                                <label style={styles.label} htmlFor="sale_price">Sale Price</label>
+                                <input id="sale_price" type="number" step="0.01" style={styles.input} value={editingListing?.sale_price || ''} onChange={e => setEditingListing(p => ({...p, sale_price: parseFloat(e.target.value)}))} />
+                            </div>
+                            <div style={styles.formGroup}>
+                                <label style={styles.label} htmlFor="product_cost">Product Cost</label>
+                                <input id="product_cost" type="number" step="0.01" style={styles.input} value={editingListing?.product_cost || ''} onChange={e => setEditingListing(p => ({...p, product_cost: parseFloat(e.target.value)}))} />
+                            </div>
+                            <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
+                                <label style={styles.label} htmlFor="amazon_fee">Total Amazon Fee (FBA + Referral)</label>
+                                <input id="amazon_fee" type="number" step="0.01" style={styles.input} value={editingListing?.amazon_fee || ''} onChange={e => setEditingListing(p => ({...p, amazon_fee: parseFloat(e.target.value)}))} />
+                            </div>
                         </div>
                         <div style={styles.modalFooter}>
                              <button style={styles.button} onClick={handleCloseModal}>Cancel</button>

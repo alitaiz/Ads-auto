@@ -63,14 +63,25 @@ export function ListingView() {
         setEditingListing(null);
     };
 
+    const handleNumericChange = (field: 'sale_price' | 'product_cost' | 'amazon_fee', value: string) => {
+        const num = value === '' ? undefined : parseFloat(value);
+        if (value !== '' && isNaN(num!)) {
+            return; 
+        }
+        setEditingListing(p => {
+            if (!p) return null;
+            return { ...p, [field]: num };
+        });
+    };
+
     const handleSave = async () => {
         if (!editingListing) return;
         
         const payload = {
             ...editingListing,
-            sale_price: editingListing.sale_price ? parseFloat(String(editingListing.sale_price)) : null,
-            product_cost: editingListing.product_cost ? parseFloat(String(editingListing.product_cost)) : null,
-            amazon_fee: editingListing.amazon_fee ? parseFloat(String(editingListing.amazon_fee)) : null,
+            sale_price: editingListing.sale_price ?? null,
+            product_cost: editingListing.product_cost ?? null,
+            amazon_fee: editingListing.amazon_fee ?? null,
         };
 
         const { id, ...data } = payload;
@@ -197,15 +208,15 @@ export function ListingView() {
                         <div style={styles.formGrid}>
                             <div style={styles.formGroup}>
                                 <label style={styles.label} htmlFor="sale_price">Sale Price</label>
-                                <input id="sale_price" type="number" step="0.01" style={styles.input} value={editingListing?.sale_price || ''} onChange={e => setEditingListing(p => ({...p, sale_price: parseFloat(e.target.value)}))} />
+                                <input id="sale_price" type="number" step="0.01" style={styles.input} value={editingListing?.sale_price ?? ''} onChange={e => handleNumericChange('sale_price', e.target.value)} />
                             </div>
                             <div style={styles.formGroup}>
                                 <label style={styles.label} htmlFor="product_cost">Product Cost</label>
-                                <input id="product_cost" type="number" step="0.01" style={styles.input} value={editingListing?.product_cost || ''} onChange={e => setEditingListing(p => ({...p, product_cost: parseFloat(e.target.value)}))} />
+                                <input id="product_cost" type="number" step="0.01" style={styles.input} value={editingListing?.product_cost ?? ''} onChange={e => handleNumericChange('product_cost', e.target.value)} />
                             </div>
                             <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
                                 <label style={styles.label} htmlFor="amazon_fee">Total Amazon Fee (FBA + Referral)</label>
-                                <input id="amazon_fee" type="number" step="0.01" style={styles.input} value={editingListing?.amazon_fee || ''} onChange={e => setEditingListing(p => ({...p, amazon_fee: parseFloat(e.target.value)}))} />
+                                <input id="amazon_fee" type="number" step="0.01" style={styles.input} value={editingListing?.amazon_fee ?? ''} onChange={e => handleNumericChange('amazon_fee', e.target.value)} />
                             </div>
                         </div>
                         <div style={styles.modalFooter}>

@@ -11,39 +11,65 @@ const RELEVANT_KEYWORDS = /\b(memorial|sympathy|loss|lost|passed|passing|remembr
 const IRRELEVANT_KEYWORDS = /\b(figurine|statue|calico|siamese|tuxedo|kitty suncatcher|black cat gifts|angel with black cat|cat chime for window|personalized)\b/i;
 
 const callGeminiWithSchema = async (prompt, systemInstruction, schema) => {
-    try {
-        const apiKey = await getApiKey('gemini');
-        const ai = new GoogleGenAI({ apiKey });
-        
-        // Cập nhật: Sử dụng model 'gemini-flash-latest' theo hướng dẫn.
-        const response = await ai.models.generateContent({
-            model: 'gemini-flash-latest',
-            contents: prompt,
-            config: {
-                systemInstruction,
-                responseMimeType: "application/json",
-                responseSchema: schema,
+    const maxRetries = 3;
+    let delay = 2000; // Start with a 2-second delay
+
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            const apiKey = await getApiKey('gemini');
+            const ai = new GoogleGenAI({ apiKey });
+            
+            const response = await ai.models.generateContent({
+                model: 'gemini-flash-latest',
+                contents: prompt,
+                config: {
+                    systemInstruction,
+                    responseMimeType: "application/json",
+                    responseSchema: schema,
+                }
+            });
+            
+            const jsonText = response.text.trim();
+            return JSON.parse(jsonText); // Success, return the parsed JSON
+        } catch (e) {
+            const isRetryable = e.status === 503 || e.status === 429 || (e.message && (e.message.includes('UNAVAILABLE') || e.message.includes('overloaded')));
+
+            if (isRetryable) {
+                if (i === maxRetries - 1) {
+                    console.error(`[AI Report] Gemini API call failed after ${maxRetries} retries.`, e);
+                    // Fall through to return the error object after the last retry fails.
+                } else {
+                    console.warn(`[AI Report] Gemini API is overloaded or rate-limited (Attempt ${i + 1}/${maxRetries}). Retrying in ${delay / 1000}s...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    delay *= 2; // Exponential backoff
+                    continue; // Go to the next iteration of the loop to retry
+                }
+            } else {
+                // Not a retryable error, log it and fall through to return the error object immediately.
+                console.error("Gemini call with schema failed with a non-retryable error:", e);
             }
-        });
-        
-        const jsonText = response.text.trim();
-        return JSON.parse(jsonText);
-    } catch (e) {
-        console.error("Gemini call with schema failed:", e);
-        return {
-            error: `Error from AI: ${e.message}`,
-            costAnalysisInsights: "Could not generate insights due to an API error.",
-            weeklyOverviewInsights: "Could not generate insights due to an API error.",
-            detailedTermAnalysis: [],
-            weeklyActionPlan: {
-                bidManagement: ["AI analysis failed, no recommendations available."],
-                negativeKeywords: [],
-                campaignStructure: [],
-                listingOptimization: []
-            }
-        };
+
+            // This part is reached if a non-retryable error occurs or all retries fail.
+            // Return a structured error object that the frontend can handle gracefully.
+            return {
+                error: `Error from AI: ${e.message}`,
+                costAnalysisInsights: "Could not generate insights due to an API error.",
+                weeklyOverviewInsights: "Could not generate insights due to an API error.",
+                spendEfficiencyInsights: "Could not generate insights due to an API error.",
+                trendsInsights: "Could not generate insights due to an API error.",
+                conversionAndDevicesInsights: "Could not generate insights due to an API error.",
+                detailedTermAnalysis: [],
+                weeklyActionPlan: {
+                    bidManagement: ["AI analysis failed, no recommendations available."],
+                    negativeKeywords: [],
+                    campaignStructure: [],
+                    listingOptimization: []
+                }
+            };
+        }
     }
 };
+
 
 const formatDateSafe = (d) => {
     if (!d) return '';

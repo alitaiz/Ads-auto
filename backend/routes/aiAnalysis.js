@@ -276,8 +276,8 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
         const listing = listingRes.rows[0];
         if (!listing) throw new Error(`Listing for ASIN ${asin} not found in the database. Please add it in the Listings tab.`);
         const { sale_price, product_cost, amazon_fee } = listing;
-        const profitMarginBeforeAd = sale_price - product_cost - amazon_fee;
-        const breakEvenAcos = sale_price > 0 ? (profitMarginBeforeAd / sale_price) * 100 : 0;
+        const profitMarginBeforeAd = (parseFloat(sale_price) || 0) - (parseFloat(product_cost) || 0) - (parseFloat(amazon_fee) || 0);
+        const breakEvenAcos = (parseFloat(sale_price) || 0) > 0 ? (profitMarginBeforeAd / parseFloat(sale_price)) * 100 : 0;
 
         const adData = adDataRes.rows;
         const { totalAdSpend, adSales, adOrders } = adData.reduce((acc, row) => ({
@@ -288,7 +288,7 @@ router.post('/ai/generate-analysis-report', async (req, res) => {
 
         const { min_date, max_date, days_of_data } = stRes.rows[0] || {};
         const totalSalesRes = await client.query("SELECT SUM(COALESCE((sales_data->'orderedProductSales'->>'amount')::numeric, 0)) as total_sales FROM sales_and_traffic_by_asin WHERE child_asin = $1 AND report_date BETWEEN $2 AND $3", [asin, startDate, endDate]);
-        const totalSales = totalSalesRes.rows[0]?.total_sales || 0;
+        const totalSales = parseFloat(totalSalesRes.rows[0]?.total_sales || '0');
         
         const tacos = totalSales > 0 ? (totalAdSpend / totalSales) * 100 : 0;
         const avgCpa = adOrders > 0 ? totalAdSpend / adOrders : 0;

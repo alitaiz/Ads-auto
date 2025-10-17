@@ -200,7 +200,7 @@ router.get('/query-performance', async (req, res) => {
                 },
                 cartAdds: {
                     totalCount: agg.cartAddData.totalCartAddCount,
-                    cartAddRate: safeDivide(agg.cartAddData.totalCartAddCount, agg.impressionData.totalQueryImpressionCount),
+                    cartAddRate: safeDivide(agg.cartAddData.totalCartAddCount, agg.clickData.totalClickCount),
                     asinCount: agg.cartAddData.asinCartAddCount,
                     asinShare: safeDivide(agg.cartAddData.asinCartAddCount, agg.cartAddData.totalCartAddCount),
                     totalMedianPrice: formatPrice(getMedian(agg.cartAddData.totalMedianCartAddPrices) != null ? { amount: getMedian(agg.cartAddData.totalMedianCartAddPrices), currencyCode } : null),
@@ -211,7 +211,7 @@ router.get('/query-performance', async (req, res) => {
                 },
                 purchases: {
                     totalCount: agg.purchaseData.totalPurchaseCount,
-                    purchaseRate: safeDivide(agg.purchaseData.totalPurchaseCount, agg.impressionData.totalQueryImpressionCount),
+                    purchaseRate: safeDivide(agg.purchaseData.totalPurchaseCount, agg.cartAddData.totalCartAddCount),
                     asinCount: agg.purchaseData.asinCount,
                     asinShare: safeDivide(agg.purchaseData.asinCount, agg.purchaseData.totalPurchaseCount),
                     totalMedianPrice: formatPrice(getMedian(agg.purchaseData.totalMedianPurchasePrices) != null ? { amount: getMedian(agg.purchaseData.totalMedianPurchasePrices), currencyCode } : null),
@@ -343,32 +343,36 @@ router.get('/query-performance-history', async (req, res) => {
                     return den > 0 ? num / den : 0;
                 };
 
+                const impressionsTotal = raw.impressionData?.totalQueryImpressionCount;
+                const clicksTotal = raw.clickData?.totalClickCount;
+                const cartsTotal = raw.cartAddData?.totalCartAddCount;
+
                 const transformed = {
                     searchQuery: raw.searchQueryData?.searchQuery,
                     searchQueryScore: raw.searchQueryData?.searchQueryScore,
                     searchQueryVolume: raw.searchQueryData?.searchQueryVolume,
                     impressions: {
-                        totalCount: raw.impressionData?.totalQueryImpressionCount,
+                        totalCount: impressionsTotal,
                         asinCount: raw.impressionData?.asinImpressionCount,
-                        asinShare: safeDivide(raw.impressionData?.asinImpressionCount, raw.impressionData?.totalQueryImpressionCount),
+                        asinShare: safeDivide(raw.impressionData?.asinImpressionCount, impressionsTotal),
                     },
                     clicks: {
-                        totalCount: raw.clickData?.totalClickCount,
-                        clickRate: safeDivide(raw.clickData?.totalClickCount, raw.impressionData?.totalQueryImpressionCount),
+                        totalCount: clicksTotal,
+                        clickRate: safeDivide(clicksTotal, impressionsTotal),
                         asinCount: raw.clickData?.asinClickCount,
-                        asinShare: safeDivide(raw.clickData?.asinClickCount, raw.clickData?.totalClickCount),
+                        asinShare: safeDivide(raw.clickData?.asinClickCount, clicksTotal),
                         totalMedianPrice: raw.clickData?.totalMedianClickPrice?.amount,
                         asinMedianPrice: raw.clickData?.asinMedianClickPrice?.amount,
                     },
                     cartAdds: {
-                        totalCount: raw.cartAddData?.totalCartAddCount,
-                        cartAddRate: safeDivide(raw.cartAddData?.totalCartAddCount, raw.impressionData?.totalQueryImpressionCount),
+                        totalCount: cartsTotal,
+                        cartAddRate: safeDivide(cartsTotal, clicksTotal),
                         asinCount: raw.cartAddData?.asinCartAddCount,
-                        asinShare: safeDivide(raw.cartAddData?.asinCartAddCount, raw.cartAddData?.totalCartAddCount),
+                        asinShare: safeDivide(raw.cartAddData?.asinCartAddCount, cartsTotal),
                     },
                     purchases: {
                         totalCount: raw.purchaseData?.totalPurchaseCount,
-                        purchaseRate: safeDivide(raw.purchaseData?.totalPurchaseCount, raw.impressionData?.totalQueryImpressionCount),
+                        purchaseRate: safeDivide(raw.purchaseData?.totalPurchaseCount, cartsTotal),
                         asinCount: raw.purchaseData?.asinPurchaseCount,
                         asinShare: safeDivide(raw.purchaseData?.asinPurchaseCount, raw.purchaseData?.totalPurchaseCount),
                     },

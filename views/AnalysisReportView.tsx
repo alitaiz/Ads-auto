@@ -1,14 +1,16 @@
 // views/AnalysisReportView.tsx
 import React, { useState, useEffect } from 'react';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
-import { Chart, Bar, Line, Doughnut } from 'react-chartjs-2';
+import { Chart, Doughnut } from 'react-chartjs-2';
+import { formatNumber, formatPercent, formatPrice } from '../utils';
+
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend, ArcElement);
 
 type AnalysisReport = any;
 
 const styles: { [key: string]: React.CSSProperties } = {
-    container: { maxWidth: '1200px', margin: '0 auto', padding: '20px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' },
+    container: { maxWidth: '1400px', margin: '0 auto', padding: '20px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' },
     header: { marginBottom: '20px' },
     title: { fontSize: '2rem', margin: 0 },
     controls: { display: 'flex', gap: '20px', alignItems: 'flex-end', padding: '20px', backgroundColor: 'var(--card-background-color)', borderRadius: 'var(--border-radius)', boxShadow: 'var(--box-shadow)', marginBottom: '30px' },
@@ -27,13 +29,17 @@ const styles: { [key: string]: React.CSSProperties } = {
     kpiValue: { fontSize: '1.75rem', fontWeight: 'bold', margin: 0, color: 'var(--primary-color)' },
     kpiLabel: { fontSize: '0.9rem', color: '#666', margin: '5px 0 0 0' },
     termListContainer: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' },
-    termList: { listStyle: 'none', padding: 0, margin: 0 },
+    termList: { listStyle: 'none', padding: 0, margin: 0, maxHeight: '150px', overflowY: 'auto' },
     termChip: { backgroundColor: '#e9ecef', padding: '4px 8px', borderRadius: '12px', fontSize: '0.85rem', marginBottom: '5px', display: 'inline-block' },
-    detailTable: { width: '100%', borderCollapse: 'collapse', marginTop: '20px' },
+    detailTableContainer: { overflowX: 'auto' },
+    detailTable: { width: '100%', minWidth: '1800px', borderCollapse: 'collapse', marginTop: '20px', fontSize: '0.85rem' },
     detailTh: { padding: '10px', textAlign: 'left', borderBottom: '2px solid #ccc', background: '#f8f9fa' },
-    detailTd: { padding: '10px', borderBottom: '1px solid #eee' },
+    detailTd: { padding: '10px', borderBottom: '1px solid #eee', whiteSpace: 'nowrap' },
     actionList: { listStyleType: 'decimal', paddingLeft: '20px' },
     chartContainer: { height: '250px', marginTop: '20px' },
+    subHeader: { fontSize: '1.2rem', marginTop: '30px', marginBottom: '15px', fontWeight: 600 },
+    comparisonCell: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start' },
+    marketValue: { fontSize: '0.8rem', color: '#6c757d' },
 };
 
 const KpiCard = ({ value, label, tooltip }: { value: string | number, label: string, tooltip?: string }) => (
@@ -50,10 +56,10 @@ export function AnalysisReportView() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date();
     const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const [dateRange, setDateRange] = useState({ start: sevenDaysAgo.toISOString().split('T')[0], end: today });
+    sevenDaysAgo.setDate(today.getDate() - 7);
+    const [dateRange, setDateRange] = useState({ start: sevenDaysAgo.toISOString().split('T')[0], end: today.toISOString().split('T')[0] });
     
     useEffect(() => {
         const fetchAsins = async () => {
@@ -77,7 +83,7 @@ export function AnalysisReportView() {
             const response = await fetch('/api/ai/generate-analysis-report', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ asin: selectedAsin, startDate: dateRange.start, endDate: dateRange.end, profileId: localStorage.getItem('selectedProfileId') }),
+                body: JSON.stringify({ asin: selectedAsin, startDate: dateRange.start, endDate: dateRange.end }),
             });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Tạo báo cáo thất bại.');
@@ -93,16 +99,18 @@ export function AnalysisReportView() {
         labels: reportData.weeklyOverview.trends.daily.map((d: any) => new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })),
         datasets: [
             { type: 'bar' as const, label: 'Chi tiêu QC', data: reportData.weeklyOverview.trends.daily.map((d: any) => d.adSpend), backgroundColor: 'rgba(255, 99, 132, 0.5)', yAxisID: 'y' },
-            { type: 'line' as const, label: 'Đơn hàng QC', data: reportData.weeklyOverview.trends.daily.map((d: any) => d.adOrders), borderColor: 'rgb(54, 162, 235)', yAxisID: 'y1' },
-            { type: 'line' as const, label: 'Doanh thu QC', data: reportData.weeklyOverview.trends.daily.map((d: any) => d.adSales), borderColor: 'rgb(75, 192, 192)', yAxisID: 'y' },
+            { type: 'line' as const, label: 'Doanh thu QC', data: reportData.weeklyOverview.trends.daily.map((d: any) => d.adSales), borderColor: 'rgb(75, 192, 192)', yAxisID: 'y', tension: 0.1 },
+            { type: 'line' as const, label: 'Đơn hàng QC', data: reportData.weeklyOverview.trends.daily.map((d: any) => d.adOrders), borderColor: 'rgb(54, 162, 235)', yAxisID: 'y1', tension: 0.1 },
         ]
     } : null;
     
     const deviceChartData = reportData?.weeklyOverview?.conversionAndDevices ? {
         labels: ['Di động (Mobile)', 'Máy tính (Browser)'],
         datasets: [{
+            label: 'Session Share',
             data: [reportData.weeklyOverview.conversionAndDevices.mobileSessionShare, 100 - reportData.weeklyOverview.conversionAndDevices.mobileSessionShare],
             backgroundColor: ['#007185', '#adb5bd'],
+            hoverOffset: 4,
         }]
     } : null;
 
@@ -113,6 +121,18 @@ export function AnalysisReportView() {
             case 'Established': return 'Cũ (Established)';
             default: return status;
         }
+    };
+
+    const renderFunnelComparison = (market: number, asin: number) => {
+      const marketVal = parseFloat(market as any);
+      const asinVal = parseFloat(asin as any);
+      
+      return (
+        <div style={styles.comparisonCell}>
+            <strong>{formatPercent(asinVal)}</strong>
+            <span style={styles.marketValue}>Market: {formatPercent(marketVal)}</span>
+        </div>
+      )
     };
 
     return (
@@ -142,12 +162,12 @@ export function AnalysisReportView() {
                             <KpiCard value={`$${reportData.costAnalysis.avgCpa}`} label="CPA Quảng cáo (TB)" tooltip="Chi phí quảng cáo trung bình cho mỗi đơn hàng từ quảng cáo" />
                              <KpiCard value={`$${reportData.costAnalysis.profitMarginAfterAd}`} label="Lợi nhuận / Đơn hàng QC" />
                              <KpiCard value={`$${reportData.costAnalysis.blendedCpa}`} label="CPA Tổng hợp" tooltip="Tổng chi tiêu QC / Tổng số đơn vị đã bán" />
-                            <KpiCard value={`$${reportData.costAnalysis.blendedProfitMargin}`} label="Lợi nhuận Tổng hợp / Đơn vị" />
+                            <KpiCard value={`$${reportData.costAnalysis.blendedProfitMargin}`} label="Lợi nhuận TB / Đơn vị" />
                         </div>
                     </div>
                     <div style={styles.reportCard}>
                         <h2 style={styles.cardTitle}>Tổng quan Tuần</h2>
-                        <h3 style={{fontSize: '1.2rem'}}>Hiệu quả Chi tiêu</h3>
+                        <h3 style={styles.subHeader}>Hiệu quả Chi tiêu</h3>
                         <div style={styles.kpiGrid}>
                             <KpiCard value={`$${reportData.weeklyOverview.spendEfficiency.totalAdSpend}`} label="Tổng chi tiêu QC" />
                             <KpiCard value={`$${reportData.weeklyOverview.spendEfficiency.adSales}`} label="Doanh thu từ QC" />
@@ -155,49 +175,47 @@ export function AnalysisReportView() {
                              <KpiCard value={`$${reportData.weeklyOverview.spendEfficiency.totalSales}`} label="Tổng Doanh thu (Ads + Organic)" />
                              <KpiCard value={`${reportData.weeklyOverview.spendEfficiency.tacos}%`} label="TACoS" />
                         </div>
-                         <h3 style={{fontSize: '1.2rem', marginTop: '30px'}}>Phân loại Search Term</h3>
+                         <h3 style={styles.subHeader}>Phân loại Search Term</h3>
                         <div style={styles.termListContainer}>
-                            <div>
-                                <h4>Liên quan ({reportData.weeklyOverview.searchTermClassification.relevantCount})</h4>
-                                <ul style={styles.termList}>{reportData.weeklyOverview.searchTermClassification.relevantTerms.map((t: string) => <li key={t}><span style={styles.termChip}>{t}</span></li>)}</ul>
-                            </div>
-                            <div>
-                                <h4>Không liên quan ({reportData.weeklyOverview.searchTermClassification.irrelevantCount})</h4>
-                                <ul style={styles.termList}>{reportData.weeklyOverview.searchTermClassification.irrelevantTerms.map((t: string) => <li key={t}><span style={styles.termChip}>{t}</span></li>)}</ul>
-                            </div>
+                            <div><h4>Liên quan ({reportData.weeklyOverview.searchTermClassification.relevantCount})</h4><ul style={styles.termList}>{reportData.weeklyOverview.searchTermClassification.relevantTerms.map((t: string) => <li key={t}><span style={styles.termChip}>{t}</span></li>)}</ul></div>
+                            <div><h4>Không liên quan ({reportData.weeklyOverview.searchTermClassification.irrelevantCount})</h4><ul style={styles.termList}>{reportData.weeklyOverview.searchTermClassification.irrelevantTerms.map((t: string) => <li key={t}><span style={styles.termChip}>{t}</span></li>)}</ul></div>
                         </div>
                         <hr style={{margin: '30px 0', border: 'none', borderTop: '1px solid #eee'}} />
-
-                        <h3 style={{fontSize: '1.2rem'}}>Xu hướng & Thiết bị</h3>
+                        <h3 style={styles.subHeader}>Xu hướng & Thiết bị</h3>
                         <div style={{display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px', alignItems: 'center'}}>
-                            {dailyChartData && <div style={styles.chartContainer}><Chart type='bar' data={dailyChartData} options={{ responsive: true, maintainAspectRatio: false, scales: { y: { position: 'left' }, y1: { position: 'right', grid: { drawOnChartArea: false } } } }} /></div>}
-                            {deviceChartData && <div style={styles.chartContainer}><Doughnut data={deviceChartData} options={{ responsive: true, maintainAspectRatio: false }} /></div>}
+                            {dailyChartData && <div style={styles.chartContainer}><Chart type='bar' data={dailyChartData} options={{ responsive: true, maintainAspectRatio: false, scales: { y: { position: 'left', beginAtZero: true }, y1: { position: 'right', grid: { drawOnChartArea: false }, beginAtZero: true } } }} /></div>}
+                            {deviceChartData && <div style={styles.chartContainer}><Doughnut data={deviceChartData} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' }} }} /></div>}
                         </div>
                     </div>
                     <div style={styles.reportCard}>
                         <h2 style={styles.cardTitle}>Phân tích chi tiết Search Term</h2>
-                        <table style={styles.detailTable}>
-                            <thead><tr>
-                                <th style={styles.detailTh}>Search Term</th>
-                                <th style={styles.detailTh}>Chi tiêu</th>
-                                <th style={styles.detailTh}>Đơn hàng</th>
-                                <th style={styles.detailTh}>Doanh thu</th>
-                                <th style={styles.detailTh}>ACOS</th>
-                                <th style={styles.detailTh}>CPA</th>
-                            </tr></thead>
-                            <tbody>
-                                {reportData.detailedSearchTermAnalysis.map((analysis: any) => (
-                                    <tr key={analysis.searchTerm}>
-                                        <td style={styles.detailTd}>{analysis.searchTerm}</td>
-                                        <td style={styles.detailTd}>{`$${analysis.adsPerformance.spend}`}</td>
-                                        <td style={styles.detailTd}>{analysis.adsPerformance.orders}</td>
-                                        <td style={styles.detailTd}>{`$${analysis.adsPerformance.sales}`}</td>
-                                        <td style={styles.detailTd}>{analysis.adsPerformance.acos}</td>
-                                        <td style={styles.detailTd}>{`$${analysis.adsPerformance.cpa}`}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                        <div style={styles.detailTableContainer}>
+                            <table style={styles.detailTable}>
+                                <thead><tr>
+                                    <th style={styles.detailTh}>Search Term</th>
+                                    <th style={styles.detailTh}>Chi tiêu QC</th><th style={styles.detailTh}>Đơn hàng QC</th><th style={styles.detailTh}>ACOS</th><th style={styles.detailTh}>CPA</th>
+                                    <th style={styles.detailTh}>Market Volume</th><th style={styles.detailTh}>ASIN Click Share</th><th style={styles.detailTh}>ASIN Purchase Share</th>
+                                    <th style={styles.detailTh}>CTR (ASIN vs Market)</th><th style={styles.detailTh}>Add-to-Cart %</th><th style={styles.detailTh}>Purchase %</th>
+                                </tr></thead>
+                                <tbody>
+                                    {reportData.detailedSearchTermAnalysis.map((analysis: any) => (
+                                        <tr key={analysis.searchTerm}>
+                                            <td style={styles.detailTd}>{analysis.searchTerm}</td>
+                                            <td style={styles.detailTd}>{`$${analysis.adsPerformance.spend}`}</td>
+                                            <td style={styles.detailTd}>{analysis.adsPerformance.orders}</td>
+                                            <td style={styles.detailTd}>{analysis.adsPerformance.acos}</td>
+                                            <td style={styles.detailTd}>{`$${analysis.adsPerformance.cpa}`}</td>
+                                            <td style={styles.detailTd}>{analysis.marketPerformance.marketVolume}</td>
+                                            <td style={styles.detailTd}>{formatPercent(analysis.asinShare.clickShare)}</td>
+                                            <td style={styles.detailTd}>{formatPercent(analysis.asinShare.purchaseShare)}</td>
+                                            <td style={styles.detailTd}>{renderFunnelComparison(analysis.funnelAnalysis.marketCtr, analysis.funnelAnalysis.asinCtr)}</td>
+                                            <td style={styles.detailTd}>{renderFunnelComparison(analysis.funnelAnalysis.marketCartRate, analysis.funnelAnalysis.asinCartRate)}</td>
+                                            <td style={styles.detailTd}>{renderFunnelComparison(analysis.funnelAnalysis.marketPurchaseRate, analysis.funnelAnalysis.asinPurchaseRate)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                     <div style={styles.reportCard}>
                         <h2 style={styles.cardTitle}>Kế hoạch Hành động Tuần tới</h2>
@@ -205,11 +223,7 @@ export function AnalysisReportView() {
                             (actions as string[]).length > 0 && (
                                 <div key={category} style={{marginBottom: '15px'}}>
                                     <h3 style={{fontSize: '1.2rem', textTransform: 'capitalize'}}>{
-                                        {
-                                            bidManagement: 'Quản lý Giá thầu (Bid)',
-                                            negativeKeywords: 'Từ khóa Phủ định',
-                                            listingOptimization: 'Tối ưu Listing'
-                                        }[category] || category
+                                        { bidManagement: 'Quản lý Giá thầu (Bid)', negativeKeywords: 'Từ khóa Phủ định', listingOptimization: 'Tối ưu Listing' }[category] || category
                                     }</h3>
                                     <ul style={styles.actionList}>{(actions as string[]).map((action, i) => <li key={i}>{action}</li>)}</ul>
                                 </div>

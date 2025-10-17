@@ -334,6 +334,7 @@ export interface QueryPerformanceData {
     spStatus?: 'none' | 'no_clicks' | 'with_clicks';
     spClicks?: number;
     spImpressions?: number;
+    spPurchases?: number;
 }
 
 export interface PerformanceFilterOptions {

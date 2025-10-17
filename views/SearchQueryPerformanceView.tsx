@@ -450,6 +450,14 @@ export function SearchQueryPerformanceView() {
                                                     {spClicks && spClicks > 0 && <span style={{ color: '#28a745', marginLeft: '8px' }}>(SP: {formatNumber(spClicks)})</span>}
                                                 </>
                                             );
+                                        } else if (col.id === 'purchases.asinCount') {
+                                            const spPurchases = item.spPurchases;
+                                            cellContent = (
+                                                <>
+                                                    {col.formatter(value)}
+                                                    {spPurchases && spPurchases > 0 && <span style={{ color: '#28a745', marginLeft: '8px' }}>(SP: {formatNumber(spPurchases)})</span>}
+                                                </>
+                                            );
                                         }
 
                                         return (

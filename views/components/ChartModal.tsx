@@ -120,9 +120,11 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
 
         const hasSpClicksData = historyData.some(d => d.sp_clicks !== null && typeof d.sp_clicks === 'number');
         const hasSpImpressionsData = historyData.some(d => d.sp_impressions !== null && typeof d.sp_impressions === 'number');
+        const hasSpOrdersData = historyData.some(d => d.sp_orders !== null && typeof d.sp_orders === 'number');
 
         const shouldShowSpClicksChart = hasSpClicksData && config.metricId === 'clicks.asinCount';
         const shouldShowSpImpressionsChart = hasSpImpressionsData && config.metricId === 'impressions.asinCount';
+        const shouldShowSpPurchasesChart = hasSpOrdersData && config.metricId === 'purchases.asinCount';
 
         if (shouldShowSpClicksChart) {
             datasets.push({
@@ -140,6 +142,16 @@ export function ChartModal({ config, dateRange, onClose }: ChartModalProps) {
                 label: 'SP Impressions',
                 data: historyData.map(d => d.sp_impressions),
                 backgroundColor: 'rgba(255, 159, 64, 0.6)', // Orange color for impressions
+                yAxisID: 'y',
+            });
+        }
+        
+        if (shouldShowSpPurchasesChart) {
+            datasets.push({
+                type: 'bar' as const,
+                label: 'SP Purchases',
+                data: historyData.map(d => d.sp_orders),
+                backgroundColor: 'rgba(75, 192, 192, 0.6)', // Teal color for purchases
                 yAxisID: 'y',
             });
         }

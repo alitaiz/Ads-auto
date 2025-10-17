@@ -84,12 +84,13 @@ router.get('/query-performance', async (req, res) => {
     console.log(`[Server] Querying performance data for ASIN: ${asin}, from ${startDate} to ${endDate}`);
 
     try {
-        // Fetch SP clicks and impressions aggregated for the whole period for each search query, filtered by ASIN
+        // Fetch SP clicks, impressions, and purchases aggregated for the whole period for each search query, filtered by ASIN
         const spDataQuery = `
             SELECT 
                 customer_search_term, 
                 SUM(clicks)::int as "spClicks",
-                SUM(impressions)::int as "spImpressions"
+                SUM(impressions)::int as "spImpressions",
+                SUM(purchases_7d)::int as "spPurchases"
             FROM sponsored_products_search_term_report
             WHERE report_date BETWEEN $1 AND $2 AND asin = $3
             GROUP BY customer_search_term;
@@ -100,6 +101,7 @@ router.get('/query-performance', async (req, res) => {
             spDataMap.set(row.customer_search_term, {
                 spClicks: row.spClicks || 0,
                 spImpressions: row.spImpressions || 0,
+                spPurchases: row.spPurchases || 0,
             });
         });
 
@@ -178,7 +180,7 @@ router.get('/query-performance', async (req, res) => {
         for (const [searchQuery, agg] of aggregationMap.entries()) {
              const currencyCode = 'USD'; // Assume USD for aggregated median price
              const safeDivide = (num, den) => (den > 0 ? num / den : 0);
-             const spData = spDataMap.get(searchQuery) || { spClicks: 0, spImpressions: 0 };
+             const spData = spDataMap.get(searchQuery) || { spClicks: 0, spImpressions: 0, spPurchases: 0 };
              let spStatus = 'none';
              if (spData.spClicks > 0) {
                  spStatus = 'with_clicks';
@@ -193,6 +195,7 @@ router.get('/query-performance', async (req, res) => {
                 spStatus: spStatus,
                 spClicks: spData.spClicks,
                 spImpressions: spData.spImpressions,
+                spPurchases: spData.spPurchases,
                 impressions: {
                     totalCount: agg.impressionData.totalQueryImpressionCount,
                     asinCount: agg.impressionData.asinImpressionCount,

@@ -41,7 +41,17 @@ export function ListingView() {
             const response = await fetch('/api/listings');
             if (!response.ok) throw new Error('Failed to fetch listings.');
             const data = await response.json();
-            setListings(data);
+            
+            // CRITICAL FIX: Parse numeric fields from string (from DB) to number.
+            // This prevents the .toFixed() crash on re-render.
+            const typedData = data.map((item: any) => ({
+                ...item,
+                sale_price: item.sale_price == null ? null : parseFloat(item.sale_price),
+                product_cost: item.product_cost == null ? null : parseFloat(item.product_cost),
+                amazon_fee: item.amazon_fee == null ? null : parseFloat(item.amazon_fee),
+            }));
+
+            setListings(typedData);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An unknown error occurred.');
         } finally {
@@ -64,14 +74,20 @@ export function ListingView() {
     };
 
     const handleNumericChange = (field: 'sale_price' | 'product_cost' | 'amazon_fee', value: string) => {
-        const num = value === '' ? undefined : parseFloat(value);
-        if (value !== '' && isNaN(num!)) {
-            return; 
+        // If the field is cleared, store undefined to represent an empty state.
+        if (value.trim() === '') {
+            setEditingListing(p => (p ? { ...p, [field]: undefined } : null));
+            return;
         }
-        setEditingListing(p => {
-            if (!p) return null;
-            return { ...p, [field]: num };
-        });
+
+        // Use a strict check with Number(). This prevents "12a" from being parsed as 12.
+        const num = Number(value);
+
+        // Only update the state if the input string is a valid number.
+        if (!isNaN(num)) {
+            setEditingListing(p => (p ? { ...p, [field]: num } : null));
+        }
+        // If the input is invalid (e.g., "abc", "12.."), do nothing, leaving the last valid state.
     };
 
     const handleSave = async () => {
@@ -195,28 +211,28 @@ export function ListingView() {
                         <h2 style={styles.modalHeader}>{editingListing?.id ? 'Edit Listing' : 'Add New Listing'}</h2>
                         <div style={styles.formGroup}>
                             <label style={styles.label} htmlFor="asin">ASIN</label>
-                            <input id="asin" style={styles.input} value={editingListing?.asin || ''} onChange={e => setEditingListing(p => ({...p, asin: e.target.value}))} required />
+                            <input id="asin" style={styles.input} value={editingListing?.asin || ''} onChange={e => setEditingListing(p => ({...p!, asin: e.target.value}))} required />
                         </div>
                          <div style={styles.formGroup}>
                             <label style={styles.label} htmlFor="sku">SKU</label>
-                            <input id="sku" style={styles.input} value={editingListing?.sku || ''} onChange={e => setEditingListing(p => ({...p, sku: e.target.value}))} required />
+                            <input id="sku" style={styles.input} value={editingListing?.sku || ''} onChange={e => setEditingListing(p => ({...p!, sku: e.target.value}))} required />
                         </div>
                          <div style={styles.formGroup}>
                             <label style={styles.label} htmlFor="title">Title</label>
-                            <input id="title" style={styles.input} value={editingListing?.title || ''} onChange={e => setEditingListing(p => ({...p, title: e.target.value}))} />
+                            <input id="title" style={styles.input} value={editingListing?.title || ''} onChange={e => setEditingListing(p => ({...p!, title: e.target.value}))} />
                         </div>
                         <div style={styles.formGrid}>
                             <div style={styles.formGroup}>
                                 <label style={styles.label} htmlFor="sale_price">Sale Price</label>
-                                <input id="sale_price" type="number" step="0.01" style={styles.input} value={editingListing?.sale_price ?? ''} onChange={e => handleNumericChange('sale_price', e.target.value)} />
+                                <input id="sale_price" type="text" inputMode="decimal" style={styles.input} value={editingListing?.sale_price ?? ''} onChange={e => handleNumericChange('sale_price', e.target.value)} />
                             </div>
                             <div style={styles.formGroup}>
                                 <label style={styles.label} htmlFor="product_cost">Product Cost</label>
-                                <input id="product_cost" type="number" step="0.01" style={styles.input} value={editingListing?.product_cost ?? ''} onChange={e => handleNumericChange('product_cost', e.target.value)} />
+                                <input id="product_cost" type="text" inputMode="decimal" style={styles.input} value={editingListing?.product_cost ?? ''} onChange={e => handleNumericChange('product_cost', e.target.value)} />
                             </div>
                             <div style={{...styles.formGroup, gridColumn: 'span 2'}}>
                                 <label style={styles.label} htmlFor="amazon_fee">Total Amazon Fee (FBA + Referral)</label>
-                                <input id="amazon_fee" type="number" step="0.01" style={styles.input} value={editingListing?.amazon_fee ?? ''} onChange={e => handleNumericChange('amazon_fee', e.target.value)} />
+                                <input id="amazon_fee" type="text" inputMode="decimal" style={styles.input} value={editingListing?.amazon_fee ?? ''} onChange={e => handleNumericChange('amazon_fee', e.target.value)} />
                             </div>
                         </div>
                         <div style={styles.modalFooter}>

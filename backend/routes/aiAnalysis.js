@@ -49,6 +49,49 @@ const formatValue = (value, type = 'number', decimals = 2) => {
     return num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: decimals });
 };
 
+/**
+ * Recursively traverses a report object to sanitize numeric data.
+ * - Converts Infinity and NaN to the string 'N/A'.
+ * - Rounds floating-point numbers to a reasonable precision.
+ * @param {any} data - The data to sanitize (object, array, or primitive).
+ * @returns {any} The sanitized data.
+ */
+const sanitizeAndFormatReport = (data) => {
+  const traverse = (obj) => {
+    if (obj === null || obj === undefined) {
+      return obj;
+    }
+
+    if (Array.isArray(obj)) {
+      return obj.map(item => traverse(item));
+    }
+
+    if (typeof obj === 'object') {
+      const newObj = {};
+      for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+          newObj[key] = traverse(obj[key]);
+        }
+      }
+      return newObj;
+    }
+
+    if (typeof obj === 'number') {
+      if (!isFinite(obj) || isNaN(obj)) {
+        return 'N/A';
+      }
+      if (obj % 1 !== 0) {
+        return parseFloat(obj.toFixed(4));
+      }
+      return obj;
+    }
+    return obj;
+  };
+
+  return traverse(data);
+};
+
+
 // Main Route
 router.post('/ai/generate-analysis-report', async (req, res) => {
     const { asin, startDate, endDate } = req.body;
